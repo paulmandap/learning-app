@@ -1,0 +1,7 @@
+# Expo web is built with web.output = "single" — one index.html, client-side
+# routing. Every deep link must therefore be served index.html with a 200 (not
+# a redirect), or a refresh on /settings returns a Cloudflare 404.
+#
+# Required for "single". NOT required for "static" output, which emits real
+# per-route HTML — that asymmetry is the easy thing to get wrong here.
+/*    /index.html   200

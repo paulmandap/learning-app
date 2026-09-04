@@ -1,0 +1,50 @@
+name: Supabase keepalive
+
+# Supabase Free pauses a project after ~7 days of low DATABASE activity, and
+# restoring it is manual. This performs a REAL database write every 3 days
+# through the touch_heartbeat RPC — a URL ping does not count as activity.
+#
+# Credentials: the two repo secrets below are the Supabase URL and the
+# PUBLISHABLE key. The publishable key is safe here (Supabase documents it as
+# safe for GitHub Actions) because it reaches only what RLS allows. The
+# heartbeat table has RLS on with no policies, so this key cannot read or write
+# it directly — the only way in is the SECURITY DEFINER RPC, which writes a
+# timestamp and nothing else. No service-role key is used anywhere.
+#
+# Set them under: Settings → Secrets and variables → Actions
+#   SUPABASE_URL              https://<project>.supabase.co
+#   SUPABASE_PUBLISHABLE_KEY  sb_publishable_...
+
+on:
+  schedule:
+    - cron: '17 3 */3 * *' # every 3 days, 03:17 UTC
+  workflow_dispatch:
+
+jobs:
+  touch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write heartbeat via RPC
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_PUBLISHABLE_KEY:-}" ]; then
+            echo "::error::SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY repo secrets are not set."
+            exit 1
+          fi
+
+          # -f makes curl exit non-zero on HTTP >= 400 so a paused or broken
+          # project fails the run loudly instead of passing silently.
+          status=$(curl -sS -f -w '%{http_code}' -o response.txt \
+            -X POST "${SUPABASE_URL}/rest/v1/rpc/touch_heartbeat" \
+            -H "apikey: ${SUPABASE_PUBLISHABLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_PUBLISHABLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+
+          echo "HTTP ${status}"
+          echo "Heartbeat written at: $(cat response.txt)"

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <!-- viewport-fit=cover so the installed PWA fills an iPhone screen past the notch -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
+    />
+
+    <title>Study</title>
+    <meta name="description" content="Turn your notes into flashcards and quizzes." />
+
+    <!-- PWA. Expo Router does not generate this; it is linked by hand.
+         NOTE: this file — not app/+html.tsx — is the HTML template when
+         web.output is "single". +html.tsx is only consulted for static/server
+         rendering, so PWA metadata placed there is silently dropped. -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#f7f7f8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111318" media="(prefers-color-scheme: dark)" />
+
+    <!-- iOS home-screen install (Share → Add to Home Screen) -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Study" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- react-native-web's recommended reset. -->
+    <style id="expo-reset">
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        overflow: hidden;
+        overscroll-behavior-y: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+
+    <!-- A white screen tells you nothing. If the app fails to start, show why.
+         Runs before the bundle so it catches module-init failures too. -->
+    <script>
+      (function () {
+        function show(title, detail) {
+          var el = document.getElementById('startup-error');
+          if (!el) {
+            el = document.createElement('pre');
+            el.id = 'startup-error';
+            el.style.cssText =
+              'position:fixed;inset:0;margin:0;padding:16px;overflow:auto;z-index:99999;' +
+              'background:#fff;color:#b3261e;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;' +
+              'white-space:pre-wrap;word-break:break-word;';
+            document.body.appendChild(el);
+          }
+          el.textContent += title + '\n' + detail + '\n\n';
+        }
+        window.addEventListener('error', function (e) {
+          show(
+            'Startup error: ' + (e.message || 'unknown'),
+            (e.filename || '') + ':' + (e.lineno || '?') + '\n' +
+              ((e.error && e.error.stack) || '')
+          );
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          show('Unhandled promise rejection', (r && (r.stack || r.message)) || String(r));
+        });
+      })();
+    </script>
+  </body>
+</html>

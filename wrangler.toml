@@ -1,0 +1,24 @@
+# Cloudflare Pages configuration.
+#
+# Deploying from the repo:
+#   npx expo export --platform web      # writes ./dist
+#   npx wrangler pages deploy           # reads pages_build_output_dir below
+#
+# Deploying from the Cloudflare dashboard (Git integration) instead, set:
+#   Build command:        npx expo export --platform web
+#   Build output dir:     dist
+#   Environment variables (Production AND Preview):
+#     EXPO_PUBLIC_SUPABASE_URL
+#     EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+#     NODE_VERSION=22
+#
+# The Supabase publishable key is compiled into the client bundle by design.
+# It is safe there — it reaches only what RLS allows. A secret/service-role key
+# must never be set here.
+#
+# SPA routing comes from public/_redirects (/* /index.html 200), which Expo
+# copies into dist. Without it, refreshing /settings returns a 404.
+
+name = "learning-app"
+compatibility_date = "2026-09-03"
+pages_build_output_dir = "dist"

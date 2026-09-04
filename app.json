@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Study App",
+    "slug": "learning-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "studyapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.paulmandap.studyapp"
+    },
+    "android": {
+      "package": "com.paulmandap.studyapp",
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
