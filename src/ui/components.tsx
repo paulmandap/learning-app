@@ -42,6 +42,17 @@ export function Body({ children, muted }: { children: ReactNode; muted?: boolean
   return <Text style={[styles.body, { color: muted ? t.textMuted : t.text }]}>{children}</Text>;
 }
 
+/**
+ * Three rungs, deliberately:
+ *
+ *  - `primary`   solid accent. ONE per screen — it is the thing you came to do.
+ *  - `outline`   accent border and text. A real alternative that is not the
+ *                default: Quiz alongside Flashcards.
+ *  - `secondary` neutral grey outline. Tertiary and administrative actions.
+ *
+ * Before `outline` existed, Flashcards and Quiz were both `primary` and competed
+ * for the same attention, which is what flattened the set screen.
+ */
 export function Button({
   label,
   onPress,
@@ -53,11 +64,15 @@ export function Button({
   onPress: () => void;
   busy?: boolean;
   disabled?: boolean;
-  variant?: 'primary' | 'secondary';
+  variant?: 'primary' | 'outline' | 'secondary';
 }) {
   const t = useTheme();
-  const isPrimary = variant === 'primary';
   const off = disabled || busy;
+
+  const fill = variant === 'primary' ? t.accent : 'transparent';
+  const border = variant === 'primary' ? t.accent : variant === 'outline' ? t.accent : t.border;
+  const label_ = variant === 'primary' ? t.accentText : variant === 'outline' ? t.accent : t.text;
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -66,19 +81,64 @@ export function Button({
       style={[
         styles.button,
         {
-          backgroundColor: isPrimary ? t.accent : 'transparent',
-          borderColor: isPrimary ? t.accent : t.border,
+          backgroundColor: fill,
+          borderColor: border,
+          // An outline button earns a heavier edge; at 1px against the page it
+          // reads as disabled text rather than as a control.
+          borderWidth: variant === 'outline' ? 2 : 1,
           opacity: off ? 0.55 : 1,
         },
       ]}
     >
       {busy ? (
-        <ActivityIndicator color={isPrimary ? t.accentText : t.text} />
+        <ActivityIndicator color={label_} />
       ) : (
-        <Text style={[styles.buttonLabel, { color: isPrimary ? t.accentText : t.text }]}>
-          {label}
-        </Text>
+        <Text style={[styles.buttonLabel, { color: label_ }]}>{label}</Text>
       )}
+    </Pressable>
+  );
+}
+
+/**
+ * A tappable row in a list.
+ *
+ * Replaces the stack of full-height `Card`s the set list used to be. Those gave
+ * every set the visual weight of a primary surface, so ten sets read as ten
+ * competing panels; a row with a chevron reads as one item among many, which is
+ * what a list of sets actually is.
+ */
+export function ListRow({
+  title,
+  meta,
+  onPress,
+}: {
+  title: string;
+  meta?: string;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.row,
+        {
+          backgroundColor: t.card,
+          borderColor: t.border,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}
+    >
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={[type.body, { color: t.text, fontWeight: '600' }]} numberOfLines={2}>
+          {title}
+        </Text>
+        {meta ? <Text style={[type.caption, { color: t.textMuted }]}>{meta}</Text> : null}
+      </View>
+      {/* U+203A. A glyph rather than an icon set: @expo/vector-icons is not
+          installed and three chevrons is not a reason to add it. */}
+      <Text style={{ color: t.textMuted, fontSize: 22, marginLeft: space.md }}>›</Text>
     </Pressable>
   );
 }
@@ -182,6 +242,15 @@ export function Notice({ tone, children }: { tone: 'ok' | 'error' | 'warn'; chil
 const styles = StyleSheet.create({
   screenContent: { alignItems: 'center', padding: space.lg, paddingBottom: 48 },
   card: { borderWidth: 1, borderRadius: radius.md, padding: space.lg, gap: space.md },
+  row: {
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: TOUCH_TARGET,
+  },
   title: type.title,
   body: type.body,
   label: type.label,

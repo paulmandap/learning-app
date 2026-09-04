@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, Notice, Screen, Title } from '../../../src/ui/components';
+import { Body, Button, Card, Field, Notice, Screen } from '../../../src/ui/components';
+import { OverflowMenu } from '../../../src/ui/menu';
+import { formatSetTitle } from '../../../src/core/title';
 import { fetchProfile } from '../../../src/data/profile';
-import { deleteSet, getSet } from '../../../src/data/sets';
+import { deleteSet, getSet, updateSet } from '../../../src/data/sets';
 import { describeDrops } from '../../../src/core/validate';
 import { listDocuments } from '../../../src/data/documents';
 import { countItems } from '../../../src/data/items';
@@ -28,6 +30,11 @@ export default function SetScreen() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // null = not renaming. Holds the RAW stored title while editing, not the
+  // formatted one, so opening and saving without typing is a no-op rather than
+  // quietly overwriting the original with its prettified version.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [savingName, setSavingName] = useState(false);
   const started = useRef(false);
 
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
@@ -47,6 +54,26 @@ export default function SetScreen() {
   });
 
   const apiKey = profile?.gemini_api_key ?? '';
+
+  async function saveName() {
+    const next = (renaming ?? '').trim();
+    if (!next) {
+      setRenaming(null);
+      return;
+    }
+    setSavingName(true);
+    try {
+      await updateSet(setId, { title: next });
+      await refetchSet();
+      // The home list shows titles too, so it has to be told.
+      await queryClient.invalidateQueries({ queryKey: ['sets'] });
+      setRenaming(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't rename that set.");
+    } finally {
+      setSavingName(false);
+    }
+  }
 
   async function removeSet() {
     setDeleting(true);
@@ -96,9 +123,52 @@ export default function SetScreen() {
   const droppedLine = plan?.droppedSummary ? describeDrops(plan.droppedSummary) : null;
   const isGenerating = set.status === 'generating';
 
+  const displayTitle = formatSetTitle(set.title);
+
   return (
     <Screen>
-      <Title>{set.title}</Title>
+      {/* The header carries the set's name and the ••• menu, so neither the
+          title nor the set-level actions take up content space. */}
+      <Stack.Screen
+        options={{
+          title: displayTitle,
+          headerRight: () => (
+            <OverflowMenu
+              items={[
+                { label: 'Add notes', onPress: () => router.push(`/new?setId=${setId}`) },
+                { label: 'Rename set', onPress: () => setRenaming(set.title) },
+                { label: 'Delete set', destructive: true, onPress: () => setConfirmDelete(true) },
+              ]}
+            />
+          ),
+        }}
+      />
+
+      {renaming !== null ? (
+        <Card>
+          <Field
+            label="Set name"
+            value={renaming}
+            onChangeText={setRenaming}
+            placeholder="Cardiac Conduction"
+            autoCapitalize="sentences"
+          />
+          <Button label="Save name" onPress={saveName} busy={savingName} />
+          <Button label="Cancel" variant="secondary" onPress={() => setRenaming(null)} />
+        </Card>
+      ) : null}
+
+      {/* Delete asks before acting, as it always did — the menu changed WHERE
+          it lives, not how much friction it carries. */}
+      {confirmDelete ? (
+        <Card>
+          <Notice tone="error">
+            Delete "{displayTitle}" and everything in it? This cannot be undone.
+          </Notice>
+          <Button label="Yes, delete this set" onPress={removeSet} busy={deleting} />
+          <Button label="Keep it" variant="secondary" onPress={() => setConfirmDelete(false)} />
+        </Card>
+      ) : null}
 
       {isGenerating ? (
         <Card>
@@ -130,14 +200,16 @@ export default function SetScreen() {
         </Card>
       )}
 
+      {/* One primary action. Flashcards is the main flow, so Quiz is an
+          outlined alternative rather than a second equal-weight blue block.
+          "Add notes" moved into the ••• menu. */}
       {itemCount > 0 ? (
         <View style={{ gap: 8 }}>
           <Button label="Flashcards" onPress={() => router.push(`/set/${setId}/flashcards`)} />
-          <Button label="Quiz" onPress={() => router.push(`/set/${setId}/quiz`)} />
           <Button
-            label="Add notes to this set"
-            variant="secondary"
-            onPress={() => router.push(`/new?setId=${setId}`)}
+            label="Quiz"
+            variant="outline"
+            onPress={() => router.push(`/set/${setId}/quiz`)}
           />
         </View>
       ) : null}
@@ -165,26 +237,9 @@ export default function SetScreen() {
         <Button label="Keep going" onPress={run} />
       ) : null}
 
-      <Button label="Home" variant="secondary" onPress={() => router.replace('/')} />
-
-      {/* Irreversible: removes the notes, the files and every card. Asks once. */}
-      <Card>
-        {confirmDelete ? (
-          <>
-            <Notice tone="error">
-              Delete "{set.title}" and everything in it? This cannot be undone.
-            </Notice>
-            <Button label="Yes, delete this set" onPress={removeSet} busy={deleting} />
-            <Button label="Keep it" variant="secondary" onPress={() => setConfirmDelete(false)} />
-          </>
-        ) : (
-          <Button
-            label="Delete this set"
-            variant="secondary"
-            onPress={() => setConfirmDelete(true)}
-          />
-        )}
-      </Card>
+      {/* The Home button is gone, and Delete no longer sits underneath where it
+          was — the header back chevron handles navigation, and Delete lives in
+          the ••• menu. That pairing was the accidental-deletion risk. */}
     </Screen>
   );
 }

@@ -16,6 +16,8 @@ export interface StudySet {
   plan: StoredPlan | null;
   created_at: string;
   updated_at: string;
+  /** Only populated by listSets, which asks for it. Undefined elsewhere. */
+  cardCount?: number;
 }
 
 /**
@@ -40,14 +42,28 @@ async function currentUserId(): Promise<string> {
   return id;
 }
 
+/**
+ * Every set, newest activity first, each with how many cards it holds.
+ *
+ * The count comes back as an embedded aggregate rather than a query per set, so
+ * a list of twenty sets is still one round trip. `hidden` cards are excluded to
+ * match what the study screens actually show — a reported card should not still
+ * be counted on the home screen.
+ */
 export async function listSets(): Promise<StudySet[]> {
   const { data, error } = await supabase
     .from('study_sets')
-    .select('id, title, status, plan, created_at, updated_at')
+    .select('id, title, status, plan, created_at, updated_at, study_items(count)')
+    .eq('study_items.hidden', false)
     .order('updated_at', { ascending: false });
 
   if (error) throw new Error(error.message);
-  return (data ?? []) as StudySet[];
+
+  type Row = Omit<StudySet, 'cardCount'> & { study_items?: { count: number }[] };
+  return ((data ?? []) as Row[]).map(({ study_items, ...set }) => ({
+    ...set,
+    cardCount: study_items?.[0]?.count ?? 0,
+  }));
 }
 
 export async function getSet(id: string): Promise<StudySet | null> {

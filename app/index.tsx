@@ -1,12 +1,12 @@
 import { useRouter } from 'expo-router';
 import { Pressable } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { Body, Button, Card, Notice, Screen, Title } from '../src/ui/components';
+import { Body, Button, Card, ListRow, Notice, Screen } from '../src/ui/components';
 import { fetchProfile } from '../src/data/profile';
-import { listSets } from '../src/data/sets';
+import { listSets, type StudySet } from '../src/data/sets';
 import { continueTarget } from '../src/data/attempts';
-import { supabase } from '../src/data/supabase';
 import { useSessionStore } from '../src/data/session';
+import { formatSetTitle } from '../src/core/title';
 
 export default function Home() {
   const router = useRouter();
@@ -34,8 +34,8 @@ export default function Home() {
 
   return (
     <Screen>
-      <Title>Study</Title>
-
+      {/* No <Title> here: the navigation header already says "Study", and
+          printing it twice wasted the first screenful. */}
       {!profileLoading && !hasKey ? (
         <Notice tone="warn">Add your Gemini key in Settings before making study sets.</Notice>
       ) : null}
@@ -53,7 +53,7 @@ export default function Home() {
           }
         >
           <Card>
-            <Body>Continue: {continueSet.title}</Body>
+            <Body>Continue: {formatSetTitle(continueSet.title)}</Body>
             <Body muted>
               {continueTo!.missed > 0
                 ? `${continueTo!.missed} card${continueTo!.missed === 1 ? '' : 's'} to retry`
@@ -73,31 +73,32 @@ export default function Home() {
         </Card>
       ) : (
         sets.map((set) => (
-          <Pressable key={set.id} onPress={() => router.push(`/set/${set.id}`)}>
-            <Card>
-              <Body>{set.title}</Body>
-              <Body muted>
-                {set.status === 'generating'
-                  ? 'Still making cards…'
-                  : set.status === 'failed'
-                    ? "Didn't finish — open to try again"
-                    : set.status === 'empty'
-                      ? 'No cards yet'
-                      : 'Ready'}
-              </Body>
-            </Card>
-          </Pressable>
+          <ListRow
+            key={set.id}
+            title={formatSetTitle(set.title)}
+            meta={describeSet(set)}
+            onPress={() => router.push(`/set/${set.id}`)}
+          />
         ))
       )}
-
-      <Button label="Settings" variant="secondary" onPress={() => router.push('/settings')} />
-      <Button
-        label="Sign out"
-        variant="secondary"
-        onPress={() => {
-          void supabase.auth.signOut();
-        }}
-      />
+      {/* Settings and Sign out used to sit here as full-width buttons. Settings
+          is now the header gear; Sign out lives inside Settings, where it
+          already was. View-level navigation does not belong in the content. */}
     </Screen>
   );
+}
+
+/** "12 cards · Ready" — status alone did not say how much was in a set. */
+function describeSet(set: StudySet): string {
+  const status =
+    set.status === 'generating'
+      ? 'Still making cards…'
+      : set.status === 'failed'
+        ? "Didn't finish — open to try again"
+        : set.status === 'empty'
+          ? 'No cards yet'
+          : 'Ready';
+
+  if (set.cardCount === undefined || set.cardCount === 0) return status;
+  return `${set.cardCount} card${set.cardCount === 1 ? '' : 's'} · ${status}`;
 }

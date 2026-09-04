@@ -182,7 +182,7 @@ export default function Flashcards() {
               ? 'Nothing to retry here — you have not missed anything at this level yet.'
               : 'No cards at this level yet.'}
           </Body>
-          <Button label="Back to set" variant="secondary" onPress={() => router.replace(`/set/${setId}`)} />
+          <Button label="Back to set" variant="secondary" onPress={() => router.back()} />
         </Card>
       ) : finished ? (
         <Card>

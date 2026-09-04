@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Deep Slate Background matching the Dark Theme -->
+  <rect width="1024" height="1024" rx="224" fill="#0D0F17"/>
+
+  <!-- Back Flashcard (Angled), peeking out to the LOWER LEFT.
+
+       The design as first supplied read `x="290" y="210" ... rotate(10 520 500)`,
+       which places this card up and to the RIGHT of the front card and rotates
+       it clockwise — so the stack peeks out top-right. The reference image
+       supplied alongside it shows the card lower-left instead, so the markup and
+       the picture disagreed. The picture is what was approved, and these numbers
+       match it. scripts/make-icons.mjs transcribes this file, so the two must
+       stay in step. -->
+  <rect x="224" y="258" width="460" height="580" rx="44"
+        fill="#4A6CF7" opacity="0.38"
+        transform="rotate(-10 454 548)"/>
+
+  <!-- Front Primary Flashcard -->
+  <rect x="272" y="232" width="480" height="580" rx="48" fill="#5E81F4"/>
+
+  <!-- Subtle Flashcard Content Lines -->
+  <rect x="340" y="340" width="220" height="34" rx="17" fill="#FFFFFF" opacity="0.95"/>
+  <rect x="340" y="410" width="344" height="20" rx="10" fill="#E0E7FF" opacity="0.75"/>
+  <rect x="340" y="450" width="280" height="20" rx="10" fill="#E0E7FF" opacity="0.75"/>
+
+  <!-- Accent Spark (Study/AI Insight) -->
+  <path d="M630 630 L645 580 L660 630 L710 645 L660 660 L645 710 L630 660 L580 645 Z"
+        fill="#FFFFFF"/>
+</svg>

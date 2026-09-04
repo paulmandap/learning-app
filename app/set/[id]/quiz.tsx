@@ -223,7 +223,10 @@ export default function Quiz() {
             onPress={() => router.replace(`/set/${setId}/quiz?retry=1`)}
           />
         ) : null}
-        <Button label="Back to set" variant="secondary" onPress={() => router.replace(`/set/${setId}`)} />
+        {/* back(), not replace(): replace destroys the history entry, which is
+            what left the installed PWA with no way back — it has no edge-swipe
+            gesture, so the header chevron is the only route out. */}
+        <Button label="Back to set" variant="secondary" onPress={() => router.back()} />
       </Screen>
     );
   }
@@ -254,7 +257,10 @@ export default function Quiz() {
               ? 'Nothing to retry here — you have not missed anything yet.'
               : 'No quiz questions at this level yet.'}
           </Body>
-          <Button label="Back to set" variant="secondary" onPress={() => router.replace(`/set/${setId}`)} />
+          {/* back(), not replace(): replace destroys the history entry, which is
+            what left the installed PWA with no way back — it has no edge-swipe
+            gesture, so the header chevron is the only route out. */}
+        <Button label="Back to set" variant="secondary" onPress={() => router.back()} />
         </Card>
       ) : item ? (
         <>
