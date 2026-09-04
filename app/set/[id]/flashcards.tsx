@@ -189,7 +189,9 @@ export default function Flashcards() {
             revealed={revealed}
             onFlip={() => setRevealed((r) => !r)}
             onGrade={grade}
-            badge={LEVELS.find((l) => l.key === card.level)?.label}
+            // Only the first card teaches the controls; after that the hints
+            // are noise competing with the question.
+            showHints={index === 0}
           />
 
           {/* Buttons stay alongside the swipe: swiping is faster once learned,
@@ -206,11 +208,9 @@ export default function Flashcards() {
                 </View>
               </View>
 
-              <SourceCard card={card} onOpenPage={openPage} />
-
-              {/* "Report this card" IS the second verification pass at this
-                  scale (D7). Hidden cards never come back. */}
-              <Button label="Report this card" variant="secondary" onPress={report} />
+              {/* key: collapse state resets per card, so opening the source on
+                  one card does not leave it open for the rest of the deck. */}
+              <SourceCard key={card.id} card={card} onOpenPage={openPage} onReport={report} />
               {reported ? <Notice tone="ok">Thanks — you won't see that one again.</Notice> : null}
             </>
           ) : null}
@@ -221,14 +221,35 @@ export default function Flashcards() {
 }
 
 /**
- * The source chip and excerpt.
+ * The source chip, with the excerpt COLLAPSED behind it.
+ *
+ * The chip stays visible on every card, because "shows me where every answer
+ * came from" is the product's promise and it has to be legible without
+ * hunting. What is hidden is the answer to a question the user has not asked
+ * yet: most of the time you flip a card, agree with the answer, and move on.
+ * Showing a paragraph of source text unbidden on every card competes with the
+ * answer you just turned over, and two blocks of prose saying nearly the same
+ * thing is worse than one.
+ *
+ * `check_flag` deliberately stays OUTSIDE the collapse. It is a warning that
+ * the notes may contradict standard knowledge, and a warning nobody opened is
+ * not a warning.
  *
  * The matched phrase is highlighted using the span the validator already
  * computed against the stored page text — this is why excerpt verification
  * returns a span rather than just a boolean.
  */
-function SourceCard({ card, onOpenPage }: { card: StudyItem; onOpenPage: () => void }) {
+function SourceCard({
+  card,
+  onOpenPage,
+  onReport,
+}: {
+  card: StudyItem;
+  onOpenPage: () => void;
+  onReport: () => void;
+}) {
   const t = useTheme();
+  const [open, setOpen] = useState(false);
 
   const highlighted = useMemo(() => {
     const excerpt = card.source_excerpt;
@@ -246,46 +267,69 @@ function SourceCard({ card, onOpenPage }: { card: StudyItem; onOpenPage: () => v
 
   return (
     <Card>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <View
+      {/* The chip IS the control. One tap, no separate "show more" link to
+          explain — the thing you would tap to see the source is the thing
+          that names it. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          onPress={() => setOpen((o) => !o)}
           style={{
             backgroundColor: t.bg,
             borderColor: t.border,
             borderWidth: 1,
             borderRadius: 999,
-            paddingHorizontal: 10,
-            paddingVertical: 4,
+            paddingHorizontal: 12,
+            paddingVertical: 6,
           }}
         >
           <Text style={{ color: t.textMuted, fontSize: 13 }}>
-            Source{pageLabel ? ` · ${pageLabel}` : ''}
+            Source{pageLabel ? ` · ${pageLabel}` : ''} {open ? '▴' : '▾'}
           </Text>
-        </View>
+        </Pressable>
+
+        <View style={{ flex: 1 }} />
+
+        {/* Demoted from a full-width button to a quiet link. "Report this card"
+            IS the second verification pass at this scale (D7), so it must stay
+            reachable — but it is used on perhaps one card in fifty, and giving
+            it the same visual weight as "Got it" was overstating it. */}
+        <Pressable accessibilityRole="button" onPress={onReport} hitSlop={8}>
+          <Text style={{ color: t.textMuted, fontSize: 13, textDecorationLine: 'underline' }}>
+            Report
+          </Text>
+        </Pressable>
       </View>
 
-      {highlighted ? (
-        <Text style={{ color: t.text, fontSize: 15, lineHeight: 22 }}>
-          {highlighted.before}
-          <Text style={{ backgroundColor: t.warnBg, color: t.warnText }}>{highlighted.hit}</Text>
-          {highlighted.after}
-        </Text>
-      ) : (
-        <Body>{card.source_excerpt}</Body>
-      )}
-
+      {/* A warning is never collapsed — see the note above. */}
       {card.check_flag ? (
         <Notice tone="warn">
           Worth double-checking against your course material: {card.check_flag}
         </Notice>
       ) : null}
 
-      {card.document_id ? (
+      {open ? (
         <>
-          <Button label="Open page" variant="secondary" onPress={onOpenPage} />
-          {pageLabel ? (
-            // Stated in text because iOS Safari ignores #page= and opens at
-            // page 1 — the number has to be readable even when the jump fails.
-            <Body muted>Opens your file. Look for page {(card.page_index ?? 0) + 1}.</Body>
+          {highlighted ? (
+            <Text style={{ color: t.text, fontSize: 15, lineHeight: 22 }}>
+              {highlighted.before}
+              <Text style={{ backgroundColor: t.warnBg, color: t.warnText }}>{highlighted.hit}</Text>
+              {highlighted.after}
+            </Text>
+          ) : (
+            <Body>{card.source_excerpt}</Body>
+          )}
+
+          {card.document_id ? (
+            <>
+              <Button label="Open page" variant="secondary" onPress={onOpenPage} />
+              {pageLabel ? (
+                // Stated in text because iOS Safari ignores #page= and opens at
+                // page 1 — the number has to be readable even when the jump fails.
+                <Body muted>Opens your file. Look for page {(card.page_index ?? 0) + 1}.</Body>
+              ) : null}
+            </>
           ) : null}
         </>
       ) : null}

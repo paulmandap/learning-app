@@ -30,8 +30,15 @@ export interface FlipCardProps {
   onFlip: () => void;
   /** Called once the card has animated away. */
   onGrade: (gotIt: boolean) => void;
-  /** Shown small at the top of the front face, e.g. "Understand". */
-  badge?: string;
+  /**
+   * Show the "tap to flip" / "swipe to grade" hints.
+   *
+   * Only the FIRST card of a session passes this. The hints teach a control
+   * that is learned in one use, and after that they are two lines of text
+   * competing with the question for attention on every single card. A card
+   * face should carry the question or the answer, and nothing else.
+   */
+  showHints?: boolean;
 }
 
 export function FlipCard({
@@ -40,7 +47,7 @@ export function FlipCard({
   revealed,
   onFlip,
   onGrade,
-  badge,
+  showHints = false,
 }: FlipCardProps) {
   const t = useTheme();
   const [width, setWidth] = useState(0);
@@ -182,26 +189,28 @@ export function FlipCard({
         }}
       >
         <Pressable onPress={onFlip} style={{ minHeight: CARD_MIN_HEIGHT }}>
-          {/* Front — the question */}
+          {/* Front — the question, and nothing else.
+              The level badge lived here and has been removed: the level segment
+              at the top of the screen already says which level you are in, and
+              a card should ask one thing without a caption arguing with it. */}
           <Animated.View style={[faceBase, { transform: [{ perspective: 1200 }, { rotateY: frontRotate }] }]}>
-            {badge ? (
-              <Text style={[type.caption, { color: t.textMuted, marginBottom: space.sm }]}>
-                {badge}
+            <Text style={[type.card, { color: t.text }]}>{question}</Text>
+            {showHints ? (
+              <Text style={[type.caption, { color: t.textMuted, marginTop: space.lg }]}>
+                {Platform.OS === 'web' ? 'Tap or press space to flip' : 'Tap to flip'}
               </Text>
             ) : null}
-            <Text style={[type.card, { color: t.text }]}>{question}</Text>
-            <Text style={[type.caption, { color: t.textMuted, marginTop: space.lg }]}>
-              {Platform.OS === 'web' ? 'Tap or press space to flip' : 'Tap to flip'}
-            </Text>
           </Animated.View>
 
-          {/* Back — the answer */}
+          {/* Back — the answer, and nothing else. The "Answer" label is gone:
+              the flip itself already said that. */}
           <Animated.View style={[faceBase, { transform: [{ perspective: 1200 }, { rotateY: backRotate }] }]}>
-            <Text style={[type.caption, { color: t.textMuted, marginBottom: space.sm }]}>Answer</Text>
             <Text style={[type.card, { color: t.text }]}>{answer}</Text>
-            <Text style={[type.caption, { color: t.textMuted, marginTop: space.lg }]}>
-              Swipe right if you got it, left if you missed it
-            </Text>
+            {showHints ? (
+              <Text style={[type.caption, { color: t.textMuted, marginTop: space.lg }]}>
+                Swipe right if you got it, left if you missed it
+              </Text>
+            ) : null}
           </Animated.View>
 
           {/* Colour wash — reaches full strength exactly where release commits,
