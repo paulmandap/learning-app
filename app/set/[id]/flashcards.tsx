@@ -12,6 +12,7 @@ import {
   Title,
 } from '../../../src/ui/components';
 import { FlipCard } from '../../../src/ui/flashcard';
+import { hapticCommit, hapticFlip } from '../../../src/ui/haptics';
 import { radius, space, useTheme } from '../../../src/ui/theme';
 import { listItems, reportItem, type StudyItem } from '../../../src/data/items';
 import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
@@ -67,13 +68,19 @@ export default function Flashcards() {
 
   const card: StudyItem | undefined = items[index];
 
+  /** One place to turn a card over, so tap and keyboard behave identically. */
+  function toggleReveal() {
+    hapticFlip();
+    setRevealed((r) => !r);
+  }
+
   // Keyboard on desktop: space = flip, left = missed, right = got it.
   useEffect(() => {
     if (Platform.OS !== 'web' || !card) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         e.preventDefault();
-        setRevealed((r) => !r);
+        toggleReveal();
       } else if (e.code === 'ArrowLeft') {
         grade(false);
       } else if (e.code === 'ArrowRight') {
@@ -86,6 +93,7 @@ export default function Flashcards() {
 
   function grade(gotIt: boolean) {
     if (!card) return;
+    hapticCommit();
     if (!gotIt) {
       setMissed((prev) => new Set(prev).add(card.id));
     }
@@ -187,7 +195,7 @@ export default function Flashcards() {
             question={card.prompt}
             answer={card.answer}
             revealed={revealed}
-            onFlip={() => setRevealed((r) => !r)}
+            onFlip={toggleReveal}
             onGrade={grade}
             // Only the first card teaches the controls; after that the hints
             // are noise competing with the question.
