@@ -6,6 +6,7 @@ import {
   swipeVerdict,
   type SwipeVerdict,
 } from '../core/gesture';
+import { alignmentFor } from '../core/layout';
 import { radius, space, swipeTint, type, useTheme } from './theme';
 
 /**
@@ -162,6 +163,11 @@ export function FlipCard({
     extrapolate: 'clamp',
   });
 
+  // Each face is aligned on its OWN content: a one-word answer stays centred
+  // behind a question that had to wrap. See src/core/layout.ts for the rule.
+  const questionAlign = alignmentFor(question);
+  const answerAlign = alignmentFor(answer);
+
   const faceBase = {
     position: 'absolute' as const,
     inset: 0 as never,
@@ -192,11 +198,21 @@ export function FlipCard({
           {/* Front — the question, and nothing else.
               The level badge lived here and has been removed: the level segment
               at the top of the screen already says which level you are in, and
-              a card should ask one thing without a caption arguing with it. */}
+              a card should ask one thing without a caption arguing with it.
+
+              Bold, per the type scale: weight is what marks this as the side
+              being asked, so a card caught mid-flip is never ambiguous. */}
           <Animated.View style={[faceBase, { transform: [{ perspective: 1200 }, { rotateY: frontRotate }] }]}>
-            <Text style={[type.card, { color: t.text }]}>{question}</Text>
+            <Text style={[type.cardPrompt, { color: t.text, textAlign: questionAlign }]}>
+              {question}
+            </Text>
             {showHints ? (
-              <Text style={[type.caption, { color: t.textMuted, marginTop: space.lg }]}>
+              <Text
+                style={[
+                  type.caption,
+                  { color: t.textMuted, marginTop: space.lg, textAlign: questionAlign },
+                ]}
+              >
                 {Platform.OS === 'web' ? 'Tap or press space to flip' : 'Tap to flip'}
               </Text>
             ) : null}
@@ -205,9 +221,14 @@ export function FlipCard({
           {/* Back — the answer, and nothing else. The "Answer" label is gone:
               the flip itself already said that. */}
           <Animated.View style={[faceBase, { transform: [{ perspective: 1200 }, { rotateY: backRotate }] }]}>
-            <Text style={[type.card, { color: t.text }]}>{answer}</Text>
+            <Text style={[type.card, { color: t.text, textAlign: answerAlign }]}>{answer}</Text>
             {showHints ? (
-              <Text style={[type.caption, { color: t.textMuted, marginTop: space.lg }]}>
+              <Text
+                style={[
+                  type.caption,
+                  { color: t.textMuted, marginTop: space.lg, textAlign: answerAlign },
+                ]}
+              >
                 Swipe right if you got it, left if you missed it
               </Text>
             ) : null}

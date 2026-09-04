@@ -87,6 +87,13 @@ export const type = {
   display: { fontSize: 28, fontWeight: '700' as const, lineHeight: 34 },
   title: { fontSize: 22, fontWeight: '600' as const, lineHeight: 28 },
   card: { fontSize: 20, fontWeight: '500' as const, lineHeight: 28 },
+  /**
+   * The question face. Same size and rhythm as `card`, heavier weight — the
+   * weight is what says "this is being asked of you" at a glance, so a card
+   * caught mid-flip is never ambiguous about which side you are looking at.
+   * Answers stay at `card` weight, and the contrast is the signal.
+   */
+  cardPrompt: { fontSize: 20, fontWeight: '700' as const, lineHeight: 28 },
   body: { fontSize: 15, fontWeight: '400' as const, lineHeight: 22 },
   label: { fontSize: 13, fontWeight: '500' as const, lineHeight: 18 },
   caption: { fontSize: 12, fontWeight: '400' as const, lineHeight: 16 },
