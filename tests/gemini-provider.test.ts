@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GeminiBrowserProvider, extractModelNames } from '../src/ai/gemini';
 import { MODELS } from '../src/ai/models';
+import { RateLimitedError } from '../src/core/queue';
 import modelsOk from './fixtures/gemini-models-ok.json';
 import invalidKey from './fixtures/gemini-invalid-key.json';
 import quota from './fixtures/gemini-quota.json';
@@ -92,6 +93,46 @@ describe('GeminiBrowserProvider.testConnection', () => {
   });
 });
 
+describe('GeminiBrowserProvider.readDocument', () => {
+  const pdf = { file: new Blob(['%PDF-1.4']), mime: 'application/pdf' };
+
+  it('throws RateLimitedError on a 503 so the queue retries the read', async () => {
+    // Observed live on a 10-page PDF: gemini-3.5-flash-lite answered 503
+    // UNAVAILABLE ("high demand"), and the very next attempt after a 10s
+    // backoff returned 200. A 503 is a wobble to wait out, not a failure —
+    // treating it as fatal loses the whole document.
+    const provider = new GeminiBrowserProvider('k', {
+      fetchImpl: stubFetch(503, {
+        error: { code: 503, message: 'This model is currently experiencing high demand.', status: 'UNAVAILABLE' },
+      }),
+    });
+
+    await expect(provider.readDocument(pdf)).rejects.toBeInstanceOf(RateLimitedError);
+  });
+
+  it('throws RateLimitedError on a 429 as well', async () => {
+    const provider = new GeminiBrowserProvider('k', { fetchImpl: stubFetch(429, quota) });
+    await expect(provider.readDocument(pdf)).rejects.toBeInstanceOf(RateLimitedError);
+  });
+
+  it('does not retry an invalid key — that is fatal, not transient', async () => {
+    // Burning the 10/20/40s ladder on a key that will never work would make a
+    // typo in Settings take 70 seconds to report.
+    const provider = new GeminiBrowserProvider('bad', { fetchImpl: stubFetch(400, invalidKey) });
+    await expect(provider.readDocument(pdf)).rejects.not.toBeInstanceOf(RateLimitedError);
+  });
+
+  it('reads pasted text without any model call at all', async () => {
+    const spy = stubFetch(200, {});
+    const provider = new GeminiBrowserProvider('k', { fetchImpl: spy });
+    const result = await provider.readDocument({ text: 'Hello.\n\nWorld.' });
+
+    expect((spy as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    expect(result.pages).toHaveLength(1);
+    expect(result.pages[0]!.readability).toBe(1);
+  });
+});
+
 describe('extractModelNames', () => {
   it('strips the models/ prefix and drops non-generative models', () => {
     expect(extractModelNames(modelsOk)).toEqual(['gemini-3.8-flash', 'gemini-2.5-pro']);
@@ -118,21 +159,32 @@ describe('MODELS config', () => {
   it('uses only models proven to SERVE generateContent, not merely listed', () => {
     // This assertion previously required gemini-2.5-pro because the docs and
     // models.list both offered it. Probing generateContent directly showed it
-    // returns 404 NOT_FOUND on the free tier — as do all the 2.5 models — while
-    // the two newest Flash models were 503 overloaded. Availability in
-    // models.list means nothing; only a real call does.
-    const VERIFIED_SERVING = ['gemini-3.5-flash', 'gemini-3.5-flash-lite'];
-    const KNOWN_UNUSABLE = [
+    // returns 404 NOT_FOUND on the free tier — as do all the 2.5 models.
+    //
+    // The 503s, unlike the 404s, ROTATE. A later sweep the same day found
+    // gemini-3.6-flash and gemini-3.8-flash — both previously recorded here as
+    // permanently overloaded — serving in 2.5s and 7.8s, while the then-pinned
+    // gemini-3.5-flash-lite had itself started returning 503. So this list is
+    // "observed serving at some point", not a guarantee for right now; only the
+    // 404s are treated as permanent.
+    const VERIFIED_SERVING = [
+      'gemini-3.5-flash', // 200, 10.4s
+      'gemini-3.5-flash-lite', // 200 earlier, 503 later the same day
+      'gemini-3.6-flash', // 200, 2.5s — current light
+      'gemini-3.8-flash', // 200, 7.8s
+      'gemini-3.7-flash', // 200, 10.8s
+    ];
+    const PERMANENTLY_GONE = [
       'gemini-2.5-pro', // 404 NOT_FOUND
       'gemini-2.5-flash', // 404 NOT_FOUND
       'gemini-2.5-flash-lite', // 404 NOT_FOUND
-      'gemini-3.8-flash', // 503 UNAVAILABLE (overloaded)
-      'gemini-3.6-flash', // 503 UNAVAILABLE (overloaded)
+      'gemini-2.0-flash', // shut down
+      'gemini-2.0-flash-lite', // shut down
     ];
 
     for (const id of Object.values(MODELS)) {
-      expect(KNOWN_UNUSABLE, `${id} was observed unusable on the free tier`).not.toContain(id);
-      expect(VERIFIED_SERVING).toContain(id);
+      expect(PERMANENTLY_GONE, `${id} does not exist on the free tier`).not.toContain(id);
+      expect(VERIFIED_SERVING, `${id} has never been seen to serve a real call`).toContain(id);
     }
   });
 });

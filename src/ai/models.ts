@@ -35,15 +35,45 @@
  * Never use: gemini-2.0-flash / gemini-2.0-flash-lite (shut down), or any
  * *-preview model (more restrictive rate limits, unapproved).
  */
+/*
+ * AVAILABILITY ROTATES. The table above is a snapshot, and it aged.
+ *
+ * Re-swept live 2026-09-04 (later the same day), one real generateContent call
+ * per model, sorted by latency:
+ *
+ *   gemini-3.6-flash        200   2.5s   <- light (was 503 in the table above)
+ *   gemini-3.8-flash        200   7.8s          (was 503 in the table above)
+ *   gemini-3.5-flash        200  10.4s   <- strong, now verified serving
+ *   gemini-3.7-flash        200  10.8s
+ *   gemini-3.5-flash-lite   503   6.4s          (was the light default)
+ *   gemini-3.1-flash-lite   503   7.0s
+ *   gemini-2.5-*            404          (still gone)
+ *   gemini-pro-latest       429
+ *
+ * The two models previously recorded as permanently overloaded were the healthy
+ * ones, and the pinned default was the sick one. So a single pinned id is
+ * fragile against Google's rotating load shedding: when it sheds, the app has no
+ * second option and the user simply cannot make cards. A fallback ladder would
+ * fix that, but D11 specifies exactly two ids — flagged for a decision, not
+ * changed here.
+ *
+ * Also observed in the same window: a one-token request ("Reply with the single
+ * word: ok") returned 503, then 200 after 88.3s, then 503. Latency during a
+ * shedding window is Google-side queueing and says nothing about payload size.
+ */
 export const MODELS = {
-  // Verified live 2026-09-04: flash-lite answers 200 while gemini-3.5-flash was
-  // already returning 429 RESOURCE_EXHAUSTED on the same key. Flash-lite has a
-  // materially larger free-tier allowance AND lower latency for this workload,
-  // so it is the right default for card generation.
-  light: 'gemini-3.5-flash-lite',
+  // Switched from gemini-3.5-flash-lite on 2026-09-04 after it began answering
+  // 503 UNAVAILABLE persistently — three read attempts across 30s of backoff all
+  // failed, which is a user who cannot make cards at all. gemini-3.6-flash was
+  // the fastest STABLE model serving in the sweep above at 2.5s.
+  //
+  // Reversible on purpose: if flash-lite recovers and 3.6 degrades, swap back.
+  // Re-sweep before assuming either is healthy — that is the whole lesson here.
+  light: 'gemini-3.6-flash',
   // No Pro-class model is reachable on the free tier (see the table above).
   // `strong` stays centralised here for Phase 3 Apply-tier work and written
-  // answer grading, and must be re-verified before it is relied on.
+  // answer grading. Verified serving 2026-09-04 at 10.4s, but never yet
+  // exercised on a real generation, so it remains unproven for that workload.
   strong: 'gemini-3.5-flash',
 } as const;
 

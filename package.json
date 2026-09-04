@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:isolation": "tsx scripts/isolation-test.ts"
+    "test:isolation": "tsx scripts/isolation-test.ts",
+    "verify:phase2": "tsx --env-file=.env scripts/verify-phase2.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.114.0",

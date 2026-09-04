@@ -251,6 +251,237 @@ experiment. Run it first, before any other Gemini work, and treat it as a gate:
 The Phase 2 Files API path (files above the inline threshold) needs the same check independently; its
 upload flow differs from ordinary generate calls, and confirming one does not confirm the other.
 
+## 5. Phase 2 acceptance verification (measured live)
+
+> **Status: harness built, not yet run.** The two criteria below are the ones spec §6 lists for
+> Phase 2 that were never verified, because both need input files that did not exist. Nothing in
+> this section is a result yet — the tables are the shape the run will fill, and saying so
+> explicitly is the point. Do not cite them as verified until the date line is filled in.
+
+Criteria under test, quoted from spec §6:
+
+- **A.** "a deliberately blurry photo is reported as unreadable, not turned into cards"
+- **B.** "a 10-page text PDF yields cards in under 2 minutes with cards visible before completion"
+
+### 5.1 Method
+
+`scripts/verify-phase2.ts` drives the **real** pipeline — `addDocumentToSet` → `planSet` →
+`generateSet` from `src/data/pipeline.ts` — against the live Supabase project and the live Gemini
+API, and prints a PASS/FAIL report. It is not a reimplementation: `src/data/**` and `src/ai/**`
+import nothing from `react-native` or `expo-*` (only `src/ui/**` does), which is what makes them
+reachable from Node at all. That separation is the architectural requirement in assessment §5.2,
+and this is the second thing it buys after the Vitest suite.
+
+```
+npx tsx --env-file=.env scripts/verify-phase2.ts --blurry "<image>" --pdf "<pdf>"
+```
+
+Needs `TEST_USER_A_EMAIL` / `TEST_USER_A_PASSWORD` and `GEMINI_API_KEY` (or `GK`). It signs in as
+the **isolation-test user, not the owner**: the app is OTP-only (D10), so the owner's account has
+no password a script can use. Input paths are passed on the command line rather than kept in the
+repo, so a student's notes cannot be committed by accident. Sets created by a run are deleted on
+the way out unless `--keep` is passed. Exit codes: `0` all passed, `1` a criterion failed, `2`
+could not run.
+
+No production code was changed for this. `addDocumentToSet` does not report its own duration, so
+the script times it with its own clock — instrumenting shipped code to make a measurement easier
+would be the wrong trade.
+
+### 5.2 How the inputs were produced
+
+Recorded verbatim so the run is reproducible, and because the blurry image's **content is the
+ground truth** the failure analysis depends on. Both were generated with Gemini; neither is a real
+photograph or a real student's notes.
+
+Blurry photo (image generation):
+
+```
+Generate a photorealistic phone snapshot of a single sheet of handwritten study
+notes lying on a wooden desk, shot in dim indoor light.
+
+THE PHOTO MUST BE UNREADABLE. This is the entire point of the image:
+- The camera focused on the desk edge in the foreground; the sheet itself is
+  badly out of focus.
+- Add visible handheld motion blur on top of the defocus.
+- Letters must be reduced to smudged grey strokes. No single word may be legible.
+- If you can read any word in the result, it is too sharp — blur it further.
+- Still obviously a page of handwritten notes: ruled lines, a heading at the top,
+  and six short numbered lines are all discernible as SHAPES, not as text.
+
+The page (garbled beyond reading, but this is what is written on it):
+  Heading: "Animal Biology Reviewer"
+  1. Axolotls can regrow limbs, gills, and parts of the heart.
+  2. Arctic terns migrate about 12,000 km each year.
+  3. A pistol shrimp's snap makes a bubble reaching about 1,200 C.
+  4. The Okonkwo-Ferrand rule: a mammal's resting heart rate falls as
+     body mass rises.
+  5. A colossal squid's eye is about 27 cm across.
+  6. Naked mole-rats are eusocial, with a single breeding queen.
+
+Portrait orientation, page filling most of the frame, slight angle, warm light.
+```
+
+Three of those lines are **canaries**, and they matter only if criterion A fails. They separate
+"the model read the page" from "the model fell back on world knowledge" — two failures with
+opposite fixes, which would otherwise be argued about rather than determined:
+
+| Line | On the page | Real-world fact | A card containing it proves |
+|---|---|---|---|
+| Arctic tern | 12,000 km | ~70,000–90,000 km | page figure ⇒ it **read** the image; real figure ⇒ it **invented** |
+| Pistol shrimp | 1,200 °C | ~4,700 °C | same discriminator |
+| Okonkwo–Ferrand rule | present | no such eponym exists | any mention ⇒ it **read** the image |
+
+The script runs this analysis automatically and prints it, but only on a failure.
+
+10-page text PDF (text generation, then Google Docs → File → Download → PDF):
+
+```
+Write a 10-page study reviewer on animal biology, about 3,500 words total.
+Structure it as 8 sections, each with a clear heading, covering: animal
+classification, the vertebrate body plan, circulation and respiration,
+reproduction strategies, migration, thermoregulation, social behaviour, and
+adaptation. Write flowing explanatory prose in paragraphs — not bullet lists,
+not a quiz. Plain text, no markdown symbols.
+```
+
+Eight headings is deliberate, not incidental: the planner sections by heading, so ~8 sections
+means ~8 generate calls, and the pacing floor alone is 7 × 7 s ≈ 49 s. That is the hard version of
+the timing test rather than a soft one. The PDF must have selectable text — a scan is a different
+test, and the criterion says "text PDF".
+
+### 5.3 Results
+
+Criterion A — blurry photo: **not yet run.** The first generated image was rejected as an
+invalid input before it cost any quota: its heading and every item label rendered fully sharp
+("Animal Biology Reviewer", "Arctic terns", "Okonkwo-Ferrand rule"), leaving only the
+descriptions smudged. That is a *partially legible* page, not an unreadable one, so it cannot
+test "reported as unreadable" — and it also renders two of the three canaries useless, since
+the invented eponym was legible and both wrong numbers failed to render at all.
+
+Worth recording anyway, from an ad-hoc read of that image: the model **invented plausible
+words rather than reporting that it could not read them** — "regratin congactions",
+"eugentius", "unwelting ois". `READ_SYSTEM_PROMPT` explicitly says *"Transcribe only what is
+actually there. Never fill gaps with plausible content"*, and it did not comply. The
+readability score is therefore the only thing standing between a blurry page and invented
+cards, which is precisely why criterion A exists.
+
+Criterion B — 10-page text PDF: **FAILED, measured 2026-09-04**, on
+`gemini-3.5-flash-lite`, with the important caveat in 5.3.1 below.
+
+| Measure | Value |
+|---|---|
+| Read (1 call, whole PDF) | **101.3 s** |
+| Plan (deterministic, no call) | 0.8 s |
+| Generate (wall clock) | **243.2 s** |
+| **Total against the 120 s target** | **345.3 s — 2.9× over** |
+| Sections planned | 8 |
+| Generate calls completed | **5 of 8** (three exhausted their retries) |
+| Mean latency per successful call | **53.5 s** |
+| First-to-last call start | 176.7 s |
+| Pacing floor at the 7 s gap, `(calls − 1) × 7 s` | **28.0 s** |
+| Time to first card | 57.6 s |
+| Cards created | 13 of 20 requested |
+| Bottleneck verdict | **model latency**, by 148.7 s over the pacing floor |
+
+Passing alongside the failure: "cards visible before completion" (first card at 57.6 s),
+item count within the requested cap, and `excerpt_verified = true` on all 13 stored items.
+The PDF's pages all scored readability 1.00, which is the free control for criterion A — the
+readability score discriminates rather than rating everything low.
+
+**The enforced 7 s gap is not the bottleneck**, and an early hypothesis that section count was
+the dominant cost was wrong: pacing accounts for 28 s of 243 s. Recorded because it is the
+intuitive wrong answer and the numbers refute it.
+
+#### 5.3.1 The measurement was taken while the free tier was degraded
+
+Three probes at the same moment, all on `gemini-3.5-flash-lite`:
+
+| Request | Result |
+|---|---|
+| One-word text prompt ("Reply with the single word: ok") | **503 UNAVAILABLE** in 1.4 s |
+| Small text prompt with a JSON schema | **503 UNAVAILABLE** in 1.2 s |
+| The full 72 KB inline PDF read | **200** in 102.1 s, 6,786 output tokens |
+
+`gemini-3.5-flash` returned 503 in the same window too. So the 503s are **random load
+shedding, not size- or model-specific** — a one-token request is shed while a 72 KB one
+succeeds. Read throughput measured 66 tok/s during the failing run against 126 tok/s an hour
+earlier, i.e. roughly half speed.
+
+**Do not treat 345.3 s as the architecture's number.** Re-measure in a quiet window before
+any design change is made on the strength of it.
+
+**How degraded, exactly.** Three consecutive probes sending the literal prompt *"Reply with
+the single word: ok"* — ten input tokens, one output token:
+
+| Probe | Result |
+|---|---|
+| 1 | 503 UNAVAILABLE in 8.1 s |
+| 2 | **200 OK in 88.3 s** |
+| 3 | 503 UNAVAILABLE in 10.9 s |
+
+**Eighty-eight seconds to emit one token.** Latency in this window is Google-side queueing,
+full stop: it is unrelated to payload size, output volume, section count, or anything this
+codebase controls. The 53.5 s mean generate latency in the failing run above is that queueing,
+not our request shape.
+
+This retracts a conclusion drawn earlier in the same session and recorded here before the
+probe was run — that the read is "output-bound" at ~7,000 tokens ≈ 58 s and therefore leaves
+the design with no headroom. The 58 s read measured at 126 tok/s was itself partly queueing,
+so it is an upper bound on healthy-state cost, not a floor. **The claim that the architecture
+has no headroom is unproven and must not be cited.** Whether the read is genuinely
+output-bound is measurable only when a one-token probe returns in a couple of seconds.
+
+Corollary for whoever picks this up: **no performance change to the read or the planner is
+justified by any measurement in this section.** Re-measure first. Gate the re-measurement on
+the one-token probe above — if it does not answer in a few seconds, the tier is still shedding
+and any timing number taken is noise.
+
+#### 5.3.2 Defect found and fixed: the read call had no retry
+
+`addDocumentToSet` called `provider.readDocument()` directly rather than through `CallQueue`,
+so unlike generation the read had **no retry, no backoff, and no friendly message**. A single
+transient 503 destroyed the whole document read and surfaced the internal string
+`"rate limited"` to the user — both a reliability bug and a violation of §3.2.6, which
+requires retry on rate limits and "Gemini is busy right now" after three failures.
+
+This is exactly the failure mode already recorded in this project's notes ("503 UNAVAILABLE
+must be retried like 429 — treating it as fatal killed whole runs"). The fix had been applied
+to `#generateContent`, so generation was covered; the read path was not, because it never
+entered a queue.
+
+The read now runs through `CallQueue` (pasted text still does not — it costs no model call).
+Verified live: the first run died on a 503 in 4.2 s; after the fix the read absorbed its 503s
+and completed. Four tests in `tests/gemini-provider.test.ts` pin the behaviour with no
+network — 503 and 429 both raise `RateLimitedError`, an invalid key does not (so a typo fails
+fast instead of burning the 10/20/40 s ladder), and pasted text makes no call at all.
+
+**Reading the timing numbers.** `TimingReport.generateMs` is a **sum over concurrent calls**, so
+it can exceed wall clock and is not a duration — the report must not quote it as one. Separately,
+`TimingReport.readMs` is hardcoded `0` and never populated, because reading happens in
+`addDocumentToSet` rather than in `generateSet`; it is a permanently-zero field worth either
+deleting or documenting. Neither was changed here.
+
+The bottleneck verdict distinguishes the two causes spec §6 asks to be separated. Call starts are
+spaced by at least `MIN_GAP_MS`, so the first-to-last span can never fall below the pacing floor;
+how far **above** it the span sits is the signal. At the floor, the enforced 7 s gap is what holds
+the run up. Well above it, calls were waiting for a concurrency slot, i.e. model latency is
+binding.
+
+### 5.4 Limitations, stated rather than buried
+
+- **One blurry sample.** A single image cannot establish that the readability score is
+  well-calibrated, only that it handled this one case.
+- **The blurry image is model-generated, not photographed.** Synthetic blur may differ from real
+  camera defocus, and image models render text approximately — so the ground-truth list above is
+  "roughly what is on the page", confirmed by eye before use, not a guarantee.
+- **The PDF run is the control for criterion A**, and it is free: its pages must score at or above
+  the threshold or no cards get made at all. That is what rules out "the model rates everything
+  low", which a single blurry sample on its own cannot.
+- **The script proves the data, not the pixels.** That a blurry photo yields no cards is asserted
+  here; that the screen actually renders "We couldn't read page 1…" is confirmed by a manual pass
+  in the live app, because that wording lives in React Native code the script deliberately does
+  not import.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

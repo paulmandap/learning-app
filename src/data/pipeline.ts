@@ -99,9 +99,21 @@ export async function addDocumentToSet(input: {
       await uploadOriginal(doc.id, source.file, source.filename);
     }
 
+    // Pasted text costs no model call, so it needs no pacing or retry.
+    //
+    // A FILE read goes through the queue, and must: it is a single Gemini call
+    // that the whole document depends on, and Gemini answers it with 503
+    // UNAVAILABLE ("high demand") often enough to matter — observed live on a
+    // 10-page PDF, where the very next attempt after a 10s backoff returned 200.
+    // Generation has always been retried this way; the read was not, so one
+    // transient 503 destroyed the entire document read and surfaced the internal
+    // string "rate limited" to the user. After MAX_ATTEMPTS the queue throws
+    // GeminiBusyError, whose message is the friendly one §3.2.6 asks for.
     const read = isPaste
       ? await provider.readDocument({ text: source.text })
-      : await provider.readDocument({ file: source.file, mime: source.mime });
+      : await new CallQueue().run(() =>
+          provider.readDocument({ file: source.file, mime: source.mime }),
+        );
 
     const { pageCount, unreadablePages } = await storeReadResult(
       doc.id,
