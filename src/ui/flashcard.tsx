@@ -62,6 +62,8 @@ export function FlipCard({
   // so reading state directly inside it would capture the first render's values.
   const widthRef = useRef(0);
   const gradingRef = useRef(false);
+  /** Which detent has already buzzed, so a single drag buzzes once. */
+  const armedRef = useRef<SwipeVerdict>('none');
   widthRef.current = width;
 
   // Flip whenever `revealed` changes, from a tap or from the keyboard.
@@ -79,6 +81,7 @@ export function FlipCard({
     entry.setValue(0);
     pan.setValue({ x: 0, y: 0 });
     gradingRef.current = false;
+    armedRef.current = 'none';
     Animated.spring(entry, {
       toValue: 1,
       useNativeDriver: Platform.OS !== 'web',
@@ -91,10 +94,11 @@ export function FlipCard({
     if (gradingRef.current) return;
     gradingRef.current = true;
 
-    // Fired HERE, not in onGrade, so the buzz lands the instant the gesture
-    // commits rather than 220ms later when the card has finished flying off.
-    // Feedback that arrives after the animation reads as lag, not as response.
-    gradeFeedback(verdict === 'gotIt');
+    // Only if the detent did not already fire — a fast flick can grade the card
+    // without ever crossing the distance threshold, and that still deserves a
+    // buzz. Without the guard, a normal swipe would buzz twice.
+    if (armedRef.current === 'none') gradeFeedback(verdict === 'gotIt');
+    armedRef.current = 'none';
 
     const w = widthRef.current || 350;
 
@@ -114,6 +118,29 @@ export function FlipCard({
         onPanResponderMove: (_e, g) => {
           if (gradingRef.current) return;
           pan.setValue({ x: g.dx, y: g.dy * 0.15 });
+
+          // DETENT. The haptic fires the moment the drag crosses the point where
+          // releasing would grade the card — finger still down, nothing animating
+          // yet — rather than after release.
+          //
+          // Two reasons. It is better feedback: you feel the card "catch" while
+          // you can still change your mind, the way iOS's own swipe actions
+          // behave, instead of being told after the fact. And firing at release
+          // was not producing a haptic on iOS at all, where the same call from a
+          // button press does — the fly-off animation starting in the same tick
+          // is the most likely reason.
+          //
+          // vx: 0 makes this distance-only. A flick that never travels far enough
+          // has no detent to cross, so it is handled at release in finish().
+          const crossed = swipeVerdict({ dx: g.dx, dy: g.dy, vx: 0, width: widthRef.current });
+          if (crossed !== 'none' && armedRef.current === 'none') {
+            armedRef.current = crossed;
+            gradeFeedback(crossed === 'gotIt');
+          } else if (crossed === 'none' && armedRef.current !== 'none') {
+            // Dragged back below the threshold: re-arm, so pushing past it again
+            // buzzes again and the detent stays honest.
+            armedRef.current = 'none';
+          }
         },
         onPanResponderRelease: (_e, g) => {
           if (gradingRef.current) return;
@@ -138,6 +165,7 @@ export function FlipCard({
           finish(verdict);
         },
         onPanResponderTerminate: () => {
+          armedRef.current = 'none';
           Animated.spring(pan, {
             toValue: { x: 0, y: 0 },
             useNativeDriver: Platform.OS !== 'web',

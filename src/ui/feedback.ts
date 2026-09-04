@@ -19,18 +19,23 @@
  *    is how MANY taps fire. Apple patched this in iOS 26.5, so on a current
  *    iPhone it is expected to do nothing.
  *
- * ## Why success gets a sound and failure does not
+ * ## There is no sound, and that is the settled answer
  *
- * A deliberate asymmetry, not an oversight. A "wrong" noise fires on the exact
- * cards a student is already struggling with, and turns a study session into a
- * series of small public failures — the sound arrives precisely when they feel
- * worst. Getting it wrong is the normal, useful half of studying; the missed
- * pile exists because those cards are the valuable ones. So success is
- * celebrated audibly, and a miss is acknowledged quietly, by touch alone.
+ * A success chime was built and removed after use. Two synthesised sine notes
+ * read as cheap and became distracting, which is the predictable outcome: a
+ * sound that fires on most of a hundred cards has to be genuinely excellent to
+ * survive the hundredth repetition, and oscillator tones will not clear that
+ * bar. A recorded sample might, at the cost of bundle bytes and a licence, for
+ * a signal the haptic already delivers.
  *
- * On iOS this also respects the hardware silent switch for free: Safari mutes
- * page audio when the ringer switch is off, and a web page cannot override
- * that. Somebody studying in a lecture will not chirp.
+ * The `chime()` implementation is kept below, unused, because the Web Audio
+ * setup is the fiddly part — the autoplay-gesture handling and the envelope
+ * ramps — and it is worth having if a real sound is ever wanted.
+ *
+ * Note for whoever revisits this: a failure sound is not the thing to add. It
+ * would fire on exactly the cards a student is already struggling with, at the
+ * moment they feel worst, and getting cards wrong is the useful half of
+ * studying. If sound returns, it returns for success only.
  */
 
 const SWITCH_ID = 'haptic-switch';
@@ -222,7 +227,6 @@ const MISSED_TAP_MS = 240;
 export function gradeFeedback(gotIt: boolean): void {
   if (gotIt) {
     haptic([12, 90, 12], [0, CORRECT_TAP_MS]);
-    chime();
     return;
   }
   haptic([25, 200, 25], [0, MISSED_TAP_MS]);

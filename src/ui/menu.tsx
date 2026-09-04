@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
+import { useNavigation, useRouter } from 'expo-router';
 import { radius, space, TOUCH_TARGET, type, useTheme } from './theme';
 
 /**
@@ -106,6 +107,43 @@ export function OverflowMenu({ items, accessibilityLabel = 'More actions' }: {
         </Pressable>
       </Modal>
     </>
+  );
+}
+
+/**
+ * An explicit header back control.
+ *
+ * The stack's own back chevron only appears when the navigator has somewhere to
+ * go back TO, and in this app there are two ordinary ways to end up without
+ * that: creating a set lands via `router.replace` (so "back" cannot return you
+ * to the half-filled form), and reloading or reopening the installed PWA on a
+ * deep URL rebuilds the stack with a single screen.
+ *
+ * An installed iOS PWA has no edge-swipe-back either, so when the chevron is
+ * missing there is genuinely no way out of the screen. This falls back to Home
+ * rather than rendering nothing, which is the difference between a tidy header
+ * and a dead end.
+ */
+export function HeaderBackButton({ label = 'Back' }: { label?: string }) {
+  const t = useTheme();
+  const router = useRouter();
+  const navigation = useNavigation();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={() => {
+        if (navigation.canGoBack()) router.back();
+        else router.replace('/');
+      }}
+      hitSlop={12}
+      style={{ paddingRight: space.md, paddingVertical: space.xs, flexDirection: 'row', alignItems: 'center' }}
+    >
+      {/* U+2039. Sized to read as a chevron rather than a stray character. */}
+      <Text style={{ color: t.accent, fontSize: 28, lineHeight: 30, marginTop: -2 }}>‹</Text>
+      <Text style={[type.body, { color: t.accent, marginLeft: 2 }]}>{label}</Text>
+    </Pressable>
   );
 }
 
