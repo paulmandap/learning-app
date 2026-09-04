@@ -12,7 +12,7 @@ import {
   Title,
 } from '../../../src/ui/components';
 import { FlipCard } from '../../../src/ui/flashcard';
-import { gradeFeedback, hapticFlip } from '../../../src/ui/feedback';
+import { gradeFeedback, hapticFlip, primeFeedback } from '../../../src/ui/feedback';
 import { radius, space, useTheme } from '../../../src/ui/theme';
 import { listItems, reportItem, type StudyItem } from '../../../src/data/items';
 import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
@@ -65,6 +65,13 @@ export default function Flashcards() {
     setRevealed(false);
     setReported(null);
   }, [level, retryOnly]);
+
+  // Build the hidden haptic switch before it is needed. Created on demand, the
+  // very first tap was lost to a DOM race — which read as "swipes do not buzz"
+  // if a swipe happened to be the first thing you did.
+  useEffect(() => {
+    primeFeedback();
+  }, []);
 
   const card: StudyItem | undefined = items[index];
 

@@ -70,17 +70,32 @@ function ensureSwitch(): HTMLLabelElement | null {
   return label;
 }
 
-/** Gap between scripted taps on the iOS path. Below ~50ms they blur into one. */
-const IOS_TAP_GAP_MS = 70;
+/**
+ * Create the hidden switch ahead of time.
+ *
+ * Called once when a study screen mounts. Doing this lazily at the moment of
+ * the first buzz meant the element was appended to the DOM and clicked in the
+ * same instant, and that first tap was silently lost — which showed up as
+ * "swipes do not buzz" for anyone whose first action was a swipe rather than a
+ * button. Creating it early costs two invisible nodes and removes the race.
+ */
+export function primeFeedback(): void {
+  ensureSwitch();
+}
 
 /**
  * Fire haptic feedback.
  *
- * @param pattern Vibration pattern where a real API exists (ms on/off/on…).
- * @param iosTaps How many discrete taps to fire on the iOS switch path, which
- *                has no duration control — count is the only available contrast.
+ * @param pattern    Vibration pattern where a real API exists (ms on/off/on…).
+ * @param iosTapsAtMs When each tap fires on the iOS switch path, in ms from now.
+ *
+ * The iOS path has NO intensity or duration control — every tap is the same
+ * system tick — so the only expressive dimensions are how many taps fire and
+ * with what rhythm. That is why these are schedules rather than durations, and
+ * why the gaps are as wide as they are: below roughly 100ms two taps are felt
+ * as one, which made a "correct" double tap indistinguishable from a flip.
  */
-function haptic(pattern: number | number[], iosTaps: number): void {
+function haptic(pattern: number | number[], iosTapsAtMs: number[]): void {
   try {
     if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
       navigator.vibrate(pattern);
@@ -89,9 +104,9 @@ function haptic(pattern: number | number[], iosTaps: number): void {
 
     const label = ensureSwitch();
     if (!label) return;
-    for (let i = 0; i < iosTaps; i++) {
-      if (i === 0) label.click();
-      else setTimeout(() => label.click(), i * IOS_TAP_GAP_MS);
+    for (const at of iosTapsAtMs) {
+      if (at <= 0) label.click();
+      else setTimeout(() => label.click(), at);
     }
   } catch {
     // A device that will not buzz is not an error worth surfacing.
@@ -178,23 +193,37 @@ function chime(): void {
 
 // ------------------------------------------------------------------ public --
 
-/** Turning a card over. Deliberately the lightest thing here. */
+/**
+ * Turning a card over. A single tap — the lightest thing here, and the only
+ * one-tap event, so grading never feels like flipping.
+ */
 export function hapticFlip(): void {
-  haptic(8, 1);
+  haptic(8, [0]);
 }
 
 /**
  * Committing an answer, from either the buttons or a completed swipe.
  *
- * Correct: a crisp double tap and the chime — brief, affirming, and over.
- * Missed:  one slightly longer, softer buzz and NO sound. Acknowledged, not
- *          scolded. See the note at the top of this file.
+ * All three events are told apart by RHYTHM, because on iOS every tap is
+ * identical and rhythm is all that is left:
+ *
+ *   flip     ·           one tap
+ *   correct  · ·         two quick taps (110ms) + the chime
+ *   missed   ·   ·       two slow taps (240ms), no sound
+ *
+ * Correct reads as an upbeat "ta-dum"; missed as a slower, flatter "uh-uh".
+ * Neither is harsh — a miss is acknowledged, not scolded, per the note at the
+ * top of this file. On Android the same shapes are expressed as real vibration
+ * patterns, where duration is available as well.
  */
+const CORRECT_TAP_MS = 110;
+const MISSED_TAP_MS = 240;
+
 export function gradeFeedback(gotIt: boolean): void {
   if (gotIt) {
-    haptic([10, 45, 10], 2);
+    haptic([12, 90, 12], [0, CORRECT_TAP_MS]);
     chime();
     return;
   }
-  haptic(30, 1);
+  haptic([25, 200, 25], [0, MISSED_TAP_MS]);
 }
