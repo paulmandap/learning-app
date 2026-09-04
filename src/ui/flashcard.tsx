@@ -7,6 +7,7 @@ import {
   type SwipeVerdict,
 } from '../core/gesture';
 import { alignmentFor } from '../core/layout';
+import { gradeFeedback } from './feedback';
 import { radius, space, swipeTint, type, useTheme } from './theme';
 
 /**
@@ -89,6 +90,12 @@ export function FlipCard({
   const finish = (verdict: Exclude<SwipeVerdict, 'none'>) => {
     if (gradingRef.current) return;
     gradingRef.current = true;
+
+    // Fired HERE, not in onGrade, so the buzz lands the instant the gesture
+    // commits rather than 220ms later when the card has finished flying off.
+    // Feedback that arrives after the animation reads as lag, not as response.
+    gradeFeedback(verdict === 'gotIt');
+
     const w = widthRef.current || 350;
 
     Animated.timing(pan, {

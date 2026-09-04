@@ -12,7 +12,7 @@ import {
   Title,
 } from '../../../src/ui/components';
 import { FlipCard } from '../../../src/ui/flashcard';
-import { hapticCommit, hapticFlip } from '../../../src/ui/haptics';
+import { gradeFeedback, hapticFlip } from '../../../src/ui/feedback';
 import { radius, space, useTheme } from '../../../src/ui/theme';
 import { listItems, reportItem, type StudyItem } from '../../../src/data/items';
 import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
@@ -82,18 +82,29 @@ export default function Flashcards() {
         e.preventDefault();
         toggleReveal();
       } else if (e.code === 'ArrowLeft') {
-        grade(false);
+        gradeWithFeedback(false);
       } else if (e.code === 'ArrowRight') {
-        grade(true);
+        gradeWithFeedback(true);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  /**
+   * Grade from a button or the keyboard.
+   *
+   * A swipe does NOT come through here for its feedback — FlipCard fires it the
+   * moment the gesture commits, rather than after the 220ms fly-off, so the
+   * buzz lands when your thumb lets go instead of a beat later.
+   */
+  function gradeWithFeedback(gotIt: boolean) {
+    gradeFeedback(gotIt);
+    grade(gotIt);
+  }
+
   function grade(gotIt: boolean) {
     if (!card) return;
-    hapticCommit();
     if (!gotIt) {
       setMissed((prev) => new Set(prev).add(card.id));
     }
@@ -209,10 +220,14 @@ export default function Flashcards() {
             <>
               <View style={{ flexDirection: 'row', gap: space.sm }}>
                 <View style={{ flex: 1 }}>
-                  <Button label="Missed" variant="secondary" onPress={() => grade(false)} />
+                  <Button
+                    label="Missed"
+                    variant="secondary"
+                    onPress={() => gradeWithFeedback(false)}
+                  />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Button label="Got it" onPress={() => grade(true)} />
+                  <Button label="Got it" onPress={() => gradeWithFeedback(true)} />
                 </View>
               </View>
 
