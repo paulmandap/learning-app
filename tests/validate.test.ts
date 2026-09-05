@@ -176,13 +176,44 @@ describe('source grounding by sentence index', () => {
     expect(resolveSource(PAGE_TEXT, 3, 'anything')).toBeNull(); // exactly one past the end
   });
 
-  it('detects an off-by-one citation via the support check', () => {
-    // Sentence 1 is "It fires 60-100 times per minute" — it does not support a
-    // question about the AV node, even though it is a real sentence.
+  it('tolerates an off-by-one citation when a neighbour supports the answer', () => {
+    // CHANGED DELIBERATELY. This test previously asserted the opposite — that
+    // citing sentence 1 for an AV-node answer must FAIL — and that strictness
+    // turned out to cost real cards.
+    //
+    // splitSentences treats a line break as a sentence boundary, so notes shaped
+    // as a label above its meaning ("LEAF" / "primary photosynthetic organ")
+    // split in two. A card answering "the leaf" and citing the function line
+    // shares no words with it, scores exactly 0, and was dropped. Measured on a
+    // labelled diagram: 2 of 6 organs lost. Glossaries and vocabulary lists have
+    // the same shape.
+    //
+    // The trade-off accepted: a citation one sentence off now passes when the
+    // neighbourhood supports the answer. The grounding guarantee is intact — the
+    // text is still resolved from the user's own notes and cannot be fabricated,
+    // and the excerpt SHOWN is the widened text, so what the user reads does
+    // support the answer. The window is bounded at one sentence, and the test
+    // below pins that bound.
     const right = resolveSource(PAGE_TEXT, 2, 'The atrioventricular node delays conduction');
     const offByOne = resolveSource(PAGE_TEXT, 1, 'The atrioventricular node delays conduction');
     expect(right!.score).toBeGreaterThan(SOURCE_SUPPORT_THRESHOLD);
-    expect(offByOne!.score).toBeLessThan(SOURCE_SUPPORT_THRESHOLD);
+    expect(offByOne!.score).toBeGreaterThanOrEqual(SOURCE_SUPPORT_THRESHOLD);
+    // What the user is shown includes the sentence that actually supports it.
+    expect(offByOne!.text).toContain('atrioventricular node delays conduction');
+  });
+
+  it('still rejects a citation two sentences away from any support', () => {
+    // Sentence 0's window reaches sentence 1 only, never sentence 2. This is the
+    // bound that stops widening from becoming "anything on the page counts".
+    //
+    // The answer is deliberately chosen to share NO words with sentences 0-1.
+    // A first attempt used "the atrioventricular node delays conduction" and
+    // scored 0.25 — one hit out of four, because both it and sentence 0 contain
+    // the generic word "node". That citation passed before this change too, so
+    // it was never testing the bound. Worth knowing on its own: at a 0.22
+    // threshold a single shared common word can carry a short answer.
+    const tooFar = resolveSource(PAGE_TEXT, 0, 'The ventricles fill with blood.');
+    expect(tooFar!.score).toBeLessThan(SOURCE_SUPPORT_THRESHOLD);
   });
 
   it('accepts an answer genuinely supported by its cited sentence', () => {
@@ -432,5 +463,68 @@ describe('validateItems', () => {
     const { kept } = validateItems(candidates, pageTexts, budget);
     expect(kept.length).toBeGreaterThan(0);
     for (const k of kept) expect(k.excerpt_verified).toBe(true);
+  });
+});
+
+describe('resolveSource — label and annotation on separate lines', () => {
+  // Exactly the shape a labelled diagram produces: the READ stage returns each
+  // label and each function as its own block, and splitSentences treats a line
+  // break as a boundary, so they land in separate sentences.
+  const diagram = [
+    'FIGURE 2.1 — PLANT ORGANS AND THEIR FUNCTIONS',
+    'FLOWER',
+    'reproductive organ',
+    'LEAF',
+    'primary photosynthetic organ',
+    'STEM',
+    'support & transport',
+  ].join('\n');
+
+  it('rescues a card whose answer is the label and whose citation is the function', () => {
+    // sentence 4 is "primary photosynthetic organ"; the answer is "The leaf".
+    // Those share no words, so the direct score is 0 and the card used to die.
+    const direct = sourceSupportScore('The leaf.', 'primary photosynthetic organ');
+    expect(direct).toBe(0);
+
+    const resolved = resolveSource(diagram, 4, 'The leaf.');
+    expect(resolved).not.toBeNull();
+    expect(resolved!.score).toBeGreaterThanOrEqual(SOURCE_SUPPORT_THRESHOLD);
+    // The excerpt now carries the label WITH its meaning, which is the more
+    // useful quote to show the user.
+    expect(resolved!.text).toContain('LEAF');
+    expect(resolved!.text).toContain('primary photosynthetic organ');
+  });
+
+  it('works in the other direction too — citing the label for a function answer', () => {
+    const resolved = resolveSource(diagram, 3, 'It is the primary photosynthetic organ.');
+    expect(resolved!.score).toBeGreaterThanOrEqual(SOURCE_SUPPORT_THRESHOLD);
+  });
+
+  it('does not widen when the cited sentence already supports the answer', () => {
+    const prose = 'The stem provides support and transport. Roots absorb water.';
+    const resolved = resolveSource(prose, 0, 'Support and transport.');
+    // Untouched: the direct sentence stands on its own.
+    expect(resolved!.text).toBe('The stem provides support and transport.');
+  });
+
+  it('still rejects a citation that no neighbourhood supports', () => {
+    // Nothing near sentence 1 mentions mitochondria, so widening must not save it.
+    const resolved = resolveSource(diagram, 1, 'The mitochondria produces ATP energy.');
+    expect(resolved!.score).toBeLessThan(SOURCE_SUPPORT_THRESHOLD);
+  });
+
+  it('never widens beyond one sentence either side', () => {
+    // "STEM" sits 2 sentences from "LEAF", so a leaf answer citing STEM stays a
+    // miss — the window is deliberately narrow enough to stop a citation
+    // drifting into a neighbouring topic.
+    const resolved = resolveSource(diagram, 6, 'The leaf.');
+    expect(resolved!.score).toBeLessThan(SOURCE_SUPPORT_THRESHOLD);
+  });
+
+  it('handles the window clamping at both ends of the page', () => {
+    expect(resolveSource(diagram, 0, 'Plant organs and their functions.')).not.toBeNull();
+    expect(resolveSource(diagram, 6, 'Support and transport.')).not.toBeNull();
+    // Out of range is still null — a fabricated index must not resolve.
+    expect(resolveSource(diagram, 99, 'anything')).toBeNull();
   });
 });

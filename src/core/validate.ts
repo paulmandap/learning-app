@@ -71,10 +71,39 @@ export interface ResolvedSource {
 }
 
 /**
+ * How many sentences either side of the citation may be pulled in as evidence.
+ *
+ * One. Enough to reunite a label with the line under it, not enough to let a
+ * citation drift into a different topic.
+ */
+export const SOURCE_WINDOW = 1;
+
+/**
  * Resolve a model citation against the app's own stored page text.
  *
  * Returns null when the index does not exist, which is how a fabricated or
  * hallucinated citation is caught.
+ *
+ * **Why a neighbouring line can count as evidence.** `splitSentences` treats a
+ * line break as a sentence boundary, so label-and-annotation notes split into
+ * separate sentences:
+ *
+ *     "LEAF"
+ *     "primary photosynthetic organ"
+ *
+ * A card asking which organ is the primary photosynthetic organ answers "the
+ * leaf" and cites the function line — and those two strings share no words at
+ * all, so the support score is exactly 0 and a perfectly good card was dropped.
+ * Measured on a labelled diagram: 2 of 6 organs were lost this way. It is not a
+ * diagram problem either; glossaries, vocabulary lists and any term/definition
+ * notes have the same shape.
+ *
+ * So when the cited sentence alone does not support the answer, the immediate
+ * neighbours are tried WITH IT. This does not weaken the guarantee: the text is
+ * still resolved from the user's own stored notes and cannot be fabricated, the
+ * threshold is unchanged, and the window is one sentence either side. The
+ * widened text becomes the excerpt, so the user sees the label and its meaning
+ * together — which is the more useful quote anyway.
  */
 export function resolveSource(
   pageText: string,
@@ -84,7 +113,21 @@ export function resolveSource(
   const sentences = splitSentences(pageText);
   const sentence = sentences[sentenceIndex];
   if (sentence === undefined) return null;
-  return { text: sentence, score: sourceSupportScore(answer, sentence) };
+
+  const direct = sourceSupportScore(answer, sentence);
+  if (direct >= SOURCE_SUPPORT_THRESHOLD) return { text: sentence, score: direct };
+
+  // Widen by one sentence either side and re-check.
+  const from = Math.max(0, sentenceIndex - SOURCE_WINDOW);
+  const to = Math.min(sentences.length - 1, sentenceIndex + SOURCE_WINDOW);
+  const window = sentences.slice(from, to + 1).join(' ');
+  const widened = sourceSupportScore(answer, window);
+
+  // Report the better of the two. A window that still fails leaves the original
+  // sentence as the excerpt, so the drop log names what the model actually cited.
+  return widened >= SOURCE_SUPPORT_THRESHOLD
+    ? { text: window, score: widened }
+    : { text: sentence, score: direct };
 }
 
 export type DropReason =
