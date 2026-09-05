@@ -16,8 +16,31 @@
  *  - **iOS Safari 17.4+:** the HTML switch control emits a system haptic when
  *    toggled, and a scripted `<label>` click triggers it. There is NO duration
  *    or intensity control — every tap is identical — so the only way to vary it
- *    is how MANY taps fire. Apple patched this in iOS 26.5, so on a current
- *    iPhone it is expected to do nothing.
+ *    is how MANY taps fire.
+ *
+ * ## iOS: taps buzz, swipes do not. This is settled — stop trying.
+ *
+ * Confirmed on a real iPhone across three attempts. Buttons and the keyboard
+ * produce a haptic; a swipe never does, from any call site:
+ *
+ *  1. Firing at release, inside PanResponder — no buzz.
+ *  2. Firing at the drag's commit threshold — no buzz. (`touchmove` is not an
+ *     activation-triggering event, so this one could never have worked.)
+ *  3. Firing from a real `touchend` listener on the card's DOM node — no buzz.
+ *
+ * The decisive evidence: `gradeFeedback` calls `chime()` and then `haptic()`
+ * on the same line of execution. On a swipe the SOUND plays and the haptic does
+ * not. So the code path runs and the call is made — the tap is simply refused.
+ *
+ * The likely reason, and why there is no fourth attempt: a button press ends in
+ * a `click`, while a swipe ends in `touchend` with the synthetic click
+ * suppressed because the finger moved. Safari appears to grant the switch
+ * haptic to discrete taps, not drags, and a page cannot manufacture a trusted
+ * click. Real per-gesture haptics need a native build (`expo-haptics`).
+ *
+ * The listener stays: it is harmless, it is correct on Android where
+ * `navigator.vibrate` works during a drag, and swipe feedback on iOS is carried
+ * by the colour wash, the fly-off and — for a correct answer — the sound.
  *
  * ## Why success gets a sound and failure does not
  *

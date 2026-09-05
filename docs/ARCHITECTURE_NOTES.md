@@ -717,6 +717,63 @@ scheduler in isolation:
 to a study rhythm, so leaking it would leak what someone is struggling with. Deleting a study
 set cascades its schedules, confirmed while cleaning up the probe data.
 
+## 8. Phase 7 — diagram cards
+
+### 8.1 7a: the figure is shown on the card (shipped)
+
+For cards from an **image** upload, the question face now carries the picture above the question.
+No new storage: the original is already in the `documents` bucket and `signedUrlFor` already
+existed, so this is a render, not a schema change. One signed URL serves every card from that
+upload rather than one per card.
+
+PDFs are unchanged. Showing a PDF *page* needs pdf.js or stored page images, and spec §4 rules
+the latter out for the MVP — that is an owner decision, not a default.
+
+**Three attempts to make it fit, each failing differently on react-native-web.** Worth recording
+because the failures are not obvious and the third is the one to copy:
+
+1. Fixed `height: 150` with `resizeMode="contain"` — cropped a wide diagram to its top band.
+   Title and two labels visible, four cut off, which removes exactly what the card asks about.
+2. `width: '100%'` + `aspectRatio` + `maxHeight` — the element **collapsed to nothing**. The
+   picture disappeared entirely.
+3. **Explicit pixel width and height**, computed from the card's measured width and the real
+   aspect ratio from `Image.getSize`. Numbers cannot crop or collapse.
+
+A fourth problem only appeared once the picture was the right shape: both faces are absolutely
+positioned so they can flip against each other, so they take their height from the card
+container. At a fixed 260 the diagram spilled over the progress bar above and clipped below. The
+container now grows by the picture's height.
+
+### 8.2 7b: the §6 gate — FAILED, so 7c was not built
+
+Spec §6 postpones label questions "only when ≥3 labels return confident non-overlapping boxes".
+`scripts/label-box-probe.ts` is that gate. It asks for each label's box, then checks
+deterministically: at least three, each at confidence ≥ 0.7, and no two overlapping by more than
+10% of the smaller box.
+
+| Document | Confident boxes | Overlaps | Clean | Verdict |
+|---|---|---|---|---|
+| `diagram-only.png` | 6 | LEAF/STEM 15%, ROOTS/TAPROOT **66%** | 2 | FAIL |
+| `diagram-photo.png` | 5 | LEAF/STEM 13% | 3 | pass, exactly at the threshold |
+
+**Gate result: 1 of 2. Label questions are NOT built.**
+
+The overlaps are real geometry, not model error. The stem is a thin bar passing *behind* the
+leaf, so their boxes must intersect. The taproot *is part of* the root system, so a 66% overlap
+is the correct answer to a badly-posed question — "tap the roots" and "tap the taproot" have no
+distinct answer. A card that marks a student wrong for tapping the right place is worse than no
+card, which is precisely what §6's clause was protecting against.
+
+That this was measured on a synthetic diagram drawn to be maximally legible matters: a
+photographed textbook page would do worse, not better.
+
+**One thing the gate found that is worth keeping.** Asked for normalised 0–1 coordinates, the
+model returned **pixels** for one image and normalised values for the other — same prompt, same
+run, `[322, 164, 84, 90]` on a 900×620 drawing. `normaliseBoxes` detects this (a normalised box
+cannot exceed 1) and rescales using dimensions read from the PNG/JPEG header. Without it the
+gate failed for the wrong reason. If label questions are ever revisited, that inconsistency is
+the first thing to design around.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

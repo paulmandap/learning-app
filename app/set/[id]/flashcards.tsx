@@ -168,6 +168,28 @@ export default function Flashcards() {
     }
   }
 
+  /**
+   * The picture this card came from, for image uploads (Phase 7a).
+   *
+   * Only for `kind === 'image'`: the original is already in Storage and
+   * signedUrlFor already exists, so showing it costs no new storage. A PDF page
+   * cannot be shown the same way — that needs pdf.js or stored page images, and
+   * spec §4 rules the latter out for the MVP.
+   *
+   * Keyed by document so one signed URL serves every card from that upload
+   * rather than one request per card.
+   */
+  const cardDoc = card?.document_id ? docs.find((d) => d.id === card.document_id) : undefined;
+  const figureDoc = cardDoc?.kind === 'image' && cardDoc.storage_path ? cardDoc : undefined;
+
+  const { data: figureUri } = useQuery({
+    queryKey: ['figure', figureDoc?.id],
+    queryFn: () => signedUrlFor(figureDoc!.storage_path!),
+    enabled: !!figureDoc,
+    // Signed URLs last 10 minutes; refetch before they lapse mid-session.
+    staleTime: 8 * 60 * 1000,
+  });
+
   async function openPage() {
     if (!card?.document_id) return;
     const doc = docs.find((d) => d.id === card.document_id);
@@ -250,6 +272,7 @@ export default function Flashcards() {
             // Only the first card teaches the controls; after that the hints
             // are noise competing with the question.
             showHints={index === 0}
+            imageUri={figureUri ?? undefined}
           />
 
           {/* Buttons stay alongside the swipe: swiping is faster once learned,

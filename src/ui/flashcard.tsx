@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PanResponder, Platform, Pressable, Text, View } from 'react-native';
+import { Animated, Image, PanResponder, Platform, Pressable, Text, View } from 'react-native';
 import {
   shouldCaptureGesture,
   swipeProgress,
@@ -25,9 +25,34 @@ import { radius, space, swipeTint, type, useTheme } from './theme';
 const FLIP_MS = 320;
 const CARD_MIN_HEIGHT = 260;
 
+/**
+ * Ceiling on a card's source picture.
+ *
+ * The picture keeps its own aspect ratio and is capped here, rather than being
+ * forced into a fixed height. A fixed box cropped a wide diagram to its top
+ * band — the title and two labels visible, the other four cut off — which
+ * removes exactly what the card is asking about. The cap still guarantees the
+ * question is never pushed off the card.
+ */
+const FIGURE_MAX_HEIGHT = 220;
+
+/** Fallback shape until the real one is known, so the layout does not jump far. */
+const FIGURE_FALLBACK_RATIO = 4 / 3;
+
 export interface FlipCardProps {
   question: string;
   answer: string;
+  /**
+   * The source picture, for cards made from an uploaded image (Phase 7a).
+   *
+   * Shown on the QUESTION face only. A card asking "which organ is the primary
+   * photosynthetic organ?" is far easier to answer with the drawing in front of
+   * you; the answer face is a few words and gains nothing from it.
+   *
+   * This is the whole diagram, not a highlighted part — label-position
+   * questions are the postponed §6 feature and are gated separately.
+   */
+  imageUri?: string;
   revealed: boolean;
   onFlip: () => void;
   /** Called once the card has animated away. */
@@ -50,9 +75,35 @@ export function FlipCard({
   onFlip,
   onGrade,
   showHints = false,
+  imageUri,
 }: FlipCardProps) {
   const t = useTheme();
   const [width, setWidth] = useState(0);
+
+  /**
+   * The picture's true aspect ratio, so the whole of it is shown.
+   *
+   * Measured with Image.getSize rather than assumed: a diagram is whatever
+   * shape the student photographed, and guessing crops it.
+   */
+  const [figureRatio, setFigureRatio] = useState(FIGURE_FALLBACK_RATIO);
+  useEffect(() => {
+    if (!imageUri) return;
+    let live = true;
+    Image.getSize(
+      imageUri,
+      (w, h) => {
+        if (live && h > 0) setFigureRatio(w / h);
+      },
+      () => {
+        // Unreachable image: keep the fallback shape rather than collapsing the
+        // card. The <Image> below will simply render nothing.
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [imageUri]);
 
   const flip = useRef(new Animated.Value(0)).current;
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
@@ -83,19 +134,17 @@ export function FlipCard({
   };
 
   /**
-   * The haptic fires from a REAL touchend listener, not from PanResponder.
+   * Grade feedback fired from a REAL touchend listener rather than PanResponder.
    *
-   * iOS has no Vibration API, so haptics go through the hidden-switch trick,
-   * and Safari only performs that during TRANSIENT USER ACTIVATION. The events
-   * that grant activation are click, pointerdown/up, keydown and touchend —
-   * touchmove is not among them, and react-native-web's responder system
-   * dispatches its release callback asynchronously, by which point the
-   * activation has lapsed. That is why a button press buzzed and an identical
-   * call from a swipe did not.
+   * Built as the third attempt at making swipes buzz on iOS, on the theory that
+   * the call needed to sit inside the touchend dispatch to be granted transient
+   * user activation. **It did not work** — see the note in ./feedback.ts. On a
+   * swipe the sound plays from the very same call and the haptic does not, so
+   * the ceiling is Safari's, not this code's.
    *
-   * Attaching straight to the DOM node puts the call inside the touchend
-   * dispatch itself, which is the same standing a Pressable's click has.
-   * Web-only by construction; native builds have a real haptics API instead.
+   * Kept because it is correct on Android, where navigator.vibrate works during
+   * a drag, and because it is where the sound is triggered from on a swipe.
+   * Web-only by construction; a native build has a real haptics API instead.
    */
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -147,8 +196,7 @@ export function FlipCard({
 
     // Covers a fast flick that never travelled far enough for the touchend
     // listener to call it, and mouse or keyboard input where there is no touch
-    // event at all. On iOS this call is usually too late to be granted a
-    // haptic; the native listener is what actually buzzes.
+    // event at all. Guarded so a normal swipe still feeds back exactly once.
     buzzOnce(verdict === 'gotIt');
 
     const w = widthRef.current || 350;
@@ -235,6 +283,25 @@ export function FlipCard({
   const questionAlign = alignmentFor(question);
   const answerAlign = alignmentFor(answer);
 
+  // The card face's usable width, inside its padding.
+  const figureWidth = Math.max(0, width - space.xl * 2);
+  // Fit to width, then cap: a tall picture is limited by FIGURE_MAX_HEIGHT, a
+  // wide one by the card itself. Either way the whole picture is visible.
+  const figureHeight = Math.min(FIGURE_MAX_HEIGHT, Math.round(figureWidth / figureRatio));
+
+  /**
+   * The card grows to fit a picture.
+   *
+   * Both faces are absolutely positioned so they can flip against each other,
+   * which means they take their height from THIS container — a fixed 260 left a
+   * tall diagram spilling over the progress bar above and clipped at the bottom.
+   * The container has to account for the picture the face is going to draw.
+   */
+  const cardHeight =
+    imageUri && figureWidth > 0
+      ? CARD_MIN_HEIGHT + figureHeight + space.md
+      : CARD_MIN_HEIGHT;
+
   const faceBase = {
     position: 'absolute' as const,
     inset: 0 as never,
@@ -253,7 +320,7 @@ export function FlipCard({
         ref={cardRef}
         {...responder.panHandlers}
         style={{
-          minHeight: CARD_MIN_HEIGHT,
+          minHeight: cardHeight,
           opacity: entry,
           transform: [
             { translateX: pan.x },
@@ -262,7 +329,7 @@ export function FlipCard({
           ],
         }}
       >
-        <Pressable onPress={onFlip} style={{ minHeight: CARD_MIN_HEIGHT }}>
+        <Pressable onPress={onFlip} style={{ minHeight: cardHeight }}>
           {/* Front — the question, and nothing else.
               The level badge lived here and has been removed: the level segment
               at the top of the screen already says which level you are in, and
@@ -271,6 +338,30 @@ export function FlipCard({
               Bold, per the type scale: weight is what marks this as the side
               being asked, so a card caught mid-flip is never ambiguous. */}
           <Animated.View style={[faceBase, { transform: [{ perspective: 1200 }, { rotateY: frontRotate }] }]}>
+            {imageUri && figureWidth > 0 ? (
+              // contain, not cover: a diagram cropped to fill the box loses the
+              // labels round its edge, which are the entire point of showing it.
+              <Image
+                source={{ uri: imageUri }}
+                resizeMode="contain"
+                accessibilityLabel="The picture these notes came from"
+                style={{
+                  // EXPLICIT pixel width and height, computed from the card's
+                  // measured width and the picture's real shape.
+                  //
+                  // Two earlier attempts failed on react-native-web: a fixed
+                  // height cropped a wide diagram to its top band (title and two
+                  // labels visible, four cut off), and width:'100%' with
+                  // aspectRatio + maxHeight collapsed the element to nothing.
+                  // Numbers cannot do either.
+                  width: figureWidth,
+                  height: figureHeight,
+                  marginBottom: space.md,
+                  borderRadius: radius.sm,
+                  backgroundColor: t.bg,
+                }}
+              />
+            ) : null}
             <Text style={[type.cardPrompt, { color: t.text, textAlign: questionAlign }]}>
               {question}
             </Text>
