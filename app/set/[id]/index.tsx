@@ -9,7 +9,8 @@ import { formatSetTitle } from '../../../src/core/title';
 import { fetchProfile } from '../../../src/data/profile';
 import { deleteSet, getSet, updateSet } from '../../../src/data/sets';
 import { describeDrops } from '../../../src/core/validate';
-import { listDocuments } from '../../../src/data/documents';
+import { freeUpSpace, listDocuments } from '../../../src/data/documents';
+import { formatBytes } from '../../../src/core/storage';
 import { countItems } from '../../../src/data/items';
 import { dueCountForSet } from '../../../src/data/review';
 import { generateSet, type Progress } from '../../../src/data/pipeline';
@@ -30,6 +31,9 @@ export default function SetScreen() {
 
   const [progress, setProgress] = useState<Progress | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmFree, setConfirmFree] = useState(false);
+  const [freeing, setFreeing] = useState(false);
+  const [freed, setFreed] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // null = not renaming. Holds the RAW stored title while editing, not the
@@ -78,6 +82,29 @@ export default function SetScreen() {
       setError(err instanceof Error ? err.message : "Couldn't rename that set.");
     } finally {
       setSavingName(false);
+    }
+  }
+
+  /**
+   * Give back the storage without giving up the studying.
+   *
+   * What fills a 1 GB bucket is the PDF; the cards, answers and schedules made
+   * from it are kilobytes in a different quota. So "I need space" never has to
+   * mean "delete my set" — see freeUpSpace in src/data/documents.ts.
+   */
+  async function free() {
+    setFreeing(true);
+    try {
+      const bytes = await freeUpSpace(setId);
+      setFreed(bytes);
+      setConfirmFree(false);
+      await queryClient.invalidateQueries({ queryKey: ['docs', setId] });
+      await queryClient.invalidateQueries({ queryKey: ['storageUsed'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't free up space just now.");
+    } finally {
+      setFreeing(false);
     }
   }
 
@@ -137,6 +164,9 @@ export default function SetScreen() {
   const isGenerating = set.status === 'generating';
 
   const displayTitle = formatSetTitle(set.title);
+  // "Free up space" only appears while there is space to free — once the
+  // originals are gone, offering it again would be an action that does nothing.
+  const hasFiles = docs.some((d) => d.storage_path);
 
   return (
     <Screen>
@@ -154,6 +184,9 @@ export default function SetScreen() {
               items={[
                 { label: 'Add notes', onPress: () => router.push(`/new?setId=${setId}`) },
                 { label: 'Rename set', onPress: () => setRenaming(set.title) },
+                ...(hasFiles
+                  ? [{ label: 'Free up space', onPress: () => setConfirmFree(true) }]
+                  : []),
                 { label: 'Delete set', destructive: true, onPress: () => setConfirmDelete(true) },
               ]}
             />
@@ -179,6 +212,23 @@ export default function SetScreen() {
 
       {/* Delete asks before acting, as it always did — the menu changed WHERE
           it lives, not how much friction it carries. */}
+      {confirmFree ? (
+        <Card>
+          <Notice tone="warn">
+            Remove the original file for "{displayTitle}"? Every card, answer and review date is
+            kept — you just won't be able to open the file it came from.
+          </Notice>
+          <Button label="Yes, free up the space" onPress={free} busy={freeing} />
+          <Button label="Keep the file" variant="secondary" onPress={() => setConfirmFree(false)} />
+        </Card>
+      ) : null}
+
+      {freed !== null ? (
+        <Notice tone="ok">
+          Freed {formatBytes(freed)}. Your cards and progress are untouched.
+        </Notice>
+      ) : null}
+
       {confirmDelete ? (
         <Card>
           <Notice tone="error">

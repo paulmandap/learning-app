@@ -19,6 +19,8 @@ export interface StoredDocument {
   kind: DocumentKind;
   title: string;
   storage_path: string | null;
+  /** Size of the stored original. Null once freed, or if uploaded before 0009. */
+  byte_size: number | null;
   page_count: number;
   status: DocumentStatus;
   unreadable_pages: number[];
@@ -45,7 +47,7 @@ async function currentUserId(): Promise<string> {
 export async function listDocuments(studySetId: string): Promise<StoredDocument[]> {
   const { data, error } = await supabase
     .from('documents')
-    .select('id, study_set_id, kind, title, storage_path, page_count, status, unreadable_pages, created_at')
+    .select('id, study_set_id, kind, title, storage_path, byte_size, page_count, status, unreadable_pages, created_at')
     .eq('study_set_id', studySetId)
     .order('created_at', { ascending: true });
 
@@ -70,7 +72,7 @@ export async function createDocument(input: {
       status: 'uploaded',
       page_count: 0,
     })
-    .select('id, study_set_id, kind, title, storage_path, page_count, status, unreadable_pages, created_at')
+    .select('id, study_set_id, kind, title, storage_path, byte_size, page_count, status, unreadable_pages, created_at')
     .single();
 
   if (error) throw new Error(error.message);
@@ -100,11 +102,77 @@ export async function uploadOriginal(
 
   const { error: updateError } = await supabase
     .from('documents')
-    .update({ storage_path: path })
+    // byte_size is recorded here and nowhere else, so the per-user total is one
+    // `sum` rather than a walk over every prefix in the bucket.
+    .update({ storage_path: path, byte_size: file.size })
     .eq('id', documentId);
 
   if (updateError) throw new Error(updateError.message);
   return path;
+}
+
+/**
+ * How many bytes of originals this user is keeping.
+ *
+ * Rows uploaded before `byte_size` existed report null and count as 0. That
+ * under-reports rather than guessing: the sizes are not recoverable through
+ * PostgREST, and a wrong total would refuse uploads for no visible reason.
+ *
+ * Degrades to 0 rather than throwing — a usage figure is not worth blocking an
+ * upload over, and the per-file limit still applies.
+ */
+export async function storageUsedBytes(): Promise<number> {
+  const { data, error } = await supabase.from('documents').select('byte_size');
+  if (error) {
+    console.warn(`[storage] could not read usage: ${error.message}`);
+    return 0;
+  }
+  return ((data ?? []) as { byte_size: number | null }[]).reduce(
+    (total, row) => total + (row.byte_size ?? 0),
+    0,
+  );
+}
+
+/**
+ * Free the space a set's originals take, and keep everything else.
+ *
+ * The insight this is built on: what fills a 1 GB bucket is the PDF, and a PDF
+ * is 20-50 MB while the cards, answers and schedules made from it are kilobytes
+ * in a different quota entirely. So there is no reason for "I need space" to
+ * mean "delete my study set" — the two are not the same resource.
+ *
+ * What is lost is exactly one thing: "Open page" can no longer show the
+ * original, and a card made from an image no longer shows its picture. Both
+ * already check `storage_path` before offering anything, so nulling it degrades
+ * them rather than breaking them — see openPage in the study screens.
+ *
+ * What is kept: every card, every answer, every review schedule, and the page
+ * text the cards were grounded in. The source excerpt on each card still comes
+ * from the user's own notes, because `document_pages` is untouched.
+ *
+ * Returns the number of bytes released.
+ */
+export async function freeUpSpace(studySetId: string): Promise<number> {
+  const docs = await listDocuments(studySetId);
+  const withFiles = docs.filter((d) => d.storage_path);
+  if (withFiles.length === 0) return 0;
+
+  const paths = withFiles.map((d) => d.storage_path!);
+  const { error } = await supabase.storage.from('documents').remove(paths);
+  // A file already gone is not a failure — the point is that it is not there
+  // any more. But a real failure must not leave storage_path pointing at
+  // nothing, so the row update is skipped and the caller sees zero freed.
+  if (error) throw new Error(error.message);
+
+  const { error: updateError } = await supabase
+    .from('documents')
+    .update({ storage_path: null, byte_size: null })
+    .in('id', withFiles.map((d) => d.id));
+
+  if (updateError) throw new Error(updateError.message);
+
+  // Summed from what was read before the update, since the rows now say null.
+  return withFiles.reduce((total, d) => total + (d.byte_size ?? 0), 0);
 }
 
 /** A short-lived signed URL. The bucket is private; there are no public links. */

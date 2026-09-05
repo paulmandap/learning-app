@@ -360,10 +360,33 @@ async function main() {
 
   try {
     await page.goto(route);
+
+    // `--wait-for "<text>"` holds until that text appears. A data-driven screen
+    // renders "Loading…" first, and a screenshot taken then is a screenshot of
+    // nothing — which is exactly what happened the first time the dashboard was
+    // captured.
+    const waitText = flag('--wait-for');
+    if (waitText) {
+      await page.waitFor(
+        `document.querySelector('#root').innerText.includes(${JSON.stringify(waitText)}) ? 'y' : ''`,
+        `"${waitText}" on screen`,
+      );
+    }
+
     await page.screenshot(out);
 
     console.log(`--- ${route} ---`);
     console.log(await page.text());
+
+    // `--eval "<expression>"` runs anything in the page and prints the result.
+    // For working out why a screen shows what it shows: the alternative is
+    // guessing at which of four queries came back empty, which has already
+    // cost one wrong conclusion here.
+    const expression = flag('--eval');
+    if (expression) {
+      console.log('\n--- eval ---');
+      console.log(JSON.stringify(await page.evaluate(expression, true), null, 2));
+    }
 
     const logs = page.logs();
     if (logs.length > 0) {

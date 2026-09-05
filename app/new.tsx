@@ -5,6 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Body, Button, Card, Field, Notice, Screen, Title } from '../src/ui/components';
 import { useTheme } from '../src/ui/theme';
 import { fetchProfile } from '../src/data/profile';
+import { storageUsedBytes } from '../src/data/documents';
+import { checkUpload } from '../src/core/storage';
 import { createSet } from '../src/data/sets';
 import {
   addDocumentToSet,
@@ -33,6 +35,12 @@ export default function NewSet() {
   const addingToExisting = typeof existingSetId === 'string' && existingSetId.length > 0;
   const t = useTheme();
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
+  // Fetched up front so a file can be refused the instant it is chosen, rather
+  // than after it has been sent. Shared query key with the Progress screen.
+  const { data: usedBytes = 0 } = useQuery({
+    queryKey: ['storageUsed'],
+    queryFn: storageUsedBytes,
+  });
 
   const [text, setText] = useState('');
   const [file, setFile] = useState<{ blob: Blob; name: string; mime: string } | null>(null);
@@ -53,6 +61,19 @@ export default function NewSet() {
     input.onchange = () => {
       const f = input.files?.[0];
       if (!f) return;
+
+      // Refused HERE, before a single byte is sent. Supabase Free gives 1 GB of
+      // file storage for the WHOLE project, so a bucket filled by one person
+      // fails for everyone else — and the error would land on whoever uploaded
+      // next rather than on whoever filled it.
+      const verdict = checkUpload({ fileBytes: f.size, usedBytes });
+      if (!verdict.ok) {
+        setError(verdict.message);
+        setFile(null);
+        return;
+      }
+
+      setError(null);
       setFile({ blob: f, name: f.name, mime: f.type || 'application/pdf' });
       if (!title) setTitle(f.name.replace(/\.[^.]+$/, ''));
     };
@@ -64,6 +85,18 @@ export default function NewSet() {
       setError('Add your Gemini key in Settings first.');
       return;
     }
+    // Backstop. The check at pick time uses whatever usage figure had loaded by
+    // then, and if that query was still in flight it saw 0 — so a large file
+    // could clear a per-user test it should have failed.
+    if (file) {
+      const fresh = await storageUsedBytes();
+      const verdict = checkUpload({ fileBytes: file.blob.size, usedBytes: fresh });
+      if (!verdict.ok) {
+        setError(verdict.message);
+        return;
+      }
+    }
+
     setBusy(true);
     setError(null);
 

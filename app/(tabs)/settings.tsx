@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Linking } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, Field, Notice, Screen, Title } from '../src/ui/components';
-import { fetchProfile, saveGeminiKey } from '../src/data/profile';
-import { deleteAllMyData } from '../src/data/sets';
-import { supabase } from '../src/data/supabase';
-import { GeminiBrowserProvider } from '../src/ai/gemini';
-import { reasonToMessage } from '../src/core/ai-errors';
+import { Body, Button, Card, Field, Notice, Screen, Title } from '../../src/ui/components';
+import { fetchProfile, saveGeminiKey } from '../../src/data/profile';
+import { deleteAllMyData } from '../../src/data/sets';
+import { supabase } from '../../src/data/supabase';
+import { GeminiBrowserProvider } from '../../src/ai/gemini';
+import { reasonToMessage } from '../../src/core/ai-errors';
 
 type TestState =
   | { kind: 'idle' }

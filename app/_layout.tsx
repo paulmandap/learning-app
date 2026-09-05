@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useColorScheme, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { startSessionListener, useSessionStore } from '../src/data/session';
-import { HeaderBackButton, HeaderGlyphButton, HeaderTitle } from '../src/ui/menu';
+import { HeaderBackButton } from '../src/ui/menu';
 import { useTheme } from '../src/ui/theme';
 
 const queryClient = new QueryClient({
@@ -49,7 +49,6 @@ const backable = {
 
 function RootNavigator() {
   const t = useTheme();
-  const router = useRouter();
   useAuthRedirect();
 
   return (
@@ -72,29 +71,17 @@ function RootNavigator() {
           contentStyle: { backgroundColor: t.bg },
         }}
       >
-        {/* Global navigation lives HERE, in the header — not as buttons in the
-            scroll view mixed among content actions. The gear is the only way to
-            Settings, and Sign out lives inside Settings rather than on Home. */}
-        <Stack.Screen
-          name="index"
-          options={{
-            title: 'Study',
-            // Home has no back control, so its title needs the same inset the
-            // gear gets — otherwise the header is aligned on the right and not
-            // the left. Every other screen has a chevron, and the title is laid
-            // out after it, so it inherits the alignment for free.
-            headerTitle: () => <HeaderTitle>Study</HeaderTitle>,
-            headerRight: () => (
-              <HeaderGlyphButton
-                glyph="⚙︎"
-                accessibilityLabel="Settings"
-                onPress={() => router.push('/settings')}
-              />
-            ),
-          }}
-        />
+        {/* Global navigation lives in app/(tabs)/_layout.tsx now — Study,
+            Progress and Settings, as a bottom bar on a phone and a rail on a
+            desktop (spec §2). It draws its own chrome, so the stack header is
+            hidden for the whole group.
+
+            What stays OUT of the tabs is deliberate: everything below is a
+            TASK with its own back control, not a place you navigate to. A
+            flashcard session covering the bar is the point — offering two ways
+            out mid-deck is a distraction rather than an option. */}
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="sign-in" options={{ title: 'Sign in', headerShown: false }} />
-        <Stack.Screen name="settings" options={{ title: 'Settings', ...backable }} />
         <Stack.Screen name="new" options={{ title: 'New set', ...backable }} />
         {/* Title is set by the screen itself, to the set's own name. */}
         <Stack.Screen name="set/[id]/index" options={{ title: '', ...backable }} />

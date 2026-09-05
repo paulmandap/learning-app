@@ -1,13 +1,13 @@
 import { useRouter } from 'expo-router';
 import { Pressable } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { Body, Button, Card, ListRow, Notice, Screen } from '../src/ui/components';
-import { fetchProfile } from '../src/data/profile';
-import { listSets, type StudySet } from '../src/data/sets';
-import { continueTarget } from '../src/data/attempts';
-import { dueCountsBySet } from '../src/data/review';
-import { useSessionStore } from '../src/data/session';
-import { formatSetTitle } from '../src/core/title';
+import { Body, Button, Card, ListRow, Notice, Screen, Title } from '../../src/ui/components';
+import { fetchProfile } from '../../src/data/profile';
+import { listSets, type StudySet } from '../../src/data/sets';
+import { continueTarget } from '../../src/data/attempts';
+import { dueCountsBySet } from '../../src/data/review';
+import { useSessionStore } from '../../src/data/session';
+import { formatSetTitle } from '../../src/core/title';
 
 export default function Home() {
   const router = useRouter();
@@ -42,8 +42,11 @@ export default function Home() {
 
   return (
     <Screen>
-      {/* No <Title> here: the navigation header already says "Study", and
-          printing it twice wasted the first screenful. */}
+      {/* The heading moved into the body when this became a tab. The stack
+          header used to carry it, but a tab root has no back control and no
+          header of its own, so the screen has to name itself. */}
+      <Title>Study</Title>
+
       {!profileLoading && !hasKey ? (
         <Notice tone="warn">Add your Gemini key in Settings before making study sets.</Notice>
       ) : null}
@@ -85,9 +88,10 @@ export default function Home() {
           />
         ))
       )}
-      {/* Settings and Sign out used to sit here as full-width buttons. Settings
-          is now the header gear; Sign out lives inside Settings, where it
-          already was. View-level navigation does not belong in the content. */}
+      {/* Settings and Sign out used to sit here as full-width buttons, then as
+          a header gear. Both are now the Settings tab. Sign out stays inside
+          Settings, where it already was. View-level navigation does not belong
+          in the content. */}
     </Screen>
   );
 }

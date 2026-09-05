@@ -1210,6 +1210,137 @@ silently reordered.
 **Verified:** typecheck clean · **326 tests** (322 before) · `expo export` ·
 boot test green · deployed · bundle hash `ed5e7e0d…` matches local.
 
+## 12. Phase 9b — navigation, a dashboard, and storage that does not cost you your history
+
+The owner's brief: *"the app is too basic … maybe add a dashboard or something?
+so that the user may get motivated"*, plus global navigation and — added
+mid-build — per-file and per-user storage limits.
+
+> **APPLY 0008 AND 0009 BEFORE DEPLOYING.** `listDocuments` selects
+> `byte_size`, so a build carrying this code against a database without 0009
+> degrades every screen that reads documents. Same class as 0007, not 0006.
+
+### 12.1 The measurement that decided how the dashboard groups
+
+The obvious grouping for "what am I weak at" is `topic`, which every card
+already carries. Measured on the real stored cards:
+
+| Set | Items | Distinct topics |
+|---|---|---|
+| A | 17 | **17** |
+| B | 11 | 9 |
+
+**Every card invents its own label.** "Flower function", "Flower role",
+"Reproductive organ" and "Reproductive organ failure" are four labels for one
+concept, because generation rule 9 asks each item for a topic and never asks it
+to reuse one. Any per-topic accuracy is therefore computed over n=1.
+
+This is why `topic_stats` — defined in 0003, `security_invoker`, isolation-tested
+since Phase 1 — **has never been read by a single line of application code.** It
+was built on a column that cannot carry it.
+
+`section_title` groups properly (4–17 items per section, and about eight sections
+on a real 10-page PDF), is already stored on every item, and needed no change.
+The dashboard uses it. `topic` is left alone: fixing it means constraining the
+generation prompt, which is the riskiest file in the project, for finer grouping
+nobody has asked for.
+
+**The guard that came out of this**: `MIN_SECTION_ATTEMPTS = 3`. A section is not
+ranked until it has been answered three times. Without it one lucky answer reads
+as mastery and one slip reads as a weakness — the same n=1 trap, one level up.
+
+### 12.2 Storage: the limit is set by the reader, not the bucket
+
+The owner's research suggested 25–50 MB per file. The app's real ceiling is
+lower and comes from somewhere else: `MAX_INLINE_BYTES` caps a Gemini inline
+request at 15 MB and `readDocument` throws above it, so **a 40 MB PDF cannot
+become cards at all**, whatever the bucket has room for. Accepting one would
+spend storage on something the app then refuses, failing later and less clearly.
+`MAX_FILE_BYTES` is therefore 15 MB, and a test asserts it never exceeds the
+reader's cap so the two cannot drift apart.
+
+Per-user: **150 MB**, the low end of the suggested 150–200. Five users at 200 MB
+is exactly the 1 GB the whole project has, leaving nothing for a sixth person or
+for space a delete has not yet reclaimed. At 150 MB, five users reach 750 MB.
+
+Refused **before** the upload starts, at the moment the file is picked, with a
+second check before `addDocumentToSet` in case the usage query had not loaded
+yet. The bucket is shared, so the failure without a limit lands on whoever
+uploads next rather than on whoever filled it.
+
+### 12.3 Freeing space must not cost the studying
+
+The owner asked whether there was an alternative to deleting finished sets. There
+is, and it follows from noticing that **the file and the cards are different
+resources**: a PDF is 20–50 MB of the 1 GB file bucket, while the cards, answers
+and schedules made from it are kilobytes of the separate 500 MB database.
+
+So "Free up space" deletes the stored originals and nulls `storage_path`, and
+keeps every card, answer, review schedule and page of extracted text. What is
+lost is exactly one thing: "Open page" can no longer show the original, and a
+card from an image no longer shows its picture. Both already checked
+`storage_path` before offering anything, so this degrades them rather than
+breaking them — the defensive code was already there from Phase 7a.
+
+### 12.4 A streak that survives tidying up
+
+The owner: *"even if they had deleted the flashcard, the dashboard must still
+count that."* He was right to raise it. `attempts` cascades from `study_sets`, so
+**deleting a set deletes the days its answers happened on** — a student who
+tidied up would watch their streak reset as a punishment for being tidy.
+
+`study_days` (0009) records one row per user per day studied and references
+`auth.users` and nothing else. No set, no item, nothing that can cascade; a
+future column pointing at study material would undo the entire design. It is also
+cheaper than what it replaced, which pulled every attempt row ever recorded to
+count distinct days. `touch_study_day()` increments it atomically, because
+PostgREST cannot express `answers = answers + 1` in an upsert and two tabs would
+race a read-then-write. 0009 backfills from existing attempts so nobody's current
+streak is reset by the migration meant to protect it.
+
+The dashboard falls back to `attempts` when `study_days` is missing, because the
+alternative is telling someone with months of history that they have never
+studied.
+
+### 12.5 Three defects found by looking, none by tests
+
+1. **A blank page.** The tab bar was built as a `<Bar>` component wrapping the
+   triggers. `Tabs` discovers its routes by walking its own children for a
+   `TabList` and reading the `TabTrigger`s inside, so the wrapper hid all three:
+   *"Couldn't find any screens for the navigator"*, and nothing rendered.
+   **`tests/boot.test.ts` caught this** — the blank-page guard doing exactly the
+   job it was written for.
+2. **A sidebar spread down the whole window**, Study at the top and Settings
+   pinned to the bottom, because `TabList` brings its own justification and the
+   style did not override it. Typecheck and 372 tests were green. Only the
+   screenshot showed it.
+3. **A silently empty dashboard.** The first run showed no sections and no retry
+   count against data that had plenty of both. `fetchDashboard` swallowed four
+   query errors, so a failed query and an empty one looked identical — the
+   project's own recorded lesson, repeated. Each now warns by name. The cause was
+   a transient `item_stats` failure that has not recurred; it would now say so.
+
+### 12.6 Navigation
+
+Spec §2 has always specified this — *"Desktop uses a centered ≤720px content
+column, sidebar nav; mobile uses bottom tabs"* — and it was never built. Study ·
+Progress · Settings, as a bottom bar under 800px and a rail beside the content
+above it.
+
+Built from `expo-router/ui`'s headless `Tabs`, with **no new dependency**:
+`@react-navigation/bottom-tabs` is not installed, and adding it would buy a
+default appearance this project would then override. The whole bar is about
+seventy lines, and one flex-direction switch gives both of the spec's layouts.
+
+`set/[id]/*` stays in the root stack, so a deck covers the bar. Everything that
+is a *place* is a tab; everything that is a *task* is pushed and keeps its own
+back control. Verified on the built bundle: the flashcards screen shows the back
+chevron and no tab bar.
+
+**Verified:** typecheck clean · **372 tests** (326 before) · `expo export` · boot
+test green · screenshots at 430px and 1280px. Not yet deployed — 0008 and 0009
+are owner actions and 0009 must land first.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

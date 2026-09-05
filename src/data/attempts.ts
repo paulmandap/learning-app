@@ -120,6 +120,20 @@ export async function recordAttempt(input: {
 
   if (error) throw new Error(error.message);
 
+  // --- mark the day studied ------------------------------------------------
+  // Separate from the attempt row on purpose. `attempts` cascades from
+  // study_sets, so deleting a set erases the days its answers happened on and
+  // would reset a streak as a punishment for tidying up. `study_days`
+  // references only auth.users, so it survives.
+  //
+  // Best effort, and after the attempt: the attempt is the record of truth.
+  try {
+    await supabase.rpc('touch_study_day');
+  } catch {
+    // A missing streak day is not worth losing an answer over. It also lets
+    // this ship before 0009 is applied.
+  }
+
   // --- advance the schedule ------------------------------------------------
   // After the attempt row, never instead of it: the attempt is the record of
   // truth and the missed pile (D8) is built from it, so it must land first.
