@@ -77,6 +77,32 @@ export const MODELS = {
   strong: 'gemini-3.5-flash',
 } as const;
 
+/**
+ * Models tried, in order, when the one before is rate-limited or overloaded.
+ *
+ * D11 specifies two model ids and this adds a fallback list, so it is a
+ * deliberate deviation. The evidence for it: over one afternoon of testing the
+ * pinned `light` model returned 503 UNAVAILABLE repeatedly, then 429
+ * RESOURCE_EXHAUSTED three times in a row, and two document reads died with
+ * "Gemini is busy right now" — while a sweep at that same moment found six
+ * other models answering in under three seconds. A user could not make cards,
+ * and the allowance to make them existed the whole time on a neighbouring id.
+ *
+ * Order is deliberate. Flash-class models of comparable capability come first
+ * so a fallback changes availability rather than quality; `flash-lite` is last
+ * because it is the weakest, and a weaker card still beats no card at all.
+ *
+ * Quota is per model, not per project, which is what makes this work — a 429 on
+ * one id says nothing about the next. Preview models stay out (more restrictive
+ * limits, unapproved), as do the 404 2.5-series ids.
+ */
+export const LIGHT_LADDER: readonly string[] = [
+  MODELS.light,
+  'gemini-3.7-flash',
+  'gemini-3.8-flash',
+  'gemini-3.5-flash-lite',
+];
+
 export type ModelTier = keyof typeof MODELS;
 
 /** Base URL for the Gemini REST API. */

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GeminiBrowserProvider, extractModelNames } from '../src/ai/gemini';
-import { MODELS } from '../src/ai/models';
+import { LIGHT_LADDER, MODELS } from '../src/ai/models';
 import { RateLimitedError } from '../src/core/queue';
 import modelsOk from './fixtures/gemini-models-ok.json';
 import invalidKey from './fixtures/gemini-invalid-key.json';
@@ -186,5 +186,83 @@ describe('MODELS config', () => {
       expect(PERMANENTLY_GONE, `${id} does not exist on the free tier`).not.toContain(id);
       expect(VERIFIED_SERVING, `${id} has never been seen to serve a real call`).toContain(id);
     }
+  });
+});
+
+describe('model fallback ladder', () => {
+  const pdf = { file: new Blob(['%PDF-1.4']), mime: 'application/pdf' };
+
+  const busy = (status: number) => ({
+    status,
+    body: { error: { code: status, message: 'busy', status: status === 429 ? 'RESOURCE_EXHAUSTED' : 'UNAVAILABLE' } },
+  });
+  const good = {
+    status: 200,
+    body: {
+      candidates: [{ content: { parts: [{ text: JSON.stringify({ pages: [
+        { page_index: 0, headings: [], blocks: [{ type: 'paragraph', text: 'Hello.' }], readability: 1 },
+      ] }) }] } }],
+    },
+  };
+
+  /** Replays a scripted sequence of responses and records the models called. */
+  function scripted(sequence: { status: number; body: unknown }[]) {
+    const calls: string[] = [];
+    let i = 0;
+    const impl = vi.fn(async (url: string) => {
+      calls.push(String(url).match(/models\/([^:]+):/)?.[1] ?? '?');
+      const next = sequence[Math.min(i++, sequence.length - 1)]!;
+      return new Response(JSON.stringify(next.body), {
+        status: next.status,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    return { impl, calls };
+  }
+
+  it('moves to the next model when the first is rate-limited', async () => {
+    // Quota is per model, so a 429 on one id says nothing about the next. This
+    // is the case that left a user unable to make cards while allowance existed
+    // one id over.
+    const { impl, calls } = scripted([busy(429), good]);
+    const result = await new GeminiBrowserProvider('k', { fetchImpl: impl }).readDocument(pdf);
+
+    expect(calls).toEqual([LIGHT_LADDER[0], LIGHT_LADDER[1]]);
+    expect(result.pages).toHaveLength(1);
+  });
+
+  it('moves on for an overloaded model too', async () => {
+    const { impl, calls } = scripted([busy(503), busy(503), good]);
+    await new GeminiBrowserProvider('k', { fetchImpl: impl }).readDocument(pdf);
+    expect(calls).toEqual([LIGHT_LADDER[0], LIGHT_LADDER[1], LIGHT_LADDER[2]]);
+  });
+
+  it('reports busy only once every model is exhausted', async () => {
+    const { impl, calls } = scripted([busy(429)]);
+    await expect(
+      new GeminiBrowserProvider('k', { fetchImpl: impl }).readDocument(pdf),
+    ).rejects.toBeInstanceOf(RateLimitedError);
+
+    // Every candidate was tried before giving up — and CallQueue then applies
+    // its backoff and retries the whole ladder.
+    expect(calls).toEqual([...LIGHT_LADDER]);
+  });
+
+  it('does NOT walk the ladder for a bad key', async () => {
+    // Four models with the same invalid key is four times the wait for the same
+    // answer. A non-retryable failure has to stop immediately.
+    const { impl, calls } = scripted([{ status: 400, body: invalidKey }]);
+    await expect(
+      new GeminiBrowserProvider('bad', { fetchImpl: impl }).readDocument(pdf),
+    ).rejects.not.toBeInstanceOf(RateLimitedError);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('starts with the pinned light model, and lists no preview ids', () => {
+    expect(LIGHT_LADDER[0]).toBe(MODELS.light);
+    for (const id of LIGHT_LADDER) {
+      expect(id).not.toMatch(/preview|latest/);
+    }
+    expect(new Set(LIGHT_LADDER).size).toBe(LIGHT_LADDER.length);
   });
 });

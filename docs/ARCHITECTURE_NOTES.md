@@ -482,6 +482,126 @@ binding.
   in the live app, because that wording lives in React Native code the script deliberately does
   not import.
 
+## 6. Diagrams: what the pipeline actually does with a labelled figure
+
+Tested 2026-09-05, on `gemini-3.6-flash`. Diagrams had never been exercised — spec §6
+postpones *diagram/label questions* — so nothing was known about what happens today. Four
+synthetic documents were used, authored here so every label and function is known exactly and a
+card can be checked against the truth rather than argued about. Source: `assets/`-adjacent
+scratch HTML rendered to PDF/PNG with headless Chrome.
+
+### 6.1 The headline: diagrams work, as text
+
+**A labelled diagram becomes ordinary text cards, and they are good ones.** The READ stage
+already transcribes figures — `READ_SYSTEM_PROMPT` asks for "the caption plus any labels
+legible in the image" — so labels and their functions reach the stored page text and generation
+treats them like any other notes.
+
+| Document | Cards | Organs covered (of 6) | Notes |
+|---|---|---|---|
+| Reviewer PDF, prose + figure, 2pp | 14 | 6/6 | prose carried the organs; no card cited the figure |
+| Diagram alone, PNG | 10 | 5/6 | 6th has no function drawn, so nothing to ask |
+| Diagram as a simulated phone photo (skew, warm cast, soft focus, glare) | 6 | 5/6 | readability still scored 1.0 |
+| Lab sheet PDF, figure isolated on p.2 | 14 | 6/6 | **all 14 cards correctly cited p.2** |
+
+Canaries planted in the documents (`Specimen VR-118`, a stomatal density of `320`, an invented
+"Vance's rule") appeared in the extracted text and in cards, confirming the model was reading
+the page rather than reciting general plant biology.
+
+**What does NOT happen: the card never shows the picture.** Cards are text. A student is asked
+"which organ is the primary photosynthetic organ?", not shown the drawing with a part
+highlighted. Showing the image would need page images stored, which spec §4 explicitly forbids
+in the MVP, and label-position questions are the postponed feature in §6. The diagram is still
+reachable from a card — the source chip's "Open page" opens the original file — but that is a
+link, not a card face.
+
+### 6.2 Defect found and fixed: a label and its meaning are separate sentences
+
+`splitSentences` treats a line break as a sentence boundary, so a figure transcribed as
+
+```
+LEAF
+primary photosynthetic organ
+```
+
+becomes two sentences. A card answering *"the leaf"* and citing the function line shares **no
+words at all** with it, scores exactly 0 against the 0.22 support threshold, and was dropped
+despite being correct. Measured on the PNG: 7 cards, 1 dropped, 4/6 organs. After the fix: **10
+cards, 0 dropped, 5/6 organs**, with the excerpt now reading
+`"LEAF primary photosynthetic organ STEM"` — the label reunited with its meaning.
+
+This is not a diagram-only problem. Glossaries, vocabulary lists and any term/definition notes
+have exactly the same shape.
+
+`resolveSource` now widens to the neighbouring sentences (bounded at one either side) when the
+cited sentence alone does not support the answer. The grounding guarantee is unchanged: text is
+still resolved from the user's own stored notes and cannot be fabricated, and the threshold is
+untouched. One existing test asserted the opposite — that an off-by-one citation must fail —
+and was changed deliberately, with the trade-off written into the test.
+
+Incidental finding while writing the replacement bound test: a citation scored **0.25** purely
+because the answer and the sentence both contained the word "node". At a 0.22 threshold a
+single shared common word can carry a short answer. That was true before this change too.
+
+### 6.3 Defect found and fixed: course admin became flashcards
+
+The lab-sheet PDF produced 20 cards of which roughly **8 were housekeeping** — "how many marks
+are given for artistic quality", "what must students bring", "on which day was the specimen
+fixed". Real study material is full of this: headers, instructions, marking schemes, room
+numbers. The generation prompt had no reason to ignore any of it.
+
+Two rules were added to `buildGeneratePrompt`: make cards about the subject rather than the
+course, and treat a figure's label/function pairings as the examinable material they are. Same
+document afterwards: **14 cards, all subject matter, zero housekeeping**, and taproot — never
+covered before — picked up.
+
+### 6.4 Conditions, and what is still unverified
+
+The free tier misbehaved throughout. One run returned **0 cards after 166 s**, which looked
+like the new prompt suppressing everything and was in fact the 10/20/40 s retry ladder against
+503s; a rerun of the identical document gave 14 cards. Two later runs died with "Gemini is busy
+right now", and a one-token probe then returned **429 RESOURCE_EXHAUSTED** three times in a
+row — the day's quota, spent on these tests.
+
+The 429s turned out to be a **per-minute token limit, not the day's quota**: a sweep minutes
+later found the pinned model serving again, alongside six other ids answering in under three
+seconds. That observation is what produced §6.5.
+
+**Prose regression: checked, and there is none.** With the fallback ladder in place
+`diagram-reviewer.pdf` produced **20 cards, 0 dropped, 6/6 organs in 21.4 s** — better than the
+14 it gave before the prompt rules existed.
+
+Getting there required correcting a wrong conclusion, which is worth recording. An intermediate
+run of the same document gave only 7 cards and 3/6 organs, and the obvious reading was that the
+new prompt rules were suppressing content. They were not: that run had been served largely by
+`gemini-3.5-flash-lite`, the ladder's weakest rung. Two variables had changed at once and the
+provider gave no way to tell which model answered. It does now — a fallback logs which rung
+served — and with that visible the picture inverted immediately.
+
+## 6.5 Model fallback ladder (deviation from D11)
+
+D11 specifies two model ids. `LIGHT_LADDER` in `src/ai/models.ts` adds an ordered list tried in
+turn when a call is rate-limited or overloaded, which is a deliberate deviation with this
+evidence behind it:
+
+- The pinned `light` model returned 503 UNAVAILABLE repeatedly, then 429 RESOURCE_EXHAUSTED
+  three times in a row.
+- Two document reads died with "Gemini is busy right now" — a user who cannot make cards.
+- A sweep **at that same moment** found `gemini-3.7-flash` at 1.3 s, `gemini-3.8-flash` at
+  2.5 s and four others healthy. **Quota is per model, so the allowance to serve that user
+  existed the whole time, one id over.**
+
+`#generateContentWithFallback` walks the ladder on a retryable failure only. A non-retryable
+one — an invalid key, a malformed request — throws immediately, because trying four models with
+the same bad key just makes a typo take four times as long to report. Only when every rung is
+exhausted does `RateLimitedError` escape to `CallQueue`, which then applies its 10/20/40 s
+backoff and retries the whole ladder. Five offline tests pin this.
+
+**The rungs are not equivalent, and that matters.** Ordered so a fallback trades availability
+rather than quality where possible, with `flash-lite` last because it is the weakest — measured
+above at 7 cards against 20 for the same document. A weaker card still beats no card, which is
+why it stays on the ladder rather than being dropped.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

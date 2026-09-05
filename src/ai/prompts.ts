@@ -91,6 +91,16 @@ HARD RULES — an item breaking any of these is discarded:
 8. Set "check_flag" ONLY if the notes clearly contradict established knowledge, and say
    what the conflict is. Do not flag things you merely find surprising or incomplete.
 9. Each item needs a short "topic" — a two-to-four-word label for what it is about.
+10. Make cards about the SUBJECT, not about the course. Real study material is full
+    of housekeeping: instructions to students, marking schemes, what to bring, dates,
+    room numbers, how an assessment is run, who prepared a specimen. None of that is
+    worth memorising. Ask yourself whether knowing a sentence would help someone
+    understand the topic itself — if not, skip it and return fewer items.
+11. A figure or diagram is study material. When the notes label parts of something and
+    give a function or meaning for each, those pairings are exactly what gets examined,
+    so make cards from them. Ask for the part given its function, or the function given
+    its part. Where a label has no function printed beside it, only the name is known —
+    do not invent one.
 
 NOTES:
 ${pagesText}`;

@@ -12,7 +12,7 @@
  * the endpoint will not answer. Send nothing else.
  */
 
-import { GEMINI_API_BASE, MODELS } from './models';
+import { GEMINI_API_BASE, LIGHT_LADDER } from './models';
 import {
   classifyGeminiResponse,
   classifyThrownError,
@@ -172,7 +172,7 @@ export class GeminiBrowserProvider implements AIProvider {
       );
     }
 
-    const payload = await this.#generateContent(MODELS.light, {
+    const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
       systemInstruction: { parts: [{ text: READ_SYSTEM_PROMPT }] },
       contents: [
         {
@@ -217,7 +217,7 @@ export class GeminiBrowserProvider implements AIProvider {
       allowedForms: [...ALLOWED_FORMS],
     });
 
-    const payload = await this.#generateContent(MODELS.light, {
+    const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
         responseMimeType: 'application/json',
@@ -238,6 +238,43 @@ export class GeminiBrowserProvider implements AIProvider {
    * GeminiCallError otherwise. Retry-After is read opportunistically — the
    * browser is not given it, so the queue's fixed ladder is the real mechanism.
    */
+  /**
+   * Try each model in turn, falling through on a retryable failure.
+   *
+   * A 429 or a 503 on one model says nothing about the next — quota is per
+   * model — so exhausting the ladder before reporting "busy" turns a dead run
+   * into a slightly slower one. Only when every candidate is rate-limited does
+   * RateLimitedError escape to CallQueue, which then applies its backoff and
+   * retries the whole ladder.
+   *
+   * Non-retryable failures (an invalid key, a malformed request) throw
+   * immediately: trying three more models with the same bad key just makes a
+   * typo take four times as long to report.
+   */
+  async #generateContentWithFallback(models: readonly string[], body: unknown): Promise<unknown> {
+    let lastRateLimit: RateLimitedError | null = null;
+
+    for (const [i, model] of models.entries()) {
+      try {
+        const result = await this.#generateContent(model, body);
+        // A fallback is not a neutral event: the rungs differ in capability, so
+        // a run served by the last one can produce fewer and weaker cards than
+        // the same run served by the first. Without this, that difference is
+        // invisible and gets misread as a prompt or content problem — which is
+        // exactly what happened the first time this ladder was exercised.
+        if (i > 0) {
+          console.warn(`[gemini] ${models[0]} unavailable; served by ${model} (rung ${i + 1})`);
+        }
+        return result;
+      } catch (err) {
+        if (!(err instanceof RateLimitedError)) throw err;
+        lastRateLimit = err;
+      }
+    }
+
+    throw lastRateLimit ?? new RateLimitedError(null);
+  }
+
   async #generateContent(model: string, body: unknown): Promise<unknown> {
     // An overloaded model can sit for well over a minute before returning 503,
     // so a call without a deadline can stall a whole run indefinitely.
@@ -299,7 +336,7 @@ export class GeminiBrowserProvider implements AIProvider {
     rubric: Rubric;
     answer: string;
   }): Promise<GradeResult> {
-    const payload = await this.#generateContent(MODELS.light, {
+    const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
       contents: [
         {
           role: 'user',
