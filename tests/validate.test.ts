@@ -589,3 +589,75 @@ describe('an mcq with no options becomes a flashcard', () => {
     expect(dropped.some((d) => d.reason === 'over_budget')).toBe(true);
   });
 });
+
+describe('a written answer with no rubric becomes a flashcard', () => {
+  // Measured on real stored cards: 2 of 9 short_answer items (22%) had no
+  // usable rubric. buildGeneratePrompt rule 7 requires one and nothing checked
+  // it, so those reached the quiz and dead-ended it — "This question can't be
+  // marked. Skip it for now." Same salvage as an option-less MCQ above.
+  const withRubric = {
+    expected_concepts: [{ id: 'c1', text: 'It sets the rhythm' }],
+    model_answer: 'The sinoatrial node sets the rhythm.',
+  };
+
+  it('keeps the item, downgraded to flashcard, when the rubric is absent', () => {
+    const { kept, dropped } = validateItems(
+      [item({ kind: 'short_answer', rubric: undefined, source_sentence: 0 })],
+      pageTexts,
+      budget,
+    );
+    expect(dropped).toHaveLength(0);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.kind).toBe('flashcard');
+    expect(kept[0]!.rubric).toBeUndefined();
+  });
+
+  it('treats an empty concept list the same as a missing rubric', () => {
+    // A rubric object with nothing in it is exactly as unmarkable as no rubric,
+    // and gradeWritten would score it 0 of 0.
+    const { kept } = validateItems(
+      [
+        item({
+          kind: 'short_answer',
+          rubric: { expected_concepts: [], model_answer: 'Anything.' },
+          source_sentence: 0,
+        }),
+      ],
+      pageTexts,
+      budget,
+    );
+    expect(kept[0]!.kind).toBe('flashcard');
+    expect(kept[0]!.rubric).toBeUndefined();
+  });
+
+  it('leaves a properly marked written answer alone', () => {
+    const { kept } = validateItems(
+      [item({ kind: 'short_answer', rubric: withRubric, source_sentence: 0 })],
+      pageTexts,
+      budget,
+    );
+    expect(kept[0]!.kind).toBe('short_answer');
+    expect(kept[0]!.rubric).toEqual(withRubric);
+  });
+
+  it('salvages rather than drops, so the card count does not fall', () => {
+    // The point of the salvage: the student keeps the card. Dropping would have
+    // cost 22% of written answers outright.
+    const { kept, dropped } = validateItems(
+      [
+        item({ kind: 'short_answer', rubric: undefined, source_sentence: 0 }),
+        item({
+          prompt: 'Second question about the pacemaker?',
+          kind: 'short_answer',
+          rubric: withRubric,
+          source_sentence: 0,
+        }),
+      ],
+      pageTexts,
+      budget,
+    );
+    expect(kept).toHaveLength(2);
+    expect(dropped).toHaveLength(0);
+    expect(kept.map((k) => k.kind)).toEqual(['flashcard', 'short_answer']);
+  });
+});

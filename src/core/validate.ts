@@ -382,6 +382,21 @@ export function validateItems(
       }
     }
 
+    // --- a written answer with nothing to mark it against ------------------
+    // Same failure, same salvage. The prompt requires a rubric on every
+    // "short_answer" (buildGeneratePrompt rule 7) and nothing checked it, so
+    // items arrived with the rubric missing entirely or holding zero expected
+    // concepts. Measured on real stored cards: 2 of 9 written answers, 22%.
+    //
+    // Those reached the quiz and dead-ended it — gradeAnswer has no checklist to
+    // mark against, so the screen says "This question can't be marked. Skip it
+    // for now." That is a card occupying a slot in the deck and giving nothing
+    // back. The prompt and answer are still a good pair, so it becomes a
+    // flashcard, exactly as an option-less MCQ does above.
+    if (item.kind === 'short_answer' && (item.rubric?.expected_concepts.length ?? 0) === 0) {
+      item = { ...item, kind: 'flashcard', rubric: undefined };
+    }
+
     // --- answer leak ------------------------------------------------------
     // Skipped for MCQ: the correct option is supposed to be visible among the
     // choices, and validateMultipleChoice already checks the prompt itself.

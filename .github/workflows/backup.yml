@@ -97,6 +97,49 @@ jobs:
           echo "schema.sql $(wc -c < schema.sql) bytes, data.sql $(wc -c < data.sql) bytes"
           echo "All eight tables and the Phase 8 columns are present."
 
+      - name: Check the rows actually came across
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+
+          # Everything above this point verifies STRUCTURE. A dump carrying every
+          # table definition and almost no rows would pass all of it, which is
+          # the "looks like protection" failure in its most dangerous form: the
+          # schema is reproducible from git, the rows are not.
+          #
+          # So compare what is in the dump against what is in the database, for
+          # the two tables holding data that cannot be regenerated — a student's
+          # cards and their answer history.
+
+          if ! command -v psql >/dev/null 2>&1; then
+            echo "::error::psql is not available on this runner, so the row counts cannot be verified."
+            exit 1
+          fi
+
+          fail=0
+          for t in study_items attempts; do
+            # pg_dump writes one row per line between the COPY header and a lone
+            # "\." terminator. Match the header loosely because the CLI has
+            # quoted the identifiers differently across versions.
+            dumped=$(awk -v tbl="$t" '
+              $0 ~ ("^COPY .*" tbl ".*FROM stdin;") { inblock = 1; next }
+              inblock && /^\\\.$/                   { inblock = 0 }
+              inblock                               { n++ }
+              END                                   { print n + 0 }
+            ' data.sql)
+
+            live=$(psql "$SUPABASE_DB_URL" -tAc "select count(*) from public.$t")
+
+            if [ "$dumped" != "$live" ]; then
+              echo "::error::$t: dump has $dumped row(s), database has $live. The backup is incomplete."
+              fail=1
+            else
+              echo "$t: $dumped row(s), matching the database."
+            fi
+          done
+          [ "$fail" -eq 0 ] || exit 1
+
       - name: Upload backup
         # v7 rather than v4: v4 declares Node 20, which GitHub deprecated and now
         # force-runs on Node 24 — a warning today, a broken backup whenever they

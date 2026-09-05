@@ -1122,6 +1122,94 @@ implementation rather than two that drift.
   from its weakest rung. The validator catches that class now, but rung quality
   still varies with how loaded the free tier is.
 
+## 11. Phase 9a — three holes closed (2026-09-05)
+
+Groundwork for Phase 9's dashboard. All three are things that would have shown up
+inside it as wrong numbers or dead cards.
+
+### 11.1 A written answer with nothing to mark it against
+
+Measured over the real stored cards: **2 of 9 `short_answer` items (22%) had no
+usable rubric** — the key absent entirely, not merely empty.
+
+`buildGeneratePrompt` rule 7 requires a rubric on every `short_answer`, and
+`validateItems` never checked it. This is the project's own principle going
+unenforced: *the prompt asks; the validator checks.*
+
+The consequence reached the user. `gradeAnswer` has no checklist to mark
+against, so the quiz shows *"This question can't be marked. Skip it for now."* —
+a card occupying a slot in the deck and giving nothing back, which would also
+have polluted every progress count in 9b.
+
+**Salvaged, not dropped**, following the exact precedent already in that function
+for an MCQ arriving with no options: the prompt and answer are a good pair, only
+the marking apparatus is missing, so it becomes a flashcard. Dropping would have
+cost 22% of written answers outright.
+
+`0008_salvage_unmarkable_short_answers.sql` applies the same salvage to rows
+stored before the check existed. It is a data statement rather than a schema
+change, is idempotent (every row it touches stops being a `short_answer`), and
+carries the verification query in a trailing comment.
+
+### 11.2 The backup verified structure but not data
+
+The check step confirmed that eight tables and both Phase 8 columns appeared and
+that neither file was empty. **A dump carrying every table definition and almost
+no rows would have passed all of it** — the most dangerous form of "looks like
+protection", because the schema is reproducible from git and the rows are not.
+
+A second step now counts rows in the dump's `COPY` block for `study_items` and
+`attempts` and compares each against a live `psql` count, failing on any
+disagreement. Those two tables hold what cannot be regenerated: a student's cards
+and their answer history.
+
+The awk was verified locally against both dump styles before it shipped, because
+a CI-only check is expensive to iterate on:
+
+| Case | Result |
+|---|---|
+| `COPY "public"."study_items" (…)` — Supabase CLI quoting | 3 of 3 counted |
+| `COPY public.study_items (…)` — plain pg_dump | 3 of 3 counted |
+| A table absent from the dump | reports 0, then fails against the live count |
+
+### 11.3 The browser harness is in the repo at last
+
+`scripts/screenshot.ts`, and `npm run screenshot`.
+
+Typecheck and the test suite have now missed three UI defects in a row — a
+diagram cropped to its top band, an image that collapsed to nothing, and a header
+that read `set/[id]/blanks` to the user. Each was obvious on sight. The harness
+that caught them was rebuilt from scratch in a temp directory three times and
+thrown away each time.
+
+No dependency: Node 22 ships a global `WebSocket` and Chrome ships the DevTools
+Protocol. It serves `dist/` with the SPA fallback `public/_redirects` provides in
+production, injects a test-user session into `localStorage` the way supabase-js
+stores one (the app is OTP-only, so there is no form a script could fill), and
+exposes `goto` / `fill` / `click` / `waitFor` / `screenshot` for probes that need
+to drive rather than only look.
+
+Two traps are encoded in it, both of which cost time when they were live:
+
+- **The answer-box selector excludes checkboxes.** `primeFeedback()` appends an
+  off-screen checkbox on every study screen, so a bare `input` selector matches
+  while the screen still says "Loading…" — the script then typed into nothing and
+  the run looked like an app bug.
+- **React tracks an input's value on the DOM node**, so assigning `.value` is
+  silently ignored. The native setter plus an `input` event is what reaches
+  `onChangeText`.
+
+### 11.4 Sequencing changed, deliberately
+
+The approved plan put global navigation in 9a and the dashboard in 9b. That would
+have shipped a tab bar whose only destinations were Study and Settings — a bar
+that navigates nowhere new. Navigation moves into 9b so it arrives with the third
+destination that justifies it. Same work, better order; flagged rather than
+silently reordered.
+
+**Verified:** typecheck clean · **326 tests** (322 before) · `expo export` ·
+boot test green · deployed · bundle hash `ed5e7e0d…` matches local.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)
