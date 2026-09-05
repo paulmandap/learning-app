@@ -23,6 +23,8 @@ import {
   ALLOWED_FORMS,
   buildGeneratePrompt,
   buildGradePrompt,
+  buildRubricCheckPrompt,
+  buildVariantPrompt,
   READ_SYSTEM_PROMPT,
 } from './prompts';
 import {
@@ -31,7 +33,11 @@ import {
   parseGradeResult,
   parseItemsLoose,
   parseReadResult,
+  parseRubricCheck,
+  parseVariantResult,
   READ_RESPONSE_SCHEMA,
+  RUBRIC_CHECK_RESPONSE_SCHEMA,
+  VARIANT_RESPONSE_SCHEMA,
 } from './schemas';
 import {
   type AIProvider,
@@ -39,8 +45,10 @@ import {
   type GeneratedItem,
   type GradeResult,
   type ReadResult,
+  type RubricCheckResult,
   type Rubric,
   type TestConnectionResult,
+  type VariantResult,
 } from './provider';
 
 /** Inline requests total 100 MB; PDFs are capped at 50 MB (verified 2026-09-03). */
@@ -362,6 +370,70 @@ export class GeminiBrowserProvider implements AIProvider {
 
     const parsed = parseGradeResult(payload);
     return { concepts_hit: parsed.concepts_hit, feedback: parsed.feedback };
+  }
+
+  /**
+   * Rewrite a question the student keeps missing (§3.3).
+   *
+   * Temperature is high here, and it is the only call in this file where that is
+   * true. Every other call wants the same input to give the same output;
+   * this one exists precisely because the first phrasing did not work, so a
+   * rewrite that lands near it is a wasted call.
+   */
+  async rephrasePrompt(input: {
+    prompt: string;
+    answer: string;
+    sourceExcerpt: string;
+  }): Promise<VariantResult | null> {
+    const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
+      contents: [{ role: 'user', parts: [{ text: buildVariantPrompt(input) }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: VARIANT_RESPONSE_SCHEMA,
+        temperature: 0.9,
+      },
+    });
+
+    return parseVariantResult(payload);
+  }
+
+  /**
+   * Second opinion on an Apply-tier marking checklist (D7's postponed pass).
+   *
+   * Temperature 0: whether a checklist point is supported by a sentence should
+   * not depend on when you ask. Same reasoning as grading.
+   */
+  async verifyRubric(input: {
+    prompt: string;
+    rubric: Rubric;
+    sourceExcerpt: string;
+    sourceText: string;
+  }): Promise<RubricCheckResult | null> {
+    const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: buildRubricCheckPrompt({
+                question: input.prompt,
+                expectedConcepts: input.rubric.expected_concepts,
+                modelAnswer: input.rubric.model_answer,
+                sourceExcerpt: input.sourceExcerpt,
+                sourceText: input.sourceText,
+              }),
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: RUBRIC_CHECK_RESPONSE_SCHEMA,
+        temperature: 0,
+      },
+    });
+
+    return parseRubricCheck(payload);
   }
 }
 

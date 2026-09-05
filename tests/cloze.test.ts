@@ -146,6 +146,32 @@ describe('gradeTypedAnswer — what is accepted outright', () => {
     expect(gradeTypedAnswer('sino atrial node', 'sino-atrial node').verdict).toBe('correct');
   });
 
+  it('treats a number spelled out as the same number', () => {
+    // Reported from real use: the notes said "60 seconds and 7 days", the
+    // student wrote it in words and was marked wrong.
+    expect(gradeTypedAnswer('sixty seconds', '60 seconds').verdict).toBe('correct');
+    expect(gradeTypedAnswer('60 seconds', 'sixty seconds').verdict).toBe('correct');
+    expect(gradeTypedAnswer('seven days', '7 days').verdict).toBe('correct');
+    expect(gradeTypedAnswer('twenty one', '21').verdict).toBe('correct');
+    expect(gradeTypedAnswer('twenty-one', '21').verdict).toBe('correct');
+    expect(gradeTypedAnswer('two thousand', '2000').verdict).toBe('correct');
+    expect(gradeTypedAnswer('one hundred twenty', '120').verdict).toBe('correct');
+  });
+
+  it('does not weld separate quantities together', () => {
+    // "and" ends a run, so "60 seconds and 7 days" stays two numbers rather
+    // than becoming one.
+    expect(gradeTypedAnswer('sixty seconds and seven days', '60 seconds and 7 days').verdict).toBe(
+      'correct',
+    );
+    expect(gradeTypedAnswer('sixty seconds and seven days', '67 days').verdict).not.toBe('correct');
+  });
+
+  it('still tells different numbers apart', () => {
+    expect(gradeTypedAnswer('seven days', '8 days').verdict).not.toBe('correct');
+    expect(gradeTypedAnswer('sixty', '16').verdict).not.toBe('correct');
+  });
+
   it('does not accept an empty answer for a non-empty one', () => {
     expect(gradeTypedAnswer('', 'xylem').verdict).toBe('incorrect');
     expect(gradeTypedAnswer('   ', 'xylem').verdict).toBe('incorrect');

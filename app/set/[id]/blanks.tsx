@@ -16,6 +16,7 @@ import { gradeFeedback, primeFeedback } from '../../../src/ui/feedback';
 import { space, type, useTheme } from '../../../src/ui/theme';
 import { listItems, type StudyItem } from '../../../src/data/items';
 import { recordAttempt } from '../../../src/data/attempts';
+import { fetchProfile } from '../../../src/data/profile';
 import { reviewStatesForSet } from '../../../src/data/review';
 import { reviewOrder } from '../../../src/core/schedule';
 import { gradeTypedAnswer, makeCloze, type Cloze } from '../../../src/core/cloze';
@@ -87,6 +88,10 @@ export default function Blanks() {
     queryKey: ['schedules', setId],
     queryFn: () => reviewStatesForSet(setId),
   });
+
+  // Only so a card missed three times can be rephrased (Phase 8). Shared query
+  // key, so this is a cache read rather than another round trip.
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
 
   /**
    * Which cards can be blanks at all.
@@ -167,6 +172,7 @@ export default function Blanks() {
       mode: 'blanks',
       result,
       answerText: typed,
+      apiKey: profile?.gemini_api_key ?? undefined,
     }).catch(() => {
       // Losing a log entry must not interrupt studying.
     });

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { GENERATE_RESPONSE_SCHEMA, parseItemsLoose, parseReadResult } from '../src/ai/schemas';
+import { GENERATE_RESPONSE_SCHEMA, parseItemsLoose, parseReadResult,
+  parseRubricCheck,
+  parseVariantResult,
+} from '../src/ai/schemas';
 import { validateItems, type CandidateItem } from '../src/core/validate';
 import type { TierBudget } from '../src/core/planner';
 
@@ -134,5 +137,49 @@ describe('dedup across concurrently-finishing sections', () => {
     expect(ok.kept).toHaveLength(1);
     expect(broken.kept).toHaveLength(0);
     expect(broken.dropped[0]!.reason).toBe('excerpt_unmatched');
+  });
+});
+
+// ------------------------------------------------- Phase 8 model replies --
+
+describe('parseVariantResult', () => {
+  it('accepts a rephrasing', () => {
+    expect(parseVariantResult({ prompt: 'Which tissue moves water up?' })).toEqual({
+      prompt: 'Which tissue moves water up?',
+    });
+  });
+
+  it('returns null rather than an empty prompt, so the card keeps its original', () => {
+    for (const bad of [{ prompt: '' }, { prompt: 42 }, {}, null, 'nope', { promt: 'typo' }]) {
+      expect(parseVariantResult(bad)).toBeNull();
+    }
+  });
+
+  it('ignores extra fields the model volunteers', () => {
+    // The answer, page and citation are not the model's to change, so anything
+    // it sends alongside the prompt is dropped here rather than downstream.
+    const r = parseVariantResult({ prompt: 'Q?', answer: 'tampered', page_index: 9 });
+    expect(r).toEqual({ prompt: 'Q?' });
+  });
+});
+
+describe('parseRubricCheck', () => {
+  it('accepts a check with flagged ids', () => {
+    expect(parseRubricCheck({ unsupported: ['c2'], note: 'Not in the source.' })).toEqual({
+      unsupported: ['c2'],
+      note: 'Not in the source.',
+    });
+  });
+
+  it('defaults missing fields to "nothing flagged"', () => {
+    expect(parseRubricCheck({})).toEqual({ unsupported: [], note: '' });
+  });
+
+  it('returns null on an unusable reply, leaving the rubric unchecked', () => {
+    // Not "false". An unparseable second opinion is not evidence against a card,
+    // and null lets a later pass try again.
+    for (const bad of [null, 'nope', { unsupported: 'c1' }, { unsupported: [1, 2] }]) {
+      expect(parseRubricCheck(bad)).toBeNull();
+    }
   });
 });

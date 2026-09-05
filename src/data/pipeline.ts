@@ -12,6 +12,7 @@ import {
   type DocumentKind,
 } from './documents';
 import { countItems, existingPrompts, insertItems } from './items';
+import { verifyRubrics } from './rubrics';
 import { getSet, markSectionComplete, updateSet, type StoredPlan } from './sets';
 
 /**
@@ -442,6 +443,27 @@ export async function generateSet(input: {
     status: allDone ? 'ready' : 'generating',
     plan: { ...plan, completedSectionIds: [...done], droppedSummary: summariseDrops(dropped) },
   });
+
+  // ------------------------------------- D7's second pass over Apply rubrics --
+  //
+  // Deliberately AFTER the set is marked ready. Spec §6 forbids buying the
+  // two-minute target by weakening the architecture, and the reverse holds too:
+  // an extra call per Apply item must not be added to the path that target
+  // measures. The cards are usable the moment the line above commits; this
+  // catches up behind them, and a card studied before it lands simply has no
+  // verdict yet, which is what rubric_verified = null means.
+  //
+  // Awaited rather than detached so a caller that wants to know can wait, and so
+  // the run is not cut off by the page navigating away the instant cards appear.
+  if (allDone && failure === null) {
+    const pass = await verifyRubrics({ setId, apiKey });
+    if (pass.checked > 0 || pass.failed > 0) {
+      console.warn(
+        `[pipeline] rubric check: ${pass.checked} checked, ${pass.flagged} flagged, ` +
+          `${pass.failed} could not be checked`,
+      );
+    }
+  }
 
   const totalMs = Date.now() - startedAt;
   const queueWaitMs = Math.max(

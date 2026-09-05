@@ -254,3 +254,57 @@ export function parseGradeResult(payload: unknown): { concepts_hit: string[]; fe
   if (parsed.success) return parsed.data;
   return { concepts_hit: [], feedback: '' };
 }
+
+// --------------------------------------------------------------- variant --
+
+export const variantResultSchema = z.object({
+  prompt: z.string().min(1),
+});
+
+/** One field. The answer, page and citation are not the model's to change. */
+export const VARIANT_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: { prompt: { type: 'string' } },
+  required: ['prompt'],
+} as const;
+
+/** Parse a rephrasing. Null when unusable — the card then keeps its original. */
+export function parseVariantResult(payload: unknown): { prompt: string } | null {
+  const parsed = variantResultSchema.safeParse(payload);
+  return parsed.success ? parsed.data : null;
+}
+
+// ---------------------------------------------------------- rubric check --
+
+export const rubricCheckSchema = z.object({
+  unsupported: z.array(z.string()).default([]),
+  note: z.string().default(''),
+});
+
+/**
+ * Shape requested for the Apply-tier rubric pass (D7).
+ *
+ * Ids and one sentence, nothing else. No reasoning field: §3.2.5 forbids
+ * storing or showing chain-of-thought, and the verdict is computed in
+ * src/core/rubric.ts from the ids alone.
+ */
+export const RUBRIC_CHECK_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    unsupported: { type: 'array', items: { type: 'string' } },
+    note: { type: 'string' },
+  },
+  required: ['unsupported', 'note'],
+} as const;
+
+/**
+ * Parse a rubric check.
+ *
+ * Defaults to "nothing flagged" rather than throwing. A malformed reply must not
+ * mark a rubric bad — an unparseable second opinion is not evidence against the
+ * card, and `rubric_verified` stays null so the pass can try again later.
+ */
+export function parseRubricCheck(payload: unknown): { unsupported: string[]; note: string } | null {
+  const parsed = rubricCheckSchema.safeParse(payload);
+  return parsed.success ? parsed.data : null;
+}

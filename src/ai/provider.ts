@@ -72,9 +72,40 @@ export class NotImplementedInPhase1 extends Error {
   }
 }
 
+/** A rephrasing of one card's question. Null when the model gave nothing usable. */
+export interface VariantResult {
+  prompt: string;
+}
+
+/**
+ * A second opinion on an Apply-tier marking checklist (D7).
+ *
+ * The model NAMES the points it cannot support; src/core/rubric.ts decides the
+ * verdict. Null when the reply could not be parsed, which leaves the rubric
+ * unchecked rather than marking it bad.
+ */
+export interface RubricCheckResult {
+  unsupported: string[];
+  note: string;
+}
+
 export interface AIProvider {
   testConnection(): Promise<TestConnectionResult>;
   readDocument(input: { file: Blob; mime: string } | { text: string }): Promise<ReadResult>;
   generateItems(input: GenerateInput): Promise<GeneratedItem[]>;
   gradeAnswer(input: { prompt: string; rubric: Rubric; answer: string }): Promise<GradeResult>;
+  /** Rewrite a question the student keeps missing, keeping its answer (§3.3). */
+  rephrasePrompt(input: {
+    prompt: string;
+    answer: string;
+    sourceExcerpt: string;
+  }): Promise<VariantResult | null>;
+  /** Check an Apply-tier rubric against its source (D7's postponed pass). */
+  verifyRubric(input: {
+    prompt: string;
+    rubric: Rubric;
+    sourceExcerpt: string;
+    /** The whole page the card came from — see buildRubricCheckPrompt. */
+    sourceText: string;
+  }): Promise<RubricCheckResult | null>;
 }

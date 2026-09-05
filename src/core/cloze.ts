@@ -248,16 +248,79 @@ export interface TypedGrade {
 }
 
 /**
- * Comparison form: words only, lowercased, no punctuation, no leading article.
+ * Number words, so "sixty seconds" and "60 seconds" are the same answer.
+ *
+ * Reported from real use: the notes said "60 seconds and 7 days", the student
+ * typed it out in words, and was marked wrong. Spelling a number is not getting
+ * it wrong, and which form the notes happened to use is an accident the student
+ * cannot be expected to reproduce.
+ *
+ * Applied to BOTH sides, so the direction never matters and the intermediate
+ * form never has to be the pretty one.
+ */
+const NUMBER_WORDS: Record<string, number> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+  sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30,
+  forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+const MULTIPLIERS: Record<string, number> = { hundred: 100, thousand: 1000, million: 1000000 };
+
+/**
+ * Collapse runs of number words into digits.
+ *
+ * A run is consecutive number words only, so "60 seconds and 7 days" keeps its
+ * conjunction and does not become one enormous number — "and" ends a run. That
+ * costs "one hundred and twenty", which stays two tokens; joining quantities
+ * wrongly is the worse failure of the two.
+ */
+function foldNumberWords(tokens: string[]): string[] {
+  const out: string[] = [];
+  let total = 0;
+  let current = 0;
+  let inRun = false;
+
+  const flush = () => {
+    if (inRun) out.push(String(total + current));
+    total = 0;
+    current = 0;
+    inRun = false;
+  };
+
+  for (const token of tokens) {
+    if (token in NUMBER_WORDS) {
+      current += NUMBER_WORDS[token]!;
+      inRun = true;
+    } else if (token in MULTIPLIERS && inRun) {
+      const m = MULTIPLIERS[token]!;
+      if (m >= 1000) {
+        total += (current || 1) * m;
+        current = 0;
+      } else {
+        current = (current || 1) * m;
+      }
+    } else {
+      flush();
+      out.push(token);
+    }
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Comparison form: words only, lowercased, no punctuation, no leading article,
+ * numbers as digits.
  *
  * Hyphens and apostrophes are split here rather than joined, unlike `words`,
  * because hyphenation is orthographic — "sino-atrial" and "sino atrial" are the
  * same answer, and a student should not lose a card to a punctuation choice.
+ * Splitting hyphens also makes "twenty-one" fold like "twenty one".
  */
 function comparable(input: string): string {
   const list = (input.match(/[\p{L}\p{N}]+/gu) ?? []).map((w) => normalize(w));
   const trimmed = list.length > 1 && ARTICLES.has(list[0]!) ? list.slice(1) : list;
-  return trimmed.join(' ');
+  return foldNumberWords(trimmed).join(' ');
 }
 
 /**

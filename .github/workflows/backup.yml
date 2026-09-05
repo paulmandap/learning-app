@@ -70,8 +70,13 @@ jobs:
             fi
           done
 
+          # review_state was added by migration 0005 AFTER this list was written,
+          # and was silently unchecked until 2026-09-05. A backup check that does
+          # not know about a table is exactly the "looks like protection" failure
+          # this step exists to prevent — so any future migration that adds a
+          # table must add it here too.
           missing=0
-          for t in profiles study_sets documents document_pages study_items attempts heartbeat; do
+          for t in profiles study_sets documents document_pages study_items attempts heartbeat review_state; do
             if ! grep -qi "CREATE TABLE[^;]*\"\?$t\"\?" schema.sql; then
               echo "::error::schema.sql has no CREATE TABLE for $t"
               missing=1
@@ -79,8 +84,18 @@ jobs:
           done
           [ "$missing" -eq 0 ] || exit 1
 
+          # The Phase 8 columns ride on study_items rather than adding a table,
+          # so they are checked by name — a dump missing them would restore a
+          # database the current app cannot query.
+          for c in variant_prompt rubric_verified; do
+            if ! grep -qi "$c" schema.sql; then
+              echo "::error::schema.sql has no $c column on study_items"
+              exit 1
+            fi
+          done
+
           echo "schema.sql $(wc -c < schema.sql) bytes, data.sql $(wc -c < data.sql) bytes"
-          echo "All seven tables present."
+          echo "All eight tables and the Phase 8 columns are present."
 
       - name: Upload backup
         uses: actions/upload-artifact@v4

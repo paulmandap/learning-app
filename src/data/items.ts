@@ -30,11 +30,35 @@ export interface StudyItem {
   topic: string | null;
   hidden: boolean;
   created_at: string;
+  /**
+   * A rephrasing written after the card was failed three times (Phase 8).
+   * Null until then. The screens ask for `promptFor(item)`, never this directly.
+   */
+  variant_prompt: string | null;
+  /**
+   * D7's second pass over Apply-tier rubrics. Null = not checked.
+   *
+   * Deliberately NOT `excerpt_verified`, whose meaning §4 fixes exactly.
+   */
+  rubric_verified: boolean | null;
 }
 
 const COLUMNS =
   'id, study_set_id, document_id, page_index, section_title, kind, level, form, prompt, answer, ' +
-  'options, rubric, source_excerpt, excerpt_verified, check_flag, topic, hidden, created_at';
+  'options, rubric, source_excerpt, excerpt_verified, check_flag, topic, hidden, created_at, ' +
+  'variant_prompt, rubric_verified';
+
+/**
+ * The question to put in front of the student.
+ *
+ * One place, so a screen cannot show the original of a card that has been
+ * rephrased. Everything that COMPARES prompts — dedup, the drop log — keeps
+ * using `prompt`, which is why the variant is a separate column rather than an
+ * overwrite.
+ */
+export function promptFor(item: Pick<StudyItem, 'prompt' | 'variant_prompt'>): string {
+  return item.variant_prompt?.trim() || item.prompt;
+}
 
 async function currentUserId(): Promise<string> {
   const { data, error } = await supabase.auth.getUser();
@@ -150,4 +174,55 @@ export async function existingPrompts(studySetId: string): Promise<string[]> {
 export async function reportItem(itemId: string): Promise<void> {
   const { error } = await supabase.from('study_items').update({ hidden: true }).eq('id', itemId);
   if (error) throw new Error(error.message);
+}
+
+/** One card, by id. Used by the rephrase pass, which starts from an attempt. */
+export async function getItem(itemId: string): Promise<StudyItem | null> {
+  const { data, error } = await supabase
+    .from('study_items')
+    .select(COLUMNS)
+    .eq('id', itemId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return (data ?? null) as unknown as StudyItem | null;
+}
+
+/** Store a rephrasing. The original `prompt` is deliberately left in place. */
+export async function saveVariantPrompt(itemId: string, prompt: string): Promise<void> {
+  const { error } = await supabase
+    .from('study_items')
+    .update({ variant_prompt: prompt })
+    .eq('id', itemId);
+  if (error) throw new Error(error.message);
+}
+
+/** Record D7's second-pass verdict on one Apply-tier rubric. */
+export async function saveRubricVerdict(itemId: string, verified: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('study_items')
+    .update({ rubric_verified: verified })
+    .eq('id', itemId);
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Apply-tier written answers whose rubric has not been checked yet.
+ *
+ * Filtered in SQL rather than in the client so a large set does not have to be
+ * pulled down to find the two or three items that need a second opinion. The
+ * partial index in 0007 covers exactly this predicate.
+ */
+export async function itemsNeedingRubricCheck(studySetId: string): Promise<StudyItem[]> {
+  const { data, error } = await supabase
+    .from('study_items')
+    .select(COLUMNS)
+    .eq('study_set_id', studySetId)
+    .eq('hidden', false)
+    .eq('kind', 'short_answer')
+    .eq('level', 'apply')
+    .is('rubric_verified', null);
+
+  if (error) throw new Error(error.message);
+  return (data ?? []) as unknown as StudyItem[];
 }

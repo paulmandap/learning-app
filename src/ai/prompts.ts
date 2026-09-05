@@ -141,6 +141,111 @@ export function renderPagesForPrompt(pages: { page_index: number; text: string }
 }
 
 /**
+ * Rephrase a question the student keeps getting wrong (spec §3.3).
+ *
+ * Deliberately narrow. The model is given one card and asked for one field
+ * back, with the answer stated so it cannot drift into asking something else.
+ * The source sentence is included because rule 1 everywhere else in this file
+ * applies here too: the rewrite may use only what the notes say.
+ */
+export function buildVariantPrompt(input: {
+  prompt: string;
+  answer: string;
+  sourceExcerpt: string;
+}): string {
+  return [
+    'A student keeps getting this question wrong. Rewrite the QUESTION so it asks',
+    'the same thing in a different way.',
+    '',
+    'CURRENT QUESTION:',
+    input.prompt,
+    '',
+    'THE ANSWER (this must not change):',
+    input.answer,
+    '',
+    "FROM THE STUDENT'S NOTES:",
+    input.sourceExcerpt,
+    '',
+    'Rules:',
+    '1. The answer above must still be the correct answer, unchanged. Do not ask for',
+    '   something narrower, wider, or different.',
+    '2. Use only what the notes say. Do not add outside knowledge or new examples.',
+    '3. Change the wording and the angle — come at it from a different direction, or',
+    '   ask for it in plainer words. Do not just reorder the original.',
+    '4. Never put the answer inside the question.',
+    '5. One sentence. No preamble, no "in other words", no explanation.',
+    '6. The student sees this card alone, so never refer to the notes, the previous',
+    '   wording, a diagram, or anything not in the question itself.',
+  ].join('\n');
+}
+
+/**
+ * Check an Apply-tier marking checklist against its source (D7's second pass).
+ *
+ * The model NAMES the points it cannot support; `src/core/rubric.ts` decides the
+ * verdict. Asking for the verdict directly would put the judgement somewhere
+ * nothing can check it, which is the mistake §3.3 exists to avoid.
+ */
+export function buildRubricCheckPrompt(input: {
+  question: string;
+  expectedConcepts: { id: string; text: string }[];
+  modelAnswer: string;
+  sourceExcerpt: string;
+  /**
+   * The whole page the card came from.
+   *
+   * Load-bearing, and it was missing on the first live run. Judging a checklist
+   * against `sourceExcerpt` alone — ONE resolved sentence — flagged **4 of 4**
+   * real Apply rubrics, every one of them wrongly. A card drawn from a diagram
+   * cites a fragment like "water/nutrient absorption", so a checklist point
+   * "identifies roots as the affected organ" genuinely is not in that string,
+   * and the model said so correctly. But the rubric was written from the whole
+   * section, and marking it unfair because one sentence does not restate it is
+   * the wrong test. See ARCHITECTURE_NOTES §10.
+   */
+  sourceText: string;
+}): string {
+  const list = input.expectedConcepts.map((c) => `- ${c.id}: ${c.text}`).join('\n');
+  // Bounded: a long page would otherwise dominate a call whose whole job is a
+  // list of ids. Generous enough to carry a section's worth of context.
+  const page = input.sourceText.slice(0, 4000);
+
+  return [
+    'You are checking a marking checklist for fairness before it is used on a student.',
+    '',
+    'QUESTION:',
+    input.question,
+    '',
+    "THE STUDENT'S NOTES THIS CAME FROM:",
+    page,
+    '',
+    'THE LINE THE CARD CITES (part of the notes above):',
+    input.sourceExcerpt,
+    '',
+    'EXPECTED ANSWER:',
+    input.modelAnswer,
+    '',
+    'CHECKLIST — a student must mention these to score full marks:',
+    list,
+    '',
+    'For each point, ask: could a student who had read the notes above be expected',
+    'to make this point when answering this question? Judge it against the WHOLE of',
+    'the notes, not only the cited line — the cited line is where the card was',
+    'drawn from, not the limit of what the student read.',
+    '',
+    'Return:',
+    '- "unsupported": the ids of points that fail that test — points the source does',
+    '  not support, or that do not belong in an answer to this question. Return an',
+    '  empty array if every point is fair. Do not invent ids.',
+    '- "note": at most one short sentence saying what is wrong, addressed to nobody',
+    '  in particular. Empty string if nothing is wrong.',
+    '',
+    'Be strict about evidence and generous about wording: a point phrased differently',
+    'from the source is fine, a point the source never makes is not.',
+  ].join('\n');
+}
+
+/**
  * Grading prompt (spec §3.2.5).
  *
  * The rubric goes in the prompt so a small model can be reliable (D11): it is

@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 import { currentState, saveSchedule } from './review';
+import { maybeRephrase } from './variants';
 import { nextState } from '../core/schedule';
+import { shouldRephrase } from '../core/variant';
 import type { AttemptResult } from '../core/grade';
 
 /**
@@ -72,6 +74,14 @@ export async function recordAttempt(input: {
   maxScore?: number | null;
   answerText?: string | null;
   feedback?: string | null;
+  /**
+   * The user's Gemini key, when the calling screen has it.
+   *
+   * Optional on purpose: recording an answer must never depend on a key being
+   * present. It only enables the rephrase pass below, and a screen that does not
+   * pass one simply never triggers it.
+   */
+  apiKey?: string;
 }): Promise<void> {
   const user_id = await currentUserId();
 
@@ -115,13 +125,31 @@ export async function recordAttempt(input: {
   // truth and the missed pile (D8) is built from it, so it must land first.
   try {
     const prev = await currentState(input.studyItemId);
+    const next = nextState(prev, input.result, Date.now());
     await saveSchedule({
       userId: user_id,
       studyItemId: input.studyItemId,
       studySetId: input.studySetId,
-      state: nextState(prev, input.result, Date.now()),
+      state: next,
       lastResult: input.result,
     });
+
+    // --- rephrase a card that keeps beating them (Phase 8) -----------------
+    // Here for the same reason the schedule write is here: every answer in the
+    // app passes through this function, so a trigger placed in a screen would
+    // be silently skipped by whatever grades a card next. `shouldRephrase`
+    // fires on the exact lapse that reaches the threshold and `variant_prompt`
+    // stops it ever firing twice.
+    //
+    // Fire-and-forget: this makes a model call, and the student is mid-session
+    // waiting for the next card. Nothing here may block that or fail it.
+    if (input.apiKey && shouldRephrase({ lapses: next.lapses, alreadyRephrased: false })) {
+      void maybeRephrase({
+        studyItemId: input.studyItemId,
+        lapses: next.lapses,
+        apiKey: input.apiKey,
+      });
+    }
   } catch {
     // Studying continues without a schedule. See the note in src/data/review.ts
     // on why this degrades rather than throws.

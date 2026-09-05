@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Linking, Pressable, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -13,7 +13,9 @@ import {
   Title,
 } from '../../../src/ui/components';
 import { radius, space, useTheme } from '../../../src/ui/theme';
-import { listItems, type StudyItem } from '../../../src/data/items';
+import { SourcePanel } from '../../../src/ui/source';
+import { listDocuments, signedUrlFor } from '../../../src/data/documents';
+import { listItems, promptFor, type StudyItem } from '../../../src/data/items';
 import { fetchProfile } from '../../../src/data/profile';
 import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
 import { GeminiBrowserProvider } from '../../../src/ai/gemini';
@@ -68,6 +70,10 @@ export default function Quiz() {
     queryKey: ['missed', setId],
     queryFn: () => missedItemIds(setId),
   });
+  const { data: docs = [] } = useQuery({
+    queryKey: ['docs', setId],
+    queryFn: () => listDocuments(setId),
+  });
 
   // Quiz uses MC and short written answers only — flashcards have no way to be
   // marked.
@@ -110,8 +116,26 @@ export default function Quiz() {
     [item],
   );
 
+  /**
+   * One in-flight submission at a time.
+   *
+   * A ref rather than state, and checked before anything else: grading a written
+   * answer awaits a model call and even a multiple-choice answer awaits
+   * recordAttempt, so several hundred milliseconds pass between the tap and
+   * `current` being set. Two taps in that window both saw `current === null`,
+   * and each appended to `answered` and wrote an attempts row — which is why a
+   * two-question quiz could finish claiming three or four, with the same
+   * question listed twice in the results.
+   *
+   * State would not fix it: a setState in the same tick is not visible to the
+   * second call. The ref is set synchronously, so the second tap returns.
+   */
+  const submitting = useRef(false);
+
   async function submit() {
     if (!item) return;
+    if (submitting.current || current) return;
+    submitting.current = true;
     setError(null);
 
     let graded: GradedAnswer;
@@ -119,17 +143,20 @@ export default function Quiz() {
     if (item.kind === 'mcq') {
       if (chosen === null) {
         setError('Choose an answer first.');
+        submitting.current = false;
         return;
       }
       graded = gradeMultipleChoice(options, chosen);
     } else {
       if (!isAnswerSubstantive(typed)) {
         setError('Write your answer first.');
+        submitting.current = false;
         return;
       }
       const rubric = item.rubric;
       if (!rubric || rubric.expected_concepts.length === 0) {
         setError("This question can't be marked. Skip it for now.");
+        submitting.current = false;
         return;
       }
 
@@ -137,7 +164,10 @@ export default function Quiz() {
       try {
         const provider = new GeminiBrowserProvider(profile?.gemini_api_key ?? '');
         const result = await provider.gradeAnswer({
-          prompt: item.prompt,
+          // What the student was SHOWN, which is the variant when there is one.
+          // Marking a rewritten question against its original wording would
+          // grade them on a question they never read.
+          prompt: promptFor(item),
           rubric,
           answer: typed,
         });
@@ -154,6 +184,7 @@ export default function Quiz() {
             ? reasonToMessage(err.reason)
             : 'Gemini is busy right now — try again in a minute.',
         );
+        submitting.current = false;
         return;
       }
       setBusy(false);
@@ -166,6 +197,7 @@ export default function Quiz() {
         studySetId: setId,
         mode: 'quiz',
         result: graded.result,
+        apiKey: profile?.gemini_api_key ?? undefined,
         score: graded.maxScore > 0 ? graded.score : null,
         maxScore: graded.maxScore > 0 ? graded.maxScore : null,
         answerText: item.kind === 'mcq' ? (options[chosen ?? 0]?.text ?? null) : typed,
@@ -179,7 +211,16 @@ export default function Quiz() {
     setAnswered((prev) => [...prev, { item, graded, typed }]);
   }
 
+  async function openPage(forItem: StudyItem) {
+    if (!forItem.document_id) return;
+    const doc = docs.find((d) => d.id === forItem.document_id);
+    if (!doc?.storage_path) return;
+    const url = await signedUrlFor(doc.storage_path, forItem.page_index ?? 0);
+    if (url) void Linking.openURL(url);
+  }
+
   function next() {
+    submitting.current = false;
     setCurrent(null);
     setTyped('');
     setChosen(null);
@@ -219,9 +260,12 @@ export default function Quiz() {
           ) : null}
         </Card>
 
-        {answered.map((a) => (
-          <Card key={a.item.id}>
-            <Body>{a.item.prompt}</Body>
+        {/* Keyed by position, not item id: a retry round can legitimately show
+            the same question twice, and duplicate React keys silently drop a
+            card from the list. */}
+        {answered.map((a, i) => (
+          <Card key={`${a.item.id}-${i}`}>
+            <Body>{promptFor(a.item)}</Body>
             <Notice tone={a.graded.result === 'correct' ? 'ok' : a.graded.result === 'partial' ? 'warn' : 'error'}>
               {a.graded.result === 'correct'
                 ? 'Right'
@@ -232,10 +276,13 @@ export default function Quiz() {
             </Notice>
             {a.graded.feedback ? <Body muted>{a.graded.feedback}</Body> : null}
             <ConceptList item={a.item} graded={a.graded} />
-            <Body muted>
-              Source{a.item.page_index !== null ? ` · p.${a.item.page_index + 1}` : ''}:{' '}
-              {a.item.source_excerpt}
-            </Body>
+            <SourcePanel
+              excerpt={a.item.source_excerpt}
+              answer={a.item.answer}
+              pageIndex={a.item.page_index}
+              checkFlag={a.item.check_flag}
+              onOpenPage={a.item.document_id ? () => void openPage(a.item) : undefined}
+            />
           </Card>
         ))}
 
@@ -289,27 +336,63 @@ export default function Quiz() {
           <ProgressBar value={index} total={items.length} />
 
           <Card>
-            <Body>{item.prompt}</Body>
+            <Body>{promptFor(item)}</Body>
 
             {item.kind === 'mcq' ? (
               <View style={{ gap: space.sm }}>
-                {options.map((o, i) => (
-                  <Pressable key={o.text} onPress={() => !current && setChosen(i)}>
-                    <View
-                      style={{
-                        borderWidth: chosen === i ? 2 : 1,
-                        borderRadius: radius.sm,
-                        padding: space.md,
-                        minHeight: 44,
-                        justifyContent: 'center',
-                        borderColor: chosen === i ? t.accent : t.border,
-                        backgroundColor: chosen === i ? t.bg : 'transparent',
-                      }}
-                    >
-                      <Text style={{ color: t.text, fontSize: 15 }}>{o.text}</Text>
-                    </View>
-                  </Pressable>
-                ))}
+                {options.map((o, i) => {
+                  // Before answering, the only state is "picked". After, the
+                  // marking is on the options themselves: the right one is
+                  // always shown as right, so a student who guessed wrong sees
+                  // which one it was without reading the source to work it out.
+                  const answeredNow = current !== null;
+                  const isChosen = chosen === i;
+                  const showRight = answeredNow && o.correct;
+                  const showWrong = answeredNow && isChosen && !o.correct;
+
+                  const borderColor = showRight
+                    ? t.ok
+                    : showWrong
+                      ? t.danger
+                      : isChosen
+                        ? t.accent
+                        : t.border;
+
+                  return (
+                    <Pressable key={o.text} onPress={() => !current && setChosen(i)}>
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: space.sm,
+                          borderWidth: showRight || showWrong || isChosen ? 2 : 1,
+                          borderRadius: radius.sm,
+                          padding: space.md,
+                          minHeight: 44,
+                          borderColor,
+                          backgroundColor: isChosen ? t.bg : 'transparent',
+                        }}
+                      >
+                        <Text style={{ color: t.text, fontSize: 15, flex: 1 }}>{o.text}</Text>
+                        {/* A mark as well as a colour: roughly one man in twelve
+                            cannot separate the green from the red, and the
+                            verdict must not live in hue alone. */}
+                        {showRight || showWrong ? (
+                          <Text
+                            accessibilityLabel={showRight ? 'Correct answer' : 'Your answer, wrong'}
+                            style={{
+                              color: showRight ? t.ok : t.danger,
+                              fontSize: 17,
+                              fontWeight: '700',
+                            }}
+                          >
+                            {showRight ? '✓' : '✗'}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  );
+                })}
               </View>
             ) : (
               <Field
@@ -334,12 +417,21 @@ export default function Quiz() {
               </Notice>
               {current.feedback ? <Body muted>{current.feedback}</Body> : null}
               <ConceptList item={item} graded={current} />
-              <Body muted>
-                Source{item.page_index !== null ? ` · p.${item.page_index + 1}` : ''}:{' '}
-                {item.source_excerpt}
-              </Body>
               <Button label={index + 1 >= items.length ? 'See results' : 'Next question'} onPress={next} />
             </Card>
+          ) : null}
+
+          {/* Collapsed behind the chip, exactly as in Flashcards. Shown only
+              once the question has been answered — before that it would be the
+              answer sitting under the question. */}
+          {current ? (
+            <SourcePanel
+              excerpt={item.source_excerpt}
+              answer={item.answer}
+              pageIndex={item.page_index}
+              checkFlag={item.check_flag}
+              onOpenPage={item.document_id ? () => void openPage(item) : undefined}
+            />
           ) : (
             <Button label="Check my answer" onPress={submit} busy={busy} />
           )}
@@ -366,6 +458,29 @@ function ConceptList({ item, graded }: { item: StudyItem; graded: GradedAnswer }
       {graded.missed.length > 0 ? (
         <Body muted>Still to mention: {graded.missed.map(textFor).join('; ')}.</Body>
       ) : null}
+      <RubricCaution item={item} />
     </View>
+  );
+}
+
+/**
+ * A quiet caution when the second pass could not trace this question's marking
+ * back to the notes (D7, `rubric_verified = false`).
+ *
+ * Shown only on a false, never on a true or an unchecked null — a badge saying
+ * "we checked this" on most cards would train the eye to ignore the one that
+ * matters. It sits with the marking rather than the question because that is
+ * what it is about: the points being demanded, not whether the fact is right.
+ *
+ * Deliberately worded as a nudge, not a verdict, and with no jargon. It appears
+ * after a student has been told what they "still need to mention", which is
+ * exactly the moment an unfair checklist stings.
+ */
+function RubricCaution({ item }: { item: StudyItem }) {
+  if (item.rubric_verified !== false) return null;
+  return (
+    <Body muted>
+      We're not sure every point above is really in your notes — trust your notes over this one.
+    </Body>
   );
 }

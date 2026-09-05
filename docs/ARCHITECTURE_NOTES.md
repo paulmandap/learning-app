@@ -972,6 +972,156 @@ Two defects were caught this way and fixed, neither visible to typecheck or test
 - **Not deployed.** The grading deviation above is an owner decision, and 0006 needs applying by
   hand. Until then blanks record under `'flashcards'`.
 
+## 10. Phase 8b/8c — variants of missed items, and rubric verification (2026-09-05)
+
+The rest of spec §6's "Later" list. Both are model passes over cards that already
+exist, and both are recorded in columns added by `0007_variants_and_rubric_check.sql`.
+
+> **DEPLOY ORDER MATTERS HERE, unlike 0006.** `listItems` now selects
+> `variant_prompt` and `rubric_verified`, so a build carrying this code against a
+> database without 0007 fails every item query and the app shows no cards at all.
+> 0006 was additive on a write path and could ship in either order; this cannot.
+> **Apply 0007 first, then deploy.**
+
+### 10.1 Variants of missed items
+
+On the third lapse (`review_state.lapses === 3`) one call rewrites the question.
+The answer, page, cited sentence and stored excerpt are all untouched — only
+`prompt` gains an alternative, in a separate column so the original survives and
+dedup keeps comparing the text it always did.
+
+Triggered inside `recordAttempt`, next to the schedule write and for the same
+reason: every answer in the app passes through there, so a trigger placed in a
+screen would be silently skipped by whatever grades a card next.
+
+`===` not `>=`, so a card failed ten times spends one call rather than eight;
+`variant_prompt` being non-null is the durable guard behind that.
+
+**Live, on real cards: 7 rewrites, 7 accepted.** A sample:
+
+| was | now |
+|---|---|
+| "What is the anatomical boundary that separates the shoot system from the root system in a vascular plant?" | "What serves as the boundary between the two plant systems?" |
+| "What specific single-cell structures greatly expand a root's surface area…?" | "Which single elongated epidermal cells multiply a root's surface area enormously?" |
+
+**One defect found by that run and fixed.** A weaker rung of the fallback ladder
+returned *"**Based on the student's notes**, what are the microscopic openings on
+the bottom of a leaf blade…"*. The rephrase prompt forbids that, and the
+generation prompt has carried the same rule from the start ("Every card must
+stand on its own"), but neither had a validator behind it — and this project's
+stated principle is that *the prompt asks, the validator checks*. `validateVariant`
+now rejects a rewrite that points outside the card. The rejection costs nothing:
+the card keeps its original wording.
+
+Worth noting for later: **the generation prompt's identical rule is still
+unenforced.** Adding the same check to `validateItems` would start dropping cards
+on the main path, which is a change that needs measuring first, so it was not
+made here.
+
+### 10.2 Rubric verification — the first design flagged 4 of 4 wrongly
+
+D7 postponed "LLM verification, Apply-tier rubrics only". The model NAMES the
+checklist points it cannot support and `src/core/rubric.ts` computes the verdict
+— the same division of labour as grading, for the same reason.
+
+**The first live run flagged every rubric it saw, and all four were wrong:**
+
+```
+"If a crop cannot take up water, which organ is failing?"
+  => false — "The source text does not mention roots."
+```
+
+The cause was the prompt, not the model. It was given `source_excerpt` — ONE
+resolved sentence — as "the only source this came from". A card drawn from a
+diagram cites a fragment like `"water/nutrient absorption"`, so a point
+"identifies roots as the affected organ" genuinely is not in that string. But the
+rubric was written from the whole section, and marking it unfair because one
+sentence does not restate it is simply the wrong test.
+
+**Fixed by passing the page text** (capped at 4,000 chars) with the cited line
+named as *part of* it rather than as the limit. Re-run on the same four:
+
+| Question asks | Checklist demands | Verdict |
+|---|---|---|
+| which organ is failing | roots + absorption | **true** |
+| which organ structure to examine | fruit + its role in dispersal | **false** — "The question only asks which organ structure to examine, so requiring the student to identify its role in seed dispersal does not belong." |
+| which organ was damaged | leaf + its photosynthetic role | **false** — "The question only asks which organ was damaged, not for an explanation of its photosynthetic role." |
+| which organ failed to form | flower + reproductive function | **true** |
+
+**2 of 4, and both flags are real defects.** Each flagged rubric demands a role
+the question never asked for, so a student answering "the fruit" — correct, and
+complete — scores 1 of 2 and is marked *partly right*. That is precisely the
+unfair marking D7's pass exists to catch, and it was invisible before.
+
+Kept as a SOFT failure (§4): the card stays and the quiz shows one quiet line,
+"We're not sure every point above is really in your notes — trust your notes over
+this one." Dropping a question because a second model disliked one point of its
+checklist would be a large action on a small signal.
+
+**Runs after the set is marked ready**, never inside generation. Apply is 20% of a
+set, so a 20-card set is four more calls ≈ 28s at the enforced gap — landing on
+the very budget §6 forbids buying with architecture changes.
+
+### 10.3 Two bugs the owner found in the quiz, both fixed
+
+**Double submission created phantom questions.** `submit()` awaited
+`recordAttempt` (and, for written answers, a model call) *before* setting
+`current`, so a second tap in that window passed the same guards and appended a
+second entry to `answered` — and wrote a second `attempts` row. A two-question
+quiz finished claiming three, with one question listed twice; tapping repeatedly
+gave "4 of 4 right" from two questions.
+
+Fixed with a ref set synchronously at the top of `submit()`. State would not have
+worked: a `setState` in the same tick is not visible to the second call. Every
+early return releases it, and `next()` clears it.
+
+The results list was also keyed on `a.item.id`, which duplicates legitimately in a
+retry round — now keyed by position.
+
+**Verified against the deployed build**, driving the real quiz in headless Chrome
+and clicking "Check my answer" three times in a row on every question:
+
+```
+10:04:04.858            d650ce83  incorrect "Fruit"     <- run 1
+10:05:05.732  +60.9s    d650ce83  incorrect "Fruit"     <- run 2, same question
+10:05:15.972  +10.2s    b81fc679  incorrect "Flower"
+10:05:21.681   +5.7s    bea53578  incorrect "STEM"
+10:05:25.428   +3.7s    b4451b3d  incorrect "Fruit"
+```
+
+One row per question, and one verdict on screen. The only repeated item is 60.9s
+apart, which is the two runs — within a run the gaps are 3.7–10.2s and nothing
+repeats. Worth stating because the raw "duplicate item id" count looked like a
+failure until the timestamps separated the runs.
+
+**Number words were marked wrong.** The notes said "60 seconds and 7 days"; typing
+it out in words failed. `comparable` now folds number words to digits on both
+sides, so "sixty seconds" and "60 seconds" are one answer. A run ends at "and", so
+"60 seconds and 7 days" stays two quantities rather than becoming one number.
+
+### 10.4 Quiz presentation, on the owner's report
+
+Answering multiple choice now marks the options themselves: the correct one turns
+green with a ✓, a wrong pick red with a ✗. A mark as well as a colour, because
+roughly one man in twelve cannot separate the two and a verdict must not live in
+hue alone.
+
+The source was printing inline and unconditionally under every answered question,
+which read as a different app from Flashcards. It is now the same collapsed chip,
+lifted out of `flashcards.tsx` into `src/ui/source.tsx` and used by both — one
+implementation rather than two that drift.
+
+### 10.5 Limitations
+
+- **Rubric verification is measured on four items.** Two flags, both defensible,
+  is encouraging and is not a false-positive rate.
+- **Variants are unmeasured for effect.** Seven rewrites were accepted as
+  well-formed; whether a rephrased question actually helps someone learn a card
+  they kept failing needs review history nobody has yet.
+- **The rephrase pass runs on the fallback ladder**, and the one bad output came
+  from its weakest rung. The validator catches that class now, but rung quality
+  still varies with how loaded the free tier is.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

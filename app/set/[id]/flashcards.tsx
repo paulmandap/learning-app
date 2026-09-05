@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Linking, Platform, Pressable, Text, View } from 'react-native';
+import { Linking, Platform, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -13,13 +13,14 @@ import {
 } from '../../../src/ui/components';
 import { FlipCard } from '../../../src/ui/flashcard';
 import { gradeFeedback, hapticFlip, primeFeedback } from '../../../src/ui/feedback';
-import { radius, space, useTheme } from '../../../src/ui/theme';
-import { listItems, reportItem, type StudyItem } from '../../../src/data/items';
+import { space } from '../../../src/ui/theme';
+import { SourcePanel } from '../../../src/ui/source';
+import { listItems, promptFor, reportItem, type StudyItem } from '../../../src/data/items';
 import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
+import { fetchProfile } from '../../../src/data/profile';
 import { reviewStatesForSet } from '../../../src/data/review';
 import { isDue, reviewOrder } from '../../../src/core/schedule';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
-import { excerptMatches } from '../../../src/core/excerpt';
 import type { Level } from '../../../src/core/planner';
 
 const LEVELS: { key: Level; label: string }[] = [
@@ -33,7 +34,6 @@ export default function Flashcards() {
   const setId = String(id);
   const retryOnly = retry === '1';
   const router = useRouter();
-  const t = useTheme();
 
   // Default Understand, per the spec's level segment.
   const [level, setLevel] = useState<Level>('understand');
@@ -58,6 +58,11 @@ export default function Flashcards() {
     queryKey: ['schedules', setId],
     queryFn: () => reviewStatesForSet(setId),
   });
+
+  // Only so a card failed three times can have its question rewritten
+  // (Phase 8). Shared query key with Settings and Quiz, so this is a cache read
+  // rather than another round trip, and studying works fine without it.
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
 
   // The missed pile (D8). Retention comes from coming back to what you got
   // wrong, so this is a first-class mode rather than a filter buried in a menu.
@@ -162,6 +167,7 @@ export default function Flashcards() {
       studySetId: setId,
       mode: 'flashcards',
       result: gotIt ? 'correct' : 'incorrect',
+      apiKey: profile?.gemini_api_key ?? undefined,
     }).catch(() => {
       // Losing a log entry must not interrupt studying.
     });
@@ -276,7 +282,9 @@ export default function Flashcards() {
 
           <FlipCard
             key={card.id}
-            question={card.prompt}
+            // The rewritten question when this card has beaten the student
+            // three times, otherwise the original (Phase 8).
+            question={promptFor(card)}
             answer={card.answer}
             revealed={revealed}
             onFlip={toggleReveal}
@@ -305,131 +313,22 @@ export default function Flashcards() {
                 </View>
               </View>
 
-              {/* key: collapse state resets per card, so opening the source on
-                  one card does not leave it open for the rest of the deck. */}
-              <SourceCard key={card.id} card={card} onOpenPage={openPage} onReport={report} />
+              {/* key: collapse state resets per card, so opening the source
+                  on one card does not leave it open for the rest of the deck. */}
+              <SourcePanel
+                key={card.id}
+                excerpt={card.source_excerpt}
+                answer={card.answer}
+                pageIndex={card.page_index}
+                checkFlag={card.check_flag}
+                onOpenPage={card.document_id ? openPage : undefined}
+                onReport={report}
+              />
               {reported ? <Notice tone="ok">Thanks — you won't see that one again.</Notice> : null}
             </>
           ) : null}
         </>
       ) : null}
     </Screen>
-  );
-}
-
-/**
- * The source chip, with the excerpt COLLAPSED behind it.
- *
- * The chip stays visible on every card, because "shows me where every answer
- * came from" is the product's promise and it has to be legible without
- * hunting. What is hidden is the answer to a question the user has not asked
- * yet: most of the time you flip a card, agree with the answer, and move on.
- * Showing a paragraph of source text unbidden on every card competes with the
- * answer you just turned over, and two blocks of prose saying nearly the same
- * thing is worse than one.
- *
- * `check_flag` deliberately stays OUTSIDE the collapse. It is a warning that
- * the notes may contradict standard knowledge, and a warning nobody opened is
- * not a warning.
- *
- * The matched phrase is highlighted using the span the validator already
- * computed against the stored page text — this is why excerpt verification
- * returns a span rather than just a boolean.
- */
-function SourceCard({
-  card,
-  onOpenPage,
-  onReport,
-}: {
-  card: StudyItem;
-  onOpenPage: () => void;
-  onReport: () => void;
-}) {
-  const t = useTheme();
-  const [open, setOpen] = useState(false);
-
-  const highlighted = useMemo(() => {
-    const excerpt = card.source_excerpt;
-    const answer = card.answer;
-    const match = excerptMatches(answer, excerpt);
-    if (!match.matched || !match.span) return null;
-    return {
-      before: excerpt.slice(0, match.span.start),
-      hit: excerpt.slice(match.span.start, match.span.end),
-      after: excerpt.slice(match.span.end),
-    };
-  }, [card.source_excerpt, card.answer]);
-
-  const pageLabel = card.page_index !== null ? `p.${card.page_index + 1}` : null;
-
-  return (
-    <Card>
-      {/* The chip IS the control. One tap, no separate "show more" link to
-          explain — the thing you would tap to see the source is the thing
-          that names it. */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ expanded: open }}
-          onPress={() => setOpen((o) => !o)}
-          style={{
-            backgroundColor: t.bg,
-            borderColor: t.border,
-            borderWidth: 1,
-            borderRadius: 999,
-            paddingHorizontal: 12,
-            paddingVertical: 6,
-          }}
-        >
-          <Text style={{ color: t.textMuted, fontSize: 13 }}>
-            Source{pageLabel ? ` · ${pageLabel}` : ''} {open ? '▴' : '▾'}
-          </Text>
-        </Pressable>
-
-        <View style={{ flex: 1 }} />
-
-        {/* Demoted from a full-width button to a quiet link. "Report this card"
-            IS the second verification pass at this scale (D7), so it must stay
-            reachable — but it is used on perhaps one card in fifty, and giving
-            it the same visual weight as "Got it" was overstating it. */}
-        <Pressable accessibilityRole="button" onPress={onReport} hitSlop={8}>
-          <Text style={{ color: t.textMuted, fontSize: 13, textDecorationLine: 'underline' }}>
-            Report
-          </Text>
-        </Pressable>
-      </View>
-
-      {/* A warning is never collapsed — see the note above. */}
-      {card.check_flag ? (
-        <Notice tone="warn">
-          Worth double-checking against your course material: {card.check_flag}
-        </Notice>
-      ) : null}
-
-      {open ? (
-        <>
-          {highlighted ? (
-            <Text style={{ color: t.text, fontSize: 15, lineHeight: 22 }}>
-              {highlighted.before}
-              <Text style={{ backgroundColor: t.warnBg, color: t.warnText }}>{highlighted.hit}</Text>
-              {highlighted.after}
-            </Text>
-          ) : (
-            <Body>{card.source_excerpt}</Body>
-          )}
-
-          {card.document_id ? (
-            <>
-              <Button label="Open page" variant="secondary" onPress={onOpenPage} />
-              {pageLabel ? (
-                // Stated in text because iOS Safari ignores #page= and opens at
-                // page 1 — the number has to be readable even when the jump fails.
-                <Body muted>Opens your file. Look for page {(card.page_index ?? 0) + 1}.</Body>
-              ) : null}
-            </>
-          ) : null}
-        </>
-      ) : null}
-    </Card>
   );
 }
