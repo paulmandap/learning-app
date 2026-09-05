@@ -59,8 +59,16 @@ export function useTheme(): Theme {
   return useColorScheme() === 'dark' ? dark : light;
 }
 
-/** Desktop uses a centred content column; mobile fills the width. */
-export const CONTENT_MAX_WIDTH = 720;
+/**
+ * Desktop uses a centred content column; mobile fills the width.
+ *
+ * 560 rather than 720. At 720 a full-width button stopped reading as a button
+ * and became a banner — wide and short — and the screens looked like a phone
+ * layout stretched to fit. Narrowing the column fixes that for every element at
+ * once, which is the right lever: capping button width alone was tried and left
+ * buttons narrower than the cards stacked directly above them.
+ */
+export const CONTENT_MAX_WIDTH = 560;
 
 /**
  * Design tokens.

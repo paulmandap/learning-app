@@ -4,28 +4,37 @@ import { useNavigation, useRouter } from 'expo-router';
 import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
 
 /**
- * Extra inset that pulls a header control in to the content column's edge.
+ * Where the content column's left edge sits, in px from the window edge.
  *
  * `Screen` centres a CONTENT_MAX_WIDTH column inside space.lg of padding, so
- * the column's left edge is `space.lg + (W - 2·space.lg - MAX)/2`, which
- * simplifies exactly to `(W - MAX)/2`. The header already supplies roughly
- * space.lg of its own padding, so only the difference is added here.
+ * the edge is `space.lg + (W - 2·space.lg - MAX)/2` — which simplifies exactly
+ * to `(W - MAX)/2`, the padding cancelling out. The `max` covers narrow screens,
+ * where the column is full-bleed and the edge is just the padding.
  *
- * Without it the header spanned the whole window while the content sat in a
- * 720px column — on a desktop screen that put the chevron and the ⋯ about 600px
- * outboard of everything else, which read as the content being shoved left even
- * though the column was exactly centred.
- *
- * At phone widths this is 0, so the mobile header does not move at all.
+ * Header controls are inset to this so the top of the screen lines up with the
+ * content beneath it. At phone widths it resolves to space.lg, which is what the
+ * header already used, so nothing moves on mobile.
  *
  * (This lives in the components rather than in the navigator's screenOptions
  * because native-stack has no headerLeftContainerStyle — that is a JS-stack
  * option and is silently absent here.)
  */
-function useHeaderGutter(): number {
+function useColumnEdge(): number {
   const { width } = useWindowDimensions();
-  return Math.max(0, (width - CONTENT_MAX_WIDTH) / 2 - space.lg);
+  return Math.max(space.lg, (width - CONTENT_MAX_WIDTH) / 2);
 }
+
+/**
+ * The header's own padding, which differs by slot and has to be subtracted.
+ *
+ * Measured from rendered screenshots rather than assumed: at 1440px wide with a
+ * 560px column the content's left edge is 440, and a header TITLE given a
+ * 424px margin rendered at 440 while a header LEFT control given the same 424
+ * rendered at 424. So the title slot contributes space.lg of padding and the
+ * left and right slots contribute none.
+ */
+const TITLE_SLOT_PADDING = space.lg;
+const CONTROL_SLOT_PADDING = 0;
 
 /**
  * A header overflow menu (⋯).
@@ -53,7 +62,7 @@ export function OverflowMenu({ items, accessibilityLabel = 'More actions' }: {
   accessibilityLabel?: string;
 }) {
   const t = useTheme();
-  const gutter = useHeaderGutter();
+  const gutter = useColumnEdge() - CONTROL_SLOT_PADDING;
   const [open, setOpen] = useState(false);
 
   return (
@@ -159,7 +168,7 @@ export function HeaderBackButton({ label = 'Back' }: { label?: string }) {
   const t = useTheme();
   const router = useRouter();
   const navigation = useNavigation();
-  const gutter = useHeaderGutter();
+  const gutter = useColumnEdge() - CONTROL_SLOT_PADDING;
 
   return (
     <Pressable
@@ -201,7 +210,7 @@ export function HeaderBackButton({ label = 'Back' }: { label?: string }) {
  */
 export function HeaderTitle({ children }: { children: string }) {
   const t = useTheme();
-  const gutter = useHeaderGutter();
+  const gutter = Math.max(0, useColumnEdge() - TITLE_SLOT_PADDING);
   return (
     <Text style={[type.title, { color: t.text, marginLeft: gutter }]} numberOfLines={1}>
       {children}
@@ -220,7 +229,7 @@ export function HeaderGlyphButton({
   accessibilityLabel: string;
 }) {
   const t = useTheme();
-  const gutter = useHeaderGutter();
+  const gutter = useColumnEdge() - CONTROL_SLOT_PADDING;
   return (
     <Pressable
       accessibilityRole="button"

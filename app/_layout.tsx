@@ -56,7 +56,17 @@ function RootNavigator() {
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack
         screenOptions={{
-          headerStyle: { backgroundColor: t.card },
+          // The header takes the PAGE background, not the card surface, and
+          // drops its hairline.
+          //
+          // As a distinct bar it spanned the whole window while its two controls
+          // sat at the content column's edges, so a lone chevron floated in a
+          // wide empty strip and read as a rendering fault. With no bar there is
+          // nothing demanding to be filled: the chevron and the ⋯ simply sit
+          // above the content, aligned to it, the way an iOS large-title screen
+          // works before you scroll.
+          headerStyle: { backgroundColor: t.bg },
+          headerShadowVisible: false,
           headerTitleStyle: { color: t.text },
           headerTintColor: t.accent,
           contentStyle: { backgroundColor: t.bg },
