@@ -700,16 +700,22 @@ The trade-off, stated plainly: a genuine database outage looks like "nothing is 
 because the study loop predates scheduling and works without it, and because a home screen that
 will not load is a worse failure than a missing count.
 
-### 7.4 Not yet applied
+### 7.4 Applied and verified, 2026-09-05
 
-`supabase/migrations/0005_review_state.sql` **has not been run.** Applying it needs a credential
-with DDL rights — a Supabase personal access token or the database connection string — and
-neither the publishable key nor the CLI's stored login was available. Until it is applied the
-feature is inert by design; afterwards it switches on with no further deploy.
+`0005_review_state.sql` was applied through the dashboard SQL editor. Verified against the live
+project immediately afterwards, exercising the real `recordAttempt` path rather than the
+scheduler in isolation:
 
-`review_state` is already covered by `scripts/isolation-test.ts`, which will move from 14 checks
-to 15. It holds no notes, but it maps a user's item ids to a study rhythm, so leaking it would
-leak what someone is struggling with.
+| Check | Result |
+|---|---|
+| First "Got it" → not due today, due tomorrow | `reps=1 interval=1d due=2026-09-06` ✓ |
+| Second "Got it" → six days out | `reps=2 interval=6d due=2026-09-11` ✓ |
+| "Missed" → back tomorrow, streak reset, lapse counted | `reps=0 interval=1d lapses=1` ✓ |
+| Exactly one schedule row after three answers | 1 ✓ (the `study_item_id` unique constraint) |
+
+**Isolation: 17/17, including `review_state`.** It holds no notes, but it maps a user's item ids
+to a study rhythm, so leaking it would leak what someone is struggling with. Deleting a study
+set cascades its schedules, confirmed while cleaning up the probe data.
 
 ## Sources
 
