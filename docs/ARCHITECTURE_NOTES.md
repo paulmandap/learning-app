@@ -637,6 +637,80 @@ rather than quality where possible, with `flash-lite` last because it is the wea
 above at 7 cards against 20 for the same document. A weaker card still beats no card, which is
 why it stays on the ladder rather than being dropped.
 
+## 7. Spaced repetition (Phase 6) — built 2026-09-05
+
+Spec §6 lists "adaptive scheduling, spaced repetition" under Later, and D8 explains why the
+groundwork went in first: *"Log every attempt + missed pile from day one. Scheduling later."*
+`attempts` records what happened; the new `review_state` records when each card is next due.
+
+### 7.1 Choices worth knowing
+
+**SM-2, not FSRS.** SM-2 needs four numbers per card and no training data. FSRS is better when
+fitted to a real review history; this project has five users and none. SM-2 is also small enough
+to hold in your head, which matters more here than the marginal accuracy.
+
+**Three outcomes, not six.** Textbook SM-2 asks the learner to self-rate 0–5. The app already
+grades `correct | partial | incorrect`, and flashcards only produce two of those. Adding a
+self-rating step is exactly the friction D1 and D2 removed elsewhere.
+
+**`partial` is a real state.** A quiz short answer scores partial between 40% and 80% of its
+rubric. Treating it as a lapse throws away a card you nearly know; treating it as correct pushes
+it out of sight. It halves the interval and holds `reps` instead.
+
+**Due dates sit on UTC day boundaries.** Otherwise a card reviewed at 09:00 and scheduled "+1
+day" is invisible at 08:59 the next morning and appears at 09:00 — which reads as a bug. UTC
+rather than local because the comparison happens both in Postgres and in the browser.
+
+**Flashcards ORDER by the schedule, they do not filter on it.** Due first, longest overdue
+leading, then never-seen, then the rest. A deck that hid everything not due would tell someone
+who sat down to study that there is nothing to study.
+
+**"Due" excludes cards never reviewed.** A fresh set of 40 would otherwise announce "40 due
+today", duplicating the card count already on the row. Due means "you have seen this and it is
+time to see it again".
+
+### 7.2 The write path cannot be forgotten
+
+The schedule is advanced inside `recordAttempt` ([src/data/attempts.ts](src/data/attempts.ts)),
+which is the single point every answer in the app passes through — flashcard swipe, flashcard
+button, keyboard shortcut, quiz submission. Putting it in the screens instead would mean a
+future third way to grade a card silently skips scheduling.
+
+It runs *after* the attempt insert and never instead of it: the attempt row is the record of
+truth and the missed pile is built from it.
+
+### 7.3 Everything degrades rather than throws
+
+Every function in `src/data/review.ts` returns an empty result on error instead of raising, and
+the schedule write in `recordAttempt` is wrapped. This is what made the code safe to deploy
+before `0005_review_state.sql` was applied.
+
+**Verified live on 2026-09-05 with the table genuinely absent:**
+
+```
+recordAttempt threw:       no
+attempt rows before/after: 1 -> 2      (the answer was still recorded)
+dueCountsBySet returned:   0 entries   (degraded cleanly)
+```
+
+Screenshots of the deployed build with no table show "Nothing waiting — you are on top of this
+one" and "1 card · Ready" — the absence reads as a quiet state, not a broken screen.
+
+The trade-off, stated plainly: a genuine database outage looks like "nothing is due". Accepted
+because the study loop predates scheduling and works without it, and because a home screen that
+will not load is a worse failure than a missing count.
+
+### 7.4 Not yet applied
+
+`supabase/migrations/0005_review_state.sql` **has not been run.** Applying it needs a credential
+with DDL rights — a Supabase personal access token or the database connection string — and
+neither the publishable key nor the CLI's stored login was available. Until it is applied the
+feature is inert by design; afterwards it switches on with no further deploy.
+
+`review_state` is already covered by `scripts/isolation-test.ts`, which will move from 14 checks
+to 15. It holds no notes, but it maps a user's item ids to a study rhythm, so leaking it would
+leak what someone is struggling with.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)
