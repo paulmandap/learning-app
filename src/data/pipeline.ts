@@ -11,7 +11,7 @@ import {
   uploadOriginal,
   type DocumentKind,
 } from './documents';
-import { existingPrompts, insertItems } from './items';
+import { countItems, existingPrompts, insertItems } from './items';
 import { getSet, markSectionComplete, updateSet, type StoredPlan } from './sets';
 
 /**
@@ -351,7 +351,91 @@ export async function generateSet(input: {
     });
   }
 
-  const allDone = plan.sections.every((s) => done.has(s.id));
+  // ------------------------------------------------- replace what we dropped --
+  //
+  // A card discarded by our own validators is not the notes falling short, and
+  // the user should not pay for it. Asking for 10 and receiving 9 because one
+  // citation would not resolve is our problem, so one extra pass asks for the
+  // difference.
+  //
+  // Bounded three ways, so this cannot become the padding D3 warned about:
+  //  - only up to the number we DROPPED. If the model deliberately wrote fewer
+  //    because the text did not support more (prompt rule 6), that is respected
+  //    and not topped up.
+  //  - one pass, never a loop.
+  //  - the replacements go through exactly the same validators, so a bad
+  //    replacement is dropped like any other card.
+  const allSectionsDone = plan.sections.every((s) => done.has(s.id));
+  if (allSectionsDone && dropped.length > 0 && failure === null) {
+    const stored = await countItems(setId);
+    const replaceable = Math.min(plan.requestedCount - stored, dropped.length);
+
+    // Generate from the section with the most words: the best chance of finding
+    // something genuinely new rather than a near-duplicate.
+    const richest = [...plan.sections].sort((a, b) => b.words - a.words)[0];
+
+    if (replaceable > 0 && richest) {
+      try {
+        const sectionPages = richest.pages
+          .map((idx) => ({ page_index: idx, text: pageText.get(idx) ?? '' }))
+          .filter((p) => p.text.length > 0);
+
+        if (sectionPages.length > 0) {
+          const callStart = Date.now();
+          const extra = await queue.run(() =>
+            provider.generateItems({
+              sectionText: renderPagesForPrompt(sectionPages),
+              sectionTitle: richest.title,
+              // Ask at every level and take the best `replaceable` of what
+              // comes back, rather than dictating which level the replacement
+              // must be — the notes decide that better than we can.
+              budget: { remember: replaceable, understand: replaceable, apply: replaceable },
+              pageRange: {
+                from: richest.pages[0] ?? 0,
+                to: richest.pages[richest.pages.length - 1] ?? 0,
+              },
+            }),
+          );
+          generateMs += Date.now() - callStart;
+          calls++;
+
+          // seenPrompts already holds every prompt kept this run and everything
+          // stored before it, so a replacement cannot repeat an existing card.
+          // The budget allows `replaceable` at EVERY level, and the result is
+          // then sliced to that many. allocateTiers(1) would have permitted one
+          // "remember" item and nothing else, so a replacement written at any
+          // other level was discarded as over_budget — replacing a dropped card
+          // with a second dropped card. A replacement is welcome at whatever
+          // level the notes support.
+          const generous = { remember: replaceable, understand: replaceable, apply: replaceable };
+          const { kept, dropped: extraDropped } = validateItems(
+            extra,
+            pageText,
+            generous,
+            seenPrompts,
+          );
+          dropped.push(...extraDropped);
+          const take = kept.slice(0, replaceable);
+          itemsCreated += await insertItems(setId, documentIdByPage, richest.title, take);
+          console.warn(
+            `[pipeline] replaced ${take.length} of ${replaceable} dropped card(s)` +
+              `${extraDropped.length ? `; ${extraDropped.length} replacement(s) also dropped` : ''}`,
+          );
+        }
+      } catch (err) {
+        // Best effort: the set is already complete and usable, so a failed
+        // top-up must not turn a finished run into a failed one. But it is
+        // logged rather than swallowed — a silently failing top-up is
+        // indistinguishable from one that never ran, and that ambiguity has
+        // already cost one wrong conclusion in this codebase.
+        console.warn(
+          `[pipeline] top-up failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  const allDone = allSectionsDone;
   // Persist WHY cards were left out. Without this the reasons are collected and
   // then thrown away, leaving "19 of 20" unexplainable.
   await updateSet(setId, {

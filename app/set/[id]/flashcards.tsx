@@ -43,8 +43,11 @@ export default function Flashcards() {
   const [reported, setReported] = useState<string | null>(null);
 
   const { data: allItems = [], isLoading } = useQuery({
-    queryKey: ['items', setId, level],
-    queryFn: () => listItems(setId, { level }),
+    // Every level in one query, filtered below. Switching levels is then
+    // instant, and the per-level counts the buttons show come for free
+    // instead of costing three more round trips.
+    queryKey: ['items', setId],
+    queryFn: () => listItems(setId),
   });
   const { data: missedSet } = useQuery({
     queryKey: ['missed', setId],
@@ -64,23 +67,32 @@ export default function Flashcards() {
   // seen, then the rest. Ordering rather than filtering is deliberate — a deck
   // that hides everything not due would show "nothing to study" to someone who
   // sat down wanting to study, which is the wrong answer to give them.
+  /** How many cards sit at each level, for the segment buttons. */
+  const countByLevel = useMemo(() => {
+    const counts: Partial<Record<Level, number>> = {};
+    for (const i of allItems) counts[i.level] = (counts[i.level] ?? 0) + 1;
+    return counts;
+  }, [allItems]);
+
+  const atLevel = useMemo(() => allItems.filter((i) => i.level === level), [allItems, level]);
+
   const items = useMemo(() => {
-    if (retryOnly) return allItems.filter((i) => missedSet?.has(i.id));
-    return reviewOrder(allItems, (i) => schedules?.get(i.id), Date.now());
-  }, [allItems, retryOnly, missedSet, schedules]);
+    if (retryOnly) return atLevel.filter((i) => missedSet?.has(i.id));
+    return reviewOrder(atLevel, (i) => schedules?.get(i.id), Date.now());
+  }, [atLevel, retryOnly, missedSet, schedules]);
 
   const dueNow = useMemo(
     () =>
       retryOnly
         ? 0
-        : allItems.filter((i) => {
+        : atLevel.filter((i) => {
             const s = schedules?.get(i.id);
             // Only cards with a schedule that has come up. A card never
             // reviewed is not "due" — it is simply new, and saying otherwise
             // would make every fresh set claim its whole deck was overdue.
             return s !== undefined && isDue(s, Date.now());
           }).length,
-    [allItems, retryOnly, schedules],
+    [atLevel, retryOnly, schedules],
   );
   const { data: docs = [] } = useQuery({
     queryKey: ['docs', setId],
@@ -216,7 +228,7 @@ export default function Flashcards() {
         {LEVELS.map((l) => (
           <View key={l.key} style={{ flex: 1 }}>
             <Button
-              label={l.label}
+              label={`${l.label} ${countByLevel[l.key] ?? 0}`}
               variant={level === l.key ? 'primary' : 'secondary'}
               onPress={() => setLevel(l.key)}
             />

@@ -127,6 +127,13 @@ export default function SetScreen() {
   const plan = set.plan;
   const unreadable = plan?.unreadablePages ?? [];
   const droppedLine = plan?.droppedSummary ? describeDrops(plan.droppedSummary) : null;
+
+  // How much of a shortfall the notes are actually responsible for: the gap,
+  // less anything we discarded ourselves.
+  const droppedCount = Object.values(plan?.droppedSummary ?? {}).reduce((a, b) => a + b, 0);
+  const notesFellShort = plan
+    ? Math.max(0, plan.requestedCount - itemCount - droppedCount)
+    : 0;
   const isGenerating = set.status === 'generating';
 
   const displayTitle = formatSetTitle(set.title);
@@ -208,7 +215,13 @@ export default function SetScreen() {
             {itemCount} card{itemCount === 1 ? '' : 's'}
             {dueCount > 0 ? ` · ${dueCount} due today` : ' · Ready'}
           </Body>
-          {plan && itemCount < plan.requestedCount ? (
+          {/* Only claims your notes were the limit when they ACTUALLY were.
+              This used to fire on any shortfall, so a set of 9 from a requested
+              10 said "your notes supported 9 good ones" when the notes were
+              rich and we had simply discarded one card. Blaming the notes for
+              our own drop is both wrong and discouraging. When drops explain
+              the gap, the line below says so and this one stays quiet. */}
+          {plan && notesFellShort > 0 ? (
             <Body muted>
               You asked for up to {plan.requestedCount}. Your notes supported {itemCount} good
               ones, and we'd rather stop than pad.

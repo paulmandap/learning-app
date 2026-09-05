@@ -58,8 +58,11 @@ export default function Quiz() {
 
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
   const { data: allItems = [], isLoading } = useQuery({
-    queryKey: ['items', setId, level],
-    queryFn: () => listItems(setId, { level }),
+    // Every level in one query, filtered below. Switching levels is then
+    // instant, and the per-level counts the buttons show come for free
+    // instead of costing three more round trips.
+    queryKey: ['items', setId],
+    queryFn: () => listItems(setId),
   });
   const { data: missed } = useQuery({
     queryKey: ['missed', setId],
@@ -67,12 +70,31 @@ export default function Quiz() {
   });
 
   // Quiz uses MC and short written answers only — flashcards have no way to be
-  // marked. "Retry what I missed" narrows to the items last answered wrongly.
+  // marked.
+  const quizzable = useMemo(
+    () => allItems.filter((i) => i.kind === 'mcq' || i.kind === 'short_answer'),
+    [allItems],
+  );
+
+  /**
+   * Counts for the level buttons, over QUIZZABLE items only.
+   *
+   * A set can hold 10 remember cards of which only 3 are multiple choice, and a
+   * button promising 10 that then shows 3 questions would be a lie.
+   */
+  const countByLevel = useMemo(() => {
+    const counts: Partial<Record<Level, number>> = {};
+    for (const i of quizzable) counts[i.level] = (counts[i.level] ?? 0) + 1;
+    return counts;
+  }, [quizzable]);
+
+  // Levels are exclusive now (see listItems): Understand means understand, not
+  // "understand and everything easier".
   const items = useMemo(() => {
-    const quizzable = allItems.filter((i) => i.kind === 'mcq' || i.kind === 'short_answer');
-    if (!retryOnly) return quizzable;
-    return quizzable.filter((i) => missed?.has(i.id));
-  }, [allItems, retryOnly, missed]);
+    const atLevel = quizzable.filter((i) => i.level === level);
+    if (!retryOnly) return atLevel;
+    return atLevel.filter((i) => missed?.has(i.id));
+  }, [quizzable, level, retryOnly, missed]);
 
   useEffect(() => {
     setIndex(0);

@@ -94,11 +94,22 @@ export async function listItems(
     .eq('hidden', false)
     .order('created_at', { ascending: true });
 
-  // Level is a FILTER, not a separate set (D2): Apply includes the easier
-  // tiers beneath it, so choosing Apply never means "only the hard ones".
-  if (options.level === 'remember') query = query.eq('level', 'remember');
-  if (options.level === 'understand') query = query.in('level', ['remember', 'understand']);
-  // 'apply' means everything, so no filter at all.
+  // Levels are EXCLUSIVE. Understand means understand, not "understand and
+  // everything easier".
+  //
+  // This reverses D2, deliberately and at the owner's request. D2 made each
+  // level cumulative so that "choosing Apply never means only the hard ones" —
+  // but the effect in practice was that Understand was mostly Remember. With
+  // the 50/30/20 mix a 20-card set put 10 recall cards in front of 6 genuine
+  // understand ones, so the level that was supposed to raise the difficulty
+  // barely changed it. The owner's words: "5 cards in understand is basically
+  // remember — there's no challenge at all."
+  //
+  // The cost of the reversal is that Apply is the smallest tier (20%), so on a
+  // small set it can be nearly empty. The level buttons now carry their counts
+  // so that is visible before you pick one, rather than being discovered as an
+  // empty deck.
+  if (options.level) query = query.eq('level', options.level);
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
