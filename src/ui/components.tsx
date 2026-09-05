@@ -285,16 +285,12 @@ const styles = StyleSheet.create({
   button: {
     borderWidth: 1,
     borderRadius: radius.button,
-    // A button stops being button-shaped past about this width — at the full
-    // 720px column it read as a banner. No alignment property is needed: a
-    // column flex container stretches its children by default, and a stretched
-    // item with a max width sits at the START of the cross axis, so buttons stay
-    // flush with the title's left edge.
-    //
-    // Mobile is unaffected: the widest phone leaves 398px of content, under the
-    // cap. Buttons already inside a flex:1 row are constrained by the wrapper
-    // first, so this never binds there either.
-    maxWidth: 400,
+    // Deliberately NOT capped. A 400px cap was tried and reverted: buttons then
+    // sat at 400 while the Cards and ListRows stacked directly above and below
+    // them stayed at the full column width, and two different widths in one
+    // column reads as broken far more loudly than a wide button does. If button
+    // width is ever revisited, the column width is the thing to change — every
+    // element in it has to agree.
     paddingVertical: space.md,
     paddingHorizontal: space.lg,
     alignItems: 'center',

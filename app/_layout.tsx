@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useColorScheme, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { startSessionListener, useSessionStore } from '../src/data/session';
-import { HeaderBackButton, HeaderGlyphButton } from '../src/ui/menu';
+import { HeaderBackButton, HeaderGlyphButton, HeaderTitle } from '../src/ui/menu';
 import { useTheme } from '../src/ui/theme';
 
 const queryClient = new QueryClient({
@@ -69,6 +69,11 @@ function RootNavigator() {
           name="index"
           options={{
             title: 'Study',
+            // Home has no back control, so its title needs the same inset the
+            // gear gets — otherwise the header is aligned on the right and not
+            // the left. Every other screen has a chevron, and the title is laid
+            // out after it, so it inherits the alignment for free.
+            headerTitle: () => <HeaderTitle>Study</HeaderTitle>,
             headerRight: () => (
               <HeaderGlyphButton
                 glyph="⚙︎"

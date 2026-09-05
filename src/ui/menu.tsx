@@ -188,6 +188,27 @@ export function HeaderBackButton({ label = 'Back' }: { label?: string }) {
   );
 }
 
+/**
+ * A header title inset to the content column.
+ *
+ * Only needed on screens with NO back control. Where a chevron is present the
+ * title is laid out after it, and since the chevron is already inset the title
+ * follows automatically.
+ *
+ * Without this the header was aligned on one side only — the gear pulled in to
+ * the column's right edge while "Study" stayed hard against the window's left —
+ * which looked worse than leaving both at the window edges.
+ */
+export function HeaderTitle({ children }: { children: string }) {
+  const t = useTheme();
+  const gutter = useHeaderGutter();
+  return (
+    <Text style={[type.title, { color: t.text, marginLeft: gutter }]} numberOfLines={1}>
+      {children}
+    </Text>
+  );
+}
+
 /** A header button that is just a glyph — the Settings gear on Home. */
 export function HeaderGlyphButton({
   glyph,
