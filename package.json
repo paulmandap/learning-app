@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:isolation": "tsx scripts/isolation-test.ts",
     "verify:phase2": "tsx --env-file=.env scripts/verify-phase2.ts",
-    "probe:diagram": "tsx --env-file=.env scripts/diagram-probe.ts"
+    "probe:diagram": "tsx --env-file=.env scripts/diagram-probe.ts",
+    "backup": "node scripts/backup.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.114.0",

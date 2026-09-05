@@ -528,3 +528,64 @@ describe('resolveSource — label and annotation on separate lines', () => {
     expect(resolveSource(diagram, 99, 'anything')).toBeNull();
   });
 });
+
+describe('an mcq with no options becomes a flashcard', () => {
+  // Observed live, twice: the model labels an item "mcq" and sends no options.
+  // The prompt/answer pair is still good — only the option list is missing —
+  // so it is salvaged as a flashcard rather than dropped as mc_invalid.
+  it('keeps the item, downgraded to flashcard', () => {
+    const { kept, dropped } = validateItems(
+      [item({ kind: 'mcq', options: undefined, answer: 'The sinoatrial node', source_sentence: 0 })],
+      pageTexts,
+      budget,
+    );
+    expect(dropped).toHaveLength(0);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.kind).toBe('flashcard');
+    expect(kept[0]!.options).toBeUndefined();
+  });
+
+  it('treats an empty option list the same as a missing one', () => {
+    const { kept, dropped } = validateItems(
+      [item({ kind: 'mcq', options: [], answer: 'The sinoatrial node', source_sentence: 0 })],
+      pageTexts,
+      budget,
+    );
+    expect(dropped).toHaveLength(0);
+    expect(kept[0]!.kind).toBe('flashcard');
+  });
+
+  it('still drops a genuinely broken option list', () => {
+    // Two options with no correct one is not "missing options", it is wrong,
+    // and the salvage must not paper over it.
+    const { kept, dropped } = validateItems(
+      [item({
+        kind: 'mcq',
+        options: [{ text: 'A', correct: false }, { text: 'B', correct: false }],
+        answer: 'The sinoatrial node',
+        source_sentence: 0,
+      })],
+      pageTexts,
+      budget,
+    );
+    expect(kept).toHaveLength(0);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]!.reason).toBe('mc_invalid');
+  });
+
+  it('counts the salvaged card against the flashcard budget, not the mcq one', () => {
+    // Budget is per LEVEL, not per kind, so this just confirms the downgraded
+    // item is still subject to the same cap as any other item.
+    const tight: TierBudget = { remember: 1, understand: 0, apply: 0 };
+    const { kept, dropped } = validateItems(
+      [
+        item({ kind: 'mcq', options: undefined, answer: 'The sinoatrial node', source_sentence: 0 }),
+        item({ prompt: 'Second question about the pacemaker?', answer: 'The sinoatrial node', source_sentence: 0 }),
+      ],
+      pageTexts,
+      tight,
+    );
+    expect(kept).toHaveLength(1);
+    expect(dropped.some((d) => d.reason === 'over_budget')).toBe(true);
+  });
+});

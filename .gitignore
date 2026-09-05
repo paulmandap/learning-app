@@ -26,3 +26,6 @@ npm-debug.log*
 yarn-error.log*
 .DS_Store
 Thumbs.db
+
+# Database dumps. Real user notes — never committed.
+backups/

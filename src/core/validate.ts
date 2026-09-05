@@ -352,7 +352,7 @@ export function validateItems(
     // BEFORE the leak and MC checks, so they compare the text a user will
     // actually see. source_excerpt is deliberately untouched: it must stay
     // verbatim or excerpt verification becomes meaningless.
-    const item = cleanCandidate(raw);
+    let item = cleanCandidate(raw);
 
     // --- basic shape ------------------------------------------------------
     if (!item.prompt?.trim() || !item.answer?.trim()) {
@@ -365,6 +365,15 @@ export function validateItems(
     }
 
     // --- multiple choice --------------------------------------------------
+    // A model sometimes labels an item "mcq" and then sends NO options at all
+    // — seen twice in one afternoon of diagram testing, and dropped both times
+    // as mc_invalid. But the prompt and answer are still a perfectly good pair;
+    // only the option list is missing. So it becomes a flashcard instead of
+    // being thrown away. A genuinely broken list (two options, no correct one)
+    // still fails validateMultipleChoice below and is dropped.
+    if (item.kind === 'mcq' && (item.options?.length ?? 0) === 0) {
+      item = { ...item, kind: 'flashcard', options: undefined };
+    }
     if (item.kind === 'mcq') {
       const problem = validateMultipleChoice(item);
       if (problem) {

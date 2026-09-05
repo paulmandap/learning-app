@@ -1,0 +1,93 @@
+name: Database backup
+
+# Supabase Free includes NO automatic backups ("Automatic backups: Not included"
+# — verified 2026-09-03, see docs/ARCHITECTURE_NOTES.md §2.5). Spec §5 therefore
+# requires a monthly export with the CLI. Until this workflow existed, every set,
+# note and answer in the project lived in exactly one place with no copy.
+#
+# ---------------------------------------------------------------------------
+# CREDENTIAL NOTE — read before changing anything here.
+#
+# This is the ONLY workflow in the repo that uses a non-publishable credential.
+# keepalive.yml deliberately uses the publishable key, which reaches only what
+# RLS allows. A pg_dump cannot work that way: dumping every user's rows is
+# exactly the thing RLS exists to prevent, so it needs the direct Postgres
+# connection string.
+#
+# That means SUPABASE_DB_URL is a full-access database credential. It lives only
+# in GitHub's encrypted secrets, is never echoed (the URL is passed straight to
+# the CLI, and `set -x` is deliberately not used), and no step prints it.
+#
+# Set it under: Settings → Secrets and variables → Actions
+#   SUPABASE_DB_URL  postgresql://postgres.<ref>:<password>@<host>:5432/postgres
+#
+# Get it from: Supabase dashboard → Project Settings → Database → Connection
+# string → URI. The password must be percent-encoded if it contains @ : / ? # or %.
+# ---------------------------------------------------------------------------
+#
+# PRIVACY: the dump contains students' notes and everything they have answered.
+# It is uploaded as a GitHub Actions artifact on a private repository and kept
+# for 90 days. It is not sent to any third-party storage. Do not add a step that
+# copies it anywhere else without deciding that deliberately.
+
+on:
+  schedule:
+    - cron: '23 4 1 * *' # 04:23 UTC on the 1st of each month
+  workflow_dispatch: # so a backup can be taken by hand before a risky migration
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Dump schema and data
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SUPABASE_DB_URL:-}" ]; then
+            echo "::error::SUPABASE_DB_URL repo secret is not set. See the comment at the top of this file."
+            exit 1
+          fi
+
+          # Two files, deliberately. `db dump` defaults to schema only, so the
+          # data needs its own pass with --data-only. Restoring means applying
+          # the schema first and then the rows.
+          npx --yes supabase@2 db dump --db-url "$SUPABASE_DB_URL" -f schema.sql
+          npx --yes supabase@2 db dump --db-url "$SUPABASE_DB_URL" --data-only --use-copy -f data.sql
+
+      - name: Check the dump is not empty
+        run: |
+          set -euo pipefail
+
+          # A backup that silently produced an empty file is worse than none,
+          # because it looks like protection. Fail loudly instead.
+          for f in schema.sql data.sql; do
+            if [ ! -s "$f" ]; then
+              echo "::error::$f is empty — the dump did not work."
+              exit 1
+            fi
+          done
+
+          missing=0
+          for t in profiles study_sets documents document_pages study_items attempts heartbeat; do
+            if ! grep -qi "CREATE TABLE[^;]*\"\?$t\"\?" schema.sql; then
+              echo "::error::schema.sql has no CREATE TABLE for $t"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+          echo "schema.sql $(wc -c < schema.sql) bytes, data.sql $(wc -c < data.sql) bytes"
+          echo "All seven tables present."
+
+      - name: Upload backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-backup-${{ github.run_id }}
+          path: |
+            schema.sql
+            data.sql
+          retention-days: 90
+          if-no-files-found: error

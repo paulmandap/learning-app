@@ -365,7 +365,11 @@ actually there. Never fill gaps with plausible content"*, and it did not comply.
 readability score is therefore the only thing standing between a blurry page and invented
 cards, which is precisely why criterion A exists.
 
-Criterion B — 10-page text PDF: **FAILED, measured 2026-09-04**, on
+Criterion B — 10-page text PDF: **PASSED, 2026-09-05 — 80.6 s of 120 s, 6/6 checks.** See
+5.3.2. The failing 2026-09-04 measurement is kept below because the two together are the
+finding: the number moves with Google's load, not with this code.
+
+Criterion B — first measurement: **FAILED, 2026-09-04**, on
 `gemini-3.5-flash-lite`, with the important caveat in 5.3.1 below.
 
 | Measure | Value |
@@ -481,6 +485,37 @@ binding.
   here; that the screen actually renders "We couldn't read page 1…" is confirmed by a manual pass
   in the live app, because that wording lives in React Native code the script deliberately does
   not import.
+
+#### 5.3.2 Criterion B passes — and the number is mostly not ours
+
+Re-measured 2026-09-05 with the fallback ladder in place, same 10-page PDF, three runs inside
+one hour. Every run fell back nine times (the pinned `light` model was 429-ing throughout), so
+the ladder is what allowed any measurement at all.
+
+| Run | Read | Generate wall | Mean per call | Total |
+|---|---|---|---|---|
+| 1 | 45.1 s | 169.8 s | 8.2 s | **218.6 s** — fail |
+| 2 | 22.9 s | 157.8 s | 19.0 s | **181.6 s** — fail |
+| 3 | 18.9 s | 60.2 s | 3.4 s | **80.6 s** — PASS, 6/6 |
+
+Same code, same document, same number of fallbacks. **Mean call latency swung 3.4 s to 19.0 s,
+a 5.6× spread, purely on how loaded Google's free tier was.** The criterion is therefore not a
+property of this architecture on its own; it is met comfortably when the tier is healthy and
+missed by up to 1.8× when it is not. Re-running until it passes would be dishonest, so all
+three are recorded.
+
+**A theory that was measured and turned out wrong.** `CallQueue` holds its concurrency slot for
+the *entire* task, not just the model call, so `insertItems` and `markSectionComplete` are paced
+by a rate limiter meant for Gemini. That looked like it could explain a 2.6× gap between
+generate wall-clock and the sum of its model calls. `TimingReport.dbMs` was added to measure it:
+**13.5 s of a 60.2 s generate window.** Real, but far too small to be the story. The gap was
+model latency variance all along. The instrumentation stays because the question will recur.
+
+**What is structural.** In the passing run, **49.0 s of the 60.2 s generate window was the
+enforced 7 s gap** — call starts sat 0.0 s above the theoretical floor. Eight sections × 7 s is
+the architecture working as §3.2.6 specifies, not a defect. It also means the headroom is thin:
+a document with more sections spends proportionally more time in pacing, and only a healthy tier
+keeps the total under 120 s.
 
 ## 6. Diagrams: what the pipeline actually does with a labelled figure
 

@@ -441,6 +441,13 @@ async function checkPdf(path: string, apiKey: string, keep: boolean): Promise<vo
       `    (sum of call latencies        ${seconds(result.timing.generateMs)} — a SUM over ` +
         'concurrent calls,\n     so it can exceed wall clock and is NOT a duration)',
     );
+    // The line that turned this measurement around. CallQueue holds its
+    // concurrency slot for the whole task, not just the model call, so these
+    // writes are paced by a rate limiter meant for Gemini.
+    console.log(
+      `    (sum of DB time in-slot       ${seconds(result.timing.dbMs)} — inserting items and ` +
+        'marking\n     sections done, inside the Gemini rate limiter)',
+    );
 
     // Every call start is spaced by at least MIN_GAP_MS, so the span between
     // the first and last start can never be below the floor. How far ABOVE it

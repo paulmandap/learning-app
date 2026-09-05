@@ -71,9 +71,13 @@ export const MODELS = {
   // Re-sweep before assuming either is healthy — that is the whole lesson here.
   light: 'gemini-3.6-flash',
   // No Pro-class model is reachable on the free tier (see the table above).
-  // `strong` stays centralised here for Phase 3 Apply-tier work and written
-  // answer grading. Verified serving 2026-09-04 at 10.4s, but never yet
-  // exercised on a real generation, so it remains unproven for that workload.
+  //
+  // ON NO CODE PATH as of 2026-09-05. Reading, generation and grading all go
+  // through LIGHT_LADDER below; nothing references `strong`. It stays pinned
+  // because D11 names it and a future Apply-tier or verification pass may want
+  // a stronger model — but it has never been exercised on a real generation,
+  // only on a one-token probe (200 in 10.4s on 2026-09-04). Do not build on it
+  // without first running scripts/diagram-probe.ts against it.
   strong: 'gemini-3.5-flash',
 } as const;
 

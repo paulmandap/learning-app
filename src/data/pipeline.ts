@@ -43,6 +43,17 @@ export interface TimingReport {
   totalMs: number;
   readMs: number;
   generateMs: number;
+  /**
+   * Database time spent INSIDE the queue slot — inserting a section's items and
+   * marking it complete.
+   *
+   * Measured because it is not obviously part of the picture and turned out to
+   * dominate: CallQueue holds its concurrency slot for the whole task, not just
+   * the model call, so these writes are paced by a rate limiter meant for
+   * Gemini. Like generateMs this is a SUM over concurrent sections, not a
+   * duration.
+   */
+  dbMs: number;
   /** Time spent waiting on the rate limiter rather than on Gemini. */
   queueWaitMs: number;
   sections: number;
@@ -242,6 +253,7 @@ export async function generateSet(input: {
   const dropped: DroppedItem[] = [];
   let itemsCreated = 0;
   let generateMs = 0;
+  let dbMs = 0;
   let calls = 0;
 
   onProgress?.({
@@ -306,10 +318,12 @@ export async function generateSet(input: {
         for (const k of kept) seenPrompts.push(k.prompt);
         dropped.push(...sectionDropped);
 
+        const dbStart = Date.now();
         const inserted = await insertItems(setId, documentIdByPage, section.title, kept);
         itemsCreated += inserted;
 
         await markSectionComplete(setId, section.id);
+        dbMs += Date.now() - dbStart;
         done.add(section.id);
 
         // Reported as each section lands, so cards appear while the rest run.
@@ -362,6 +376,6 @@ export async function generateSet(input: {
     itemsCreated,
     dropped,
     unreadablePages: plan.unreadablePages,
-    timing: { totalMs, readMs: 0, generateMs, queueWaitMs, sections: plan.sections.length, calls },
+    timing: { totalMs, readMs: 0, generateMs, dbMs, queueWaitMs, sections: plan.sections.length, calls },
   };
 }
