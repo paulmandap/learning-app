@@ -11,6 +11,7 @@ import { deleteSet, getSet, updateSet } from '../../../src/data/sets';
 import { describeDrops } from '../../../src/core/validate';
 import { listDocuments } from '../../../src/data/documents';
 import { countItems } from '../../../src/data/items';
+import { dueCountForSet } from '../../../src/data/review';
 import { generateSet, type Progress } from '../../../src/data/pipeline';
 
 /**
@@ -52,6 +53,10 @@ export default function SetScreen() {
   const { data: docs = [] } = useQuery({
     queryKey: ['docs', setId],
     queryFn: () => listDocuments(setId),
+  });
+  const { data: dueCount = 0 } = useQuery({
+    queryKey: ['due', setId],
+    queryFn: () => dueCountForSet(setId),
   });
 
   const apiKey = profile?.gemini_api_key ?? '';
@@ -200,7 +205,8 @@ export default function SetScreen() {
         // thing and gets out of the way.
         <View style={{ gap: space.xs }}>
           <Body muted>
-            {itemCount} card{itemCount === 1 ? '' : 's'} · Ready
+            {itemCount} card{itemCount === 1 ? '' : 's'}
+            {dueCount > 0 ? ` · ${dueCount} due today` : ' · Ready'}
           </Body>
           {plan && itemCount < plan.requestedCount ? (
             <Body muted>

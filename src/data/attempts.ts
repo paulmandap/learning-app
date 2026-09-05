@@ -1,4 +1,6 @@
 import { supabase } from './supabase';
+import { currentState, saveSchedule } from './review';
+import { nextState } from '../core/schedule';
 import type { AttemptResult } from '../core/grade';
 
 /**
@@ -32,7 +34,18 @@ async function currentUserId(): Promise<string> {
   return id;
 }
 
-/** Record one answer. Exactly one row per answered question. */
+/**
+ * Record one answer. Exactly one row per answered question.
+ *
+ * Also advances the card's review schedule (Phase 6). This is the right place
+ * for it and the only one: every answer in the app — flashcard swipe, flashcard
+ * button, keyboard shortcut, quiz submission — passes through here, so a
+ * schedule cannot be forgotten by a caller that grades a card some new way.
+ *
+ * The schedule write is deliberately non-fatal. Losing an answer because a
+ * scheduling row would not write is a bad trade, and this code ships before
+ * migration 0005 has necessarily been applied.
+ */
 export async function recordAttempt(input: {
   studyItemId: string;
   studySetId: string;
@@ -58,6 +71,23 @@ export async function recordAttempt(input: {
   });
 
   if (error) throw new Error(error.message);
+
+  // --- advance the schedule ------------------------------------------------
+  // After the attempt row, never instead of it: the attempt is the record of
+  // truth and the missed pile (D8) is built from it, so it must land first.
+  try {
+    const prev = await currentState(input.studyItemId);
+    await saveSchedule({
+      userId: user_id,
+      studyItemId: input.studyItemId,
+      studySetId: input.studySetId,
+      state: nextState(prev, input.result, Date.now()),
+      lastResult: input.result,
+    });
+  } catch {
+    // Studying continues without a schedule. See the note in src/data/review.ts
+    // on why this degrades rather than throws.
+  }
 }
 
 export interface ItemStat {

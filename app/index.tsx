@@ -5,6 +5,7 @@ import { Body, Button, Card, ListRow, Notice, Screen } from '../src/ui/component
 import { fetchProfile } from '../src/data/profile';
 import { listSets, type StudySet } from '../src/data/sets';
 import { continueTarget } from '../src/data/attempts';
+import { dueCountsBySet } from '../src/data/review';
 import { useSessionStore } from '../src/data/session';
 import { formatSetTitle } from '../src/core/title';
 
@@ -26,6 +27,13 @@ export default function Home() {
   const { data: continueTo } = useQuery({
     queryKey: ['continue'],
     queryFn: continueTarget,
+    enabled: !!session,
+  });
+
+  // One query for the whole screen, not one per set.
+  const { data: dueBySet } = useQuery({
+    queryKey: ['due'],
+    queryFn: () => dueCountsBySet(),
     enabled: !!session,
   });
 
@@ -54,11 +62,7 @@ export default function Home() {
         >
           <Card>
             <Body>Continue: {formatSetTitle(continueSet.title)}</Body>
-            <Body muted>
-              {continueTo!.missed > 0
-                ? `${continueTo!.missed} card${continueTo!.missed === 1 ? '' : 's'} to retry`
-                : 'Nothing to retry — you are on top of this one'}
-            </Body>
+            <Body muted>{describeContinue(continueTo!, dueBySet)}</Body>
           </Card>
         </Pressable>
       ) : null}
@@ -76,7 +80,7 @@ export default function Home() {
           <ListRow
             key={set.id}
             title={formatSetTitle(set.title)}
-            meta={describeSet(set)}
+            meta={describeSet(set, dueBySet?.get(set.id) ?? 0)}
             onPress={() => router.push(`/set/${set.id}`)}
           />
         ))
@@ -88,8 +92,29 @@ export default function Home() {
   );
 }
 
+/**
+ * What to say under "Continue: <set>".
+ *
+ * Due and missed are different things and both matter: due is the schedule
+ * saying it is time, missed is the pile of things you got wrong. They are shown
+ * together when both apply, and the fallback stays encouraging rather than
+ * empty.
+ */
+function describeContinue(
+  target: { studySetId: string; missed: number },
+  dueBySet: Map<string, number> | undefined,
+): string {
+  const due = dueBySet?.get(target.studySetId) ?? 0;
+  const parts: string[] = [];
+  if (due > 0) parts.push(`${due} due today`);
+  if (target.missed > 0) {
+    parts.push(`${target.missed} card${target.missed === 1 ? '' : 's'} to retry`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : 'Nothing waiting — you are on top of this one';
+}
+
 /** "12 cards · Ready" — status alone did not say how much was in a set. */
-function describeSet(set: StudySet): string {
+function describeSet(set: StudySet, due: number): string {
   const status =
     set.status === 'generating'
       ? 'Still making cards…'
@@ -100,5 +125,9 @@ function describeSet(set: StudySet): string {
           : 'Ready';
 
   if (set.cardCount === undefined || set.cardCount === 0) return status;
-  return `${set.cardCount} card${set.cardCount === 1 ? '' : 's'} · ${status}`;
+  const cards = `${set.cardCount} card${set.cardCount === 1 ? '' : 's'}`;
+  // The due count replaces "Ready" when there is one: "12 due today" is the
+  // more useful half of that line, and both together is more than a list row
+  // should carry.
+  return due > 0 ? `${cards} · ${due} due today` : `${cards} · ${status}`;
 }

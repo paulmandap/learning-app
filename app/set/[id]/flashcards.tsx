@@ -16,6 +16,8 @@ import { gradeFeedback, hapticFlip, primeFeedback } from '../../../src/ui/feedba
 import { radius, space, useTheme } from '../../../src/ui/theme';
 import { listItems, reportItem, type StudyItem } from '../../../src/data/items';
 import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
+import { reviewStatesForSet } from '../../../src/data/review';
+import { isDue, reviewOrder } from '../../../src/core/schedule';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import { excerptMatches } from '../../../src/core/excerpt';
 import type { Level } from '../../../src/core/planner';
@@ -49,11 +51,36 @@ export default function Flashcards() {
     queryFn: () => missedItemIds(setId),
   });
 
+  const { data: schedules } = useQuery({
+    queryKey: ['schedules', setId],
+    queryFn: () => reviewStatesForSet(setId),
+  });
+
   // The missed pile (D8). Retention comes from coming back to what you got
   // wrong, so this is a first-class mode rather than a filter buried in a menu.
-  const items = useMemo(
-    () => (retryOnly ? allItems.filter((i) => missedSet?.has(i.id)) : allItems),
-    [allItems, retryOnly, missedSet],
+  //
+  // Outside retry mode the deck is ORDERED by the schedule (Phase 6) rather
+  // than filtered: due cards first, longest overdue leading, then cards never
+  // seen, then the rest. Ordering rather than filtering is deliberate — a deck
+  // that hides everything not due would show "nothing to study" to someone who
+  // sat down wanting to study, which is the wrong answer to give them.
+  const items = useMemo(() => {
+    if (retryOnly) return allItems.filter((i) => missedSet?.has(i.id));
+    return reviewOrder(allItems, (i) => schedules?.get(i.id), Date.now());
+  }, [allItems, retryOnly, missedSet, schedules]);
+
+  const dueNow = useMemo(
+    () =>
+      retryOnly
+        ? 0
+        : allItems.filter((i) => {
+            const s = schedules?.get(i.id);
+            // Only cards with a schedule that has come up. A card never
+            // reviewed is not "due" — it is simply new, and saying otherwise
+            // would make every fresh set claim its whole deck was overdue.
+            return s !== undefined && isDue(s, Date.now());
+          }).length,
+    [allItems, retryOnly, schedules],
   );
   const { data: docs = [] } = useQuery({
     queryKey: ['docs', setId],
@@ -207,6 +234,11 @@ export default function Flashcards() {
       ) : card ? (
         <>
           <ProgressBar value={index} total={items.length} />
+          {dueNow > 0 ? (
+            <Body muted>
+              {dueNow} due for review today — those come first.
+            </Body>
+          ) : null}
 
           <FlipCard
             key={card.id}

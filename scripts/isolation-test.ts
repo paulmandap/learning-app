@@ -6,7 +6,7 @@
  * because RLS is enforced by Postgres, not by anything we could unit test.
  *
  * Coverage, each asserted separately:
- *   - every base table
+ *   - every base table, including review_state (Phase 6)
  *   - item_stats and topic_stats  <-- the views, tested in their own right
  *   - storage objects under A's prefix
  *   - profiles.gemini_api_key specifically
@@ -147,6 +147,21 @@ async function main() {
     });
   }
 
+  // Phase 6: a schedule row for A, so B reading zero of them means something.
+  if (item) {
+    await A.client.from('review_state').insert({
+      user_id: A.userId,
+      study_item_id: item.id,
+      study_set_id: set.id,
+      due_at: new Date().toISOString(),
+      interval_days: 6,
+      ease: 2.5,
+      reps: 2,
+      lapses: 0,
+      last_result: 'correct',
+    });
+  }
+
   await A.client.from('document_pages').insert({
     user_id: A.userId,
     document_id: doc?.id ?? null,
@@ -171,6 +186,9 @@ async function main() {
     'document_pages',
     'study_items',
     'attempts',
+    // Phase 6. Holds no notes, but it maps a user's item ids to a study
+    // rhythm — leaking it would leak what someone is struggling with.
+    'review_state',
   ] as const;
 
   for (const table of tables) {
