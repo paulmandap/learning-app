@@ -98,7 +98,11 @@ jobs:
           echo "All eight tables and the Phase 8 columns are present."
 
       - name: Upload backup
-        uses: actions/upload-artifact@v4
+        # v7 rather than v4: v4 declares Node 20, which GitHub deprecated and now
+        # force-runs on Node 24 — a warning today, a broken backup whenever they
+        # stop forcing it. Checked before bumping: name, path, if-no-files-found
+        # and retention-days all still exist in v7's inputs.
+        uses: actions/upload-artifact@v7
         with:
           name: supabase-backup-${{ github.run_id }}
           path: |
