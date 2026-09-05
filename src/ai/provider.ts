@@ -11,6 +11,7 @@
  */
 
 import type { FailureReason } from '../core/ai-errors';
+import type { AssistantContext } from '../core/chat';
 
 export type TestConnectionResult =
   | { ok: true; models: string[] }
@@ -100,6 +101,14 @@ export interface AIProvider {
     answer: string;
     sourceExcerpt: string;
   }): Promise<VariantResult | null>;
+  /**
+   * Answer one question about the student's notes (D14).
+   *
+   * Returns plain text, not a schema: an answer IS the payload, so wrapping it
+   * in JSON would spend output tokens on punctuation the screen then strips.
+   * Null when the model returned nothing usable.
+   */
+  chat(input: { question: string; context: AssistantContext }): Promise<string | null>;
   /** Check an Apply-tier rubric against its source (D7's postponed pass). */
   verifyRubric(input: {
     prompt: string;

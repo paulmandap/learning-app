@@ -308,3 +308,32 @@ export function parseRubricCheck(payload: unknown): { unsupported: string[]; not
   const parsed = rubricCheckSchema.safeParse(payload);
   return parsed.success ? parsed.data : null;
 }
+
+// ------------------------------------------------------------------ chat --
+
+export const chatResultSchema = z.object({ answer: z.string().min(1) });
+
+/**
+ * Shape requested for a study-assistant reply (D14).
+ *
+ * An answer is prose, so wrapping it in JSON looks like waste — and the first
+ * version of this file did exactly that reasoning and asked for plain text.
+ * It was wrong for a mechanical reason: `#generateContent` returns
+ * `extractJsonPayload(...)` to EVERY caller, so a plain-text reply was parsed
+ * as JSON, failed, and came back null. The student saw "I couldn't come up with
+ * an answer" while the model had answered perfectly well.
+ *
+ * The wrapper costs about ten tokens. Being the only call in the file that
+ * needs its own return path costs more than that.
+ */
+export const CHAT_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: { answer: { type: 'string' } },
+  required: ['answer'],
+} as const;
+
+/** Parse an assistant reply. Null when unusable, so the screen can say so. */
+export function parseChatResult(payload: unknown): string | null {
+  const parsed = chatResultSchema.safeParse(payload);
+  return parsed.success ? parsed.data.answer.trim() : null;
+}

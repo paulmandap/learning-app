@@ -1,0 +1,238 @@
+import { useEffect, useRef, useState } from 'react';
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { useQuery } from '@tanstack/react-query';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { radius, space, useTheme } from './theme';
+import { fetchProfile } from '../data/profile';
+import { askAssistant } from '../data/assistant';
+import { useAssistantContext } from '../data/assistant-context';
+import { describeRemaining, isAskable, MAX_QUESTION_CHARS } from '../core/chat';
+
+/**
+ * The study assistant (Phase 9c, D14).
+ *
+ * A small circle in the bottom corner that opens into a panel big enough to
+ * read and type in — the owner's words. Closed it is one tappable circle;
+ * open it is a sheet on a phone and a panel beside the content on a desktop.
+ *
+ * ## Deliberately not a chat app
+ *
+ * One question, one answer, no scrollback. That is not a shortcut:
+ *
+ *  - a conversation history would be sent with every follow-up, so the third
+ *    question in a thread costs several times the first — on a free tier shared
+ *    with the thing that actually makes the cards;
+ *  - the answer is grounded in the card or the notes in front of you, and a
+ *    thread drifts away from that grounding with each turn;
+ *  - the useful question here is "explain this bit", asked and answered.
+ *
+ * ## What it knows
+ *
+ * Whatever the current screen put in `useAssistantContext` — the open card on a
+ * study screen, the set's notes elsewhere. An ungrounded assistant would be
+ * worse than the Gemini web app for the same quota, and could confidently
+ * contradict the notes the student is about to be examined on.
+ */
+
+const CLOSED_SIZE = 52;
+/** Wide enough for a paragraph without being a second window. */
+const PANEL_WIDTH = 380;
+/** Below this the panel goes nearly full width, as a sheet. */
+const NARROW_MAX_WIDTH = 520;
+
+export function StudyAssistant() {
+  const t = useTheme();
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const context = useAssistantContext((s) => s.context);
+
+  const [open, setOpen] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
+  const apiKey = profile?.gemini_api_key ?? '';
+
+  const narrow = width < NARROW_MAX_WIDTH;
+  const panelWidth = narrow ? Math.min(width - space.lg * 2, 420) : PANEL_WIDTH;
+
+  // Escape closes it, the way any overlay should on a keyboard.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  async function ask() {
+    // A ref, set synchronously. The same double-submit that produced phantom
+    // quiz questions would here spend two of a capped twenty on one question.
+    if (inFlight.current || !isAskable(question)) return;
+    inFlight.current = true;
+    setBusy(true);
+    setAnswer(null);
+    setNote(null);
+
+    const result = await askAssistant({ question, context, apiKey });
+
+    if (result.ok) {
+      setAnswer(result.answer);
+      setNote(describeRemaining(result.remaining));
+    } else {
+      setNote(result.message);
+    }
+    setBusy(false);
+    inFlight.current = false;
+  }
+
+  // ------------------------------------------------------------- closed --
+  if (!open) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Ask about your notes"
+        onPress={() => setOpen(true)}
+        style={{
+          position: 'absolute',
+          right: space.lg,
+          bottom: insets.bottom + space.lg,
+          width: CLOSED_SIZE,
+          height: CLOSED_SIZE,
+          borderRadius: CLOSED_SIZE / 2,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: t.accent,
+          // A real shadow, because this floats over content rather than sitting
+          // in it — without one it reads as a flat sticker on the page.
+          shadowColor: '#000',
+          shadowOpacity: 0.22,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 3 },
+          elevation: 5,
+        }}
+      >
+        <Text style={{ fontSize: 22, color: t.accentText }}>✦</Text>
+      </Pressable>
+    );
+  }
+
+  // --------------------------------------------------------------- open --
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        right: narrow ? space.md : space.lg,
+        bottom: insets.bottom + space.md,
+        width: panelWidth,
+        // Tall enough to read a four-sentence answer without scrolling, and
+        // never taller than the window it floats in.
+        maxHeight: Math.min(height - insets.top - space.xl * 2, 460),
+        backgroundColor: t.card,
+        borderColor: t.border,
+        borderWidth: 1,
+        borderRadius: radius.lg,
+        padding: space.lg,
+        gap: space.sm,
+        shadowColor: '#000',
+        shadowOpacity: 0.24,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 8,
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <Text style={{ flex: 1, fontSize: 16, fontWeight: '700', color: t.text }}>
+          Ask about your notes
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          onPress={() => setOpen(false)}
+          hitSlop={10}
+        >
+          <Text style={{ fontSize: 20, color: t.textMuted }}>✕</Text>
+        </Pressable>
+      </View>
+
+      {/* Says what it can see, so the answers are not mysterious. A student who
+          knows it is looking at this card asks better questions of it. */}
+      <Text style={{ fontSize: 13, color: t.textMuted }}>
+        {context.kind === 'card'
+          ? 'Looking at the card in front of you.'
+          : context.kind === 'set'
+            ? `Looking at "${context.title}".`
+            : 'Open a set and I can answer from your own notes.'}
+      </Text>
+
+      <TextInput
+        value={question}
+        onChangeText={setQuestion}
+        placeholder="Why is this the answer?"
+        placeholderTextColor={t.textMuted}
+        multiline
+        maxLength={MAX_QUESTION_CHARS}
+        onSubmitEditing={ask}
+        // The panel opens because someone wants to type. Landing in the field
+        // saves a tap, and there is nothing else here to focus.
+        autoFocus
+        style={{
+          borderWidth: 1,
+          borderColor: t.border,
+          borderRadius: radius.sm,
+          backgroundColor: t.bg,
+          color: t.text,
+          padding: space.md,
+          minHeight: 64,
+          fontSize: 15,
+        }}
+      />
+
+      <Pressable
+        accessibilityRole="button"
+        onPress={ask}
+        disabled={busy || !isAskable(question)}
+        style={{
+          backgroundColor: busy || !isAskable(question) ? t.border : t.accent,
+          borderRadius: radius.sm,
+          paddingVertical: space.md,
+          alignItems: 'center',
+          minHeight: 44,
+          justifyContent: 'center',
+        }}
+      >
+        <Text
+          style={{
+            color: busy || !isAskable(question) ? t.textMuted : t.accentText,
+            fontWeight: '700',
+            fontSize: 15,
+          }}
+        >
+          {busy ? 'Thinking…' : 'Ask'}
+        </Text>
+      </Pressable>
+
+      {answer ? (
+        // Scrolls rather than clipping: four sentences fit, and an occasional
+        // longer answer must still be readable to the end.
+        <ScrollView style={{ flexShrink: 1 }}>
+          <Text style={{ color: t.text, fontSize: 15, lineHeight: 22 }}>{answer}</Text>
+        </ScrollView>
+      ) : null}
+
+      {note ? <Text style={{ color: t.textMuted, fontSize: 13 }}>{note}</Text> : null}
+    </View>
+  );
+}

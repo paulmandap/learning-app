@@ -93,6 +93,13 @@ export default function Settings() {
           Google may read them.{'\n\n'}
           Please don't add patient information, anyone's personal details, or confidential work
           documents. A good test: if you wouldn't want a stranger reading it, don't put it here.
+          {'\n\n'}
+          {/* D13 fixes this copy and says it must not be paraphrased smaller,
+              so the assistant is NAMED here rather than left implied — it sends
+              notes to Google more often, and more casually, than making cards
+              does. Wording approved by the owner (Phase 9c). */}
+          The study assistant works the same way — what you ask it, and the notes it looks at to
+          answer, are sent to Google too.
         </Notice>
       </Card>
 

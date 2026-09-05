@@ -5,6 +5,7 @@ import { useColorScheme, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { startSessionListener, useSessionStore } from '../src/data/session';
 import { HeaderBackButton } from '../src/ui/menu';
+import { StudyAssistant } from '../src/ui/assistant';
 import { useTheme } from '../src/ui/theme';
 
 const queryClient = new QueryClient({
@@ -49,7 +50,13 @@ const backable = {
 
 function RootNavigator() {
   const t = useTheme();
+  const segments = useSegments();
   useAuthRedirect();
+
+  // Mounted once, above the navigator, so it survives navigation and keeps its
+  // panel open across screens. Hidden on sign-in: there are no notes to ask
+  // about yet, and a floating button over a one-field form is clutter.
+  const showAssistant = segments[0] !== 'sign-in';
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
@@ -94,6 +101,7 @@ function RootNavigator() {
           options={{ title: 'Fill in the blanks', ...backable }}
         />
       </Stack>
+      {showAssistant ? <StudyAssistant /> : null}
     </View>
   );
 }

@@ -18,6 +18,7 @@ import { SourcePanel } from '../../../src/ui/source';
 import { listItems, promptFor, reportItem, type StudyItem } from '../../../src/data/items';
 import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
 import { fetchProfile } from '../../../src/data/profile';
+import { useAssistantContext } from '../../../src/data/assistant-context';
 import { reviewStatesForSet } from '../../../src/data/review';
 import { isDue, reviewOrder } from '../../../src/core/schedule';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
@@ -118,6 +119,23 @@ export default function Flashcards() {
   }, []);
 
   const card: StudyItem | undefined = items[index];
+
+  // Tell the assistant which card is open, so "why is this the answer?" is
+  // answerable without sending a page of notes. Cleared on unmount, because a
+  // stale card is worse than none — it would answer confidently about a card
+  // the student left two screens ago.
+  const setAssistantContext = useAssistantContext((s) => s.setContext);
+  const clearAssistantContext = useAssistantContext((s) => s.clearContext);
+  useEffect(() => {
+    if (!card) return;
+    setAssistantContext({
+      kind: 'card',
+      prompt: promptFor(card),
+      answer: card.answer,
+      source: card.source_excerpt,
+    });
+  }, [card, setAssistantContext]);
+  useEffect(() => clearAssistantContext, [clearAssistantContext]);
 
   /** One place to turn a card over, so tap and keyboard behave identically. */
   function toggleReveal() {

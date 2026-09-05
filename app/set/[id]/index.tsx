@@ -9,8 +9,10 @@ import { formatSetTitle } from '../../../src/core/title';
 import { fetchProfile } from '../../../src/data/profile';
 import { deleteSet, getSet, updateSet } from '../../../src/data/sets';
 import { describeDrops } from '../../../src/core/validate';
-import { freeUpSpace, listDocuments } from '../../../src/data/documents';
+import { freeUpSpace, listDocuments, pagesForSet } from '../../../src/data/documents';
 import { formatBytes } from '../../../src/core/storage';
+import { useAssistantContext } from '../../../src/data/assistant-context';
+import { trimNotes } from '../../../src/core/chat';
 import { countItems } from '../../../src/data/items';
 import { dueCountForSet } from '../../../src/data/review';
 import { generateSet, type Progress } from '../../../src/data/pipeline';
@@ -64,6 +66,25 @@ export default function SetScreen() {
   });
 
   const apiKey = profile?.gemini_api_key ?? '';
+
+  // The assistant answers from this set's notes while you are on its screen.
+  // Fetched lazily and trimmed to a budget — the whole point of the cap is that
+  // one question must not carry a whole document (src/core/chat.ts).
+  const { data: pages = [] } = useQuery({
+    queryKey: ['pages', setId],
+    queryFn: () => pagesForSet(setId),
+  });
+  const setAssistantContext = useAssistantContext((s) => s.setContext);
+  const clearAssistantContext = useAssistantContext((s) => s.clearContext);
+  useEffect(() => {
+    if (!set) return;
+    setAssistantContext({
+      kind: 'set',
+      title: formatSetTitle(set.title),
+      notes: trimNotes(pages.map((p) => p.text).join('\n\n')),
+    });
+  }, [set, pages, setAssistantContext]);
+  useEffect(() => clearAssistantContext, [clearAssistantContext]);
 
   async function saveName() {
     const next = (renaming ?? '').trim();

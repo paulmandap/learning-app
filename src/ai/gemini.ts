@@ -19,10 +19,12 @@ import {
   isRetryableStatus,
 } from '../core/ai-errors';
 import { parseRetryAfter, RateLimitedError } from '../core/queue';
+import { MAX_REPLY_TOKENS, type AssistantContext } from '../core/chat';
 import {
   ALLOWED_FORMS,
   buildGeneratePrompt,
   buildGradePrompt,
+  buildChatPrompt,
   buildRubricCheckPrompt,
   buildVariantPrompt,
   READ_SYSTEM_PROMPT,
@@ -33,9 +35,11 @@ import {
   parseGradeResult,
   parseItemsLoose,
   parseReadResult,
+  parseChatResult,
   parseRubricCheck,
   parseVariantResult,
   READ_RESPONSE_SCHEMA,
+  CHAT_RESPONSE_SCHEMA,
   RUBRIC_CHECK_RESPONSE_SCHEMA,
   VARIANT_RESPONSE_SCHEMA,
 } from './schemas';
@@ -395,6 +399,40 @@ export class GeminiBrowserProvider implements AIProvider {
     });
 
     return parseVariantResult(payload);
+  }
+
+  /**
+   * Answer one question about the student's notes (D14).
+   *
+   * Asks for JSON like every other call here, and that is not incidental:
+   * `#generateContent` hands `extractJsonPayload(...)` to every caller, so a
+   * plain-text reply is parsed as JSON, fails, and arrives as null. Built that
+   * way first, and the student saw "I couldn't come up with an answer" while
+   * the model had answered fine.
+   *
+   * `maxOutputTokens` is a truncation guard, not a spend control — see
+   * MAX_REPLY_TOKENS for the measurement. The prompt asks for at most four
+   * sentences, and this is what makes it true: a rule with no mechanism behind
+   * it is a wish.
+   *
+   * Temperature sits between the two extremes used elsewhere. Grading and rubric
+   * checks run at 0 because the same input must give the same verdict; a
+   * rephrasing runs at 0.9 because a rewrite that lands near the original is
+   * wasted. An explanation wants neither — repeatable enough to be trustworthy,
+   * loose enough not to repeat itself word for word when asked twice.
+   */
+  async chat(input: { question: string; context: AssistantContext }): Promise<string | null> {
+    const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
+      contents: [{ role: 'user', parts: [{ text: buildChatPrompt(input) }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: CHAT_RESPONSE_SCHEMA,
+        maxOutputTokens: MAX_REPLY_TOKENS,
+        temperature: 0.3,
+      },
+    });
+
+    return parseChatResult(payload);
   }
 
   /**

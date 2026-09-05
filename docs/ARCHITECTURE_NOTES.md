@@ -1341,6 +1341,114 @@ chevron and no tab bar.
 test green · screenshots at 430px and 1280px. Not yet deployed — 0008 and 0009
 are owner actions and 0009 must land first.
 
+## 13. Phase 9c — the study assistant (D14)
+
+A floating button that opens into a panel, grounded in the student's own notes,
+with a daily cap so it cannot starve card generation. **Not in the spec** — §3.3
+lists exactly four things Gemini does (read, write items, grade, write variants)
+and this is a fifth, with a recurring cost. Recorded as **D14** rather than
+slipped in.
+
+> **Migration 0010 is NOT applied.** Until it is, the cap degrades open: the
+> assistant warns once per question and answers uncapped. Unlike 0009 this is
+> safe to deploy first — nothing reads a column that does not exist.
+
+### 13.1 `maxOutputTokens` is not a spend control — measured
+
+The obvious design is a small `maxOutputTokens` to make each answer cheap. It
+was built that way, at 320, and **every question returned "I couldn't come up
+with an answer"**.
+
+On Gemini 3.x, `maxOutputTokens` budgets the model's **thinking and its answer
+together**. Measured live on a realistic prompt:
+
+| Cap | Model | Thinking | Answer | Result |
+|---|---|---|---|---|
+| 320 | `gemini-3.7-flash` | 303 | 76 chars | **MAX_TOKENS, cut mid-sentence** |
+| 320 | `gemini-3.6-flash` | 286 | 26 tok | barely fits a one-line question |
+| 640 | `gemini-3.7-flash` | 511 | 42 tok | STOP, complete |
+| 640 | `gemini-3.5-flash-lite` | 0 | 46 tok | STOP, complete |
+
+The thinking tokens are spent whether or not the answer fits, so a low cap does
+not save them — **it throws away the answer they already paid for**.
+`thinkingConfig: { thinkingBudget: 0 }` was tried and is ignored by these models:
+thinking still ran to 303 tokens.
+
+Set to 1024, and the real cost controls are the two that actually bound spend:
+the daily message count, and the four-sentence rule in the prompt.
+
+Note `flash-lite` reports zero thinking tokens — it does not think by default,
+which is why it was the rung that appeared to work while the others did not.
+
+### 13.2 A second bug behind the first
+
+With the budget fixed the answers were still empty, and the ladder log showed a
+rung had **served** the request. `#generateContent` returns
+`extractJsonPayload(...)` to every caller, and the assistant was the one call
+asking for plain text — so a perfectly good prose answer was run through
+`JSON.parse`, failed, and arrived as `null`.
+
+The reasoning that produced it is written down because it sounds right: an
+answer is prose, so a JSON wrapper spends output tokens on braces the screen then
+strips. True, and worth about ten tokens — far less than being the only call in
+the file with its own return path. It now uses `CHAT_RESPONSE_SCHEMA` like
+everything else, and `extractText` was deleted rather than left as dead code.
+
+Both bugs presented identically: a fluent model, a silent null, and a student
+told the assistant had nothing to say.
+
+### 13.3 What it can see, and why that is two things
+
+Card context on a study screen, set context elsewhere — the owner's choice, and
+the cheap one is also the better one. Answering *"why is this the answer?"* needs
+the card in front of you, not a page of notes, so the common question is also the
+smallest request.
+
+Verified against live Gemini. On a card:
+
+> *"Your notes state that gas exchange passes through stomata on the underside of
+> the leaf blade…"*
+
+On a set, it surfaced **"Vance's rule"** and **"specimen VR-118"** — the canaries
+planted in those fixtures (§6.1), which exist nowhere but in that document. That
+is the check that matters: not that it replied, but that it replied from the
+notes rather than from general plant biology.
+
+`scripts/assistant-probe.ts` runs this, including the refusal paths that must
+cost no model call at all.
+
+### 13.4 The cap is a database row, not a counter in the browser
+
+Gemini's free quota is **per Google project** (§2.2), so a per-device counter
+would protect nothing: the same key on a phone and a laptop would each get a
+full allowance and between them exhaust the quota generation depends on.
+
+`claim_chat_message` (0010) increments and returns what is left in one statement,
+so two tabs cannot both pass a check-then-increment. The claim happens **before**
+the model call — a cap enforced afterwards would let a burst all through. A
+failed call does not refund, because the failure modes that would trigger a
+refund are exactly when the quota most needs protecting.
+
+### 13.5 Deliberately not a chat
+
+One question, one answer, no scrollback. A history would be re-sent with every
+follow-up, so the third question in a thread costs several times the first — on
+an allowance shared with the thing that actually makes the cards. It also drifts
+from the grounding with each turn, and the useful question here is "explain this
+bit", asked and answered.
+
+### 13.6 D13 privacy copy extended, with approval
+
+D13 fixes the Settings wording and says it must not be paraphrased smaller, so
+the assistant is named rather than left implied. Owner-approved:
+
+> The study assistant works the same way — what you ask it, and the notes it
+> looks at to answer, are sent to Google too.
+
+**Verified:** typecheck clean · **392 tests** · `expo export` · boot test green ·
+screenshots of the closed button and the open panel · live probe grounded on both
+contexts. 0010 outstanding.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

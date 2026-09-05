@@ -373,6 +373,14 @@ async function main() {
       );
     }
 
+    // `--click "<label>"` presses a control before the shot, for the states you
+    // cannot reach by URL — an opened panel, a revealed answer.
+    const clickLabel = flag('--click');
+    if (clickLabel) {
+      await page.click(clickLabel);
+      await new Promise((r) => setTimeout(r, 900));
+    }
+
     await page.screenshot(out);
 
     console.log(`--- ${route} ---`);
