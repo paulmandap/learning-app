@@ -1,7 +1,31 @@
 import { useState, type ReactNode } from 'react';
-import { Modal, Pressable, Text, View } from 'react-native';
+import { Modal, Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { useNavigation, useRouter } from 'expo-router';
-import { radius, space, TOUCH_TARGET, type, useTheme } from './theme';
+import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
+
+/**
+ * Extra inset that pulls a header control in to the content column's edge.
+ *
+ * `Screen` centres a CONTENT_MAX_WIDTH column inside space.lg of padding, so
+ * the column's left edge is `space.lg + (W - 2·space.lg - MAX)/2`, which
+ * simplifies exactly to `(W - MAX)/2`. The header already supplies roughly
+ * space.lg of its own padding, so only the difference is added here.
+ *
+ * Without it the header spanned the whole window while the content sat in a
+ * 720px column — on a desktop screen that put the chevron and the ⋯ about 600px
+ * outboard of everything else, which read as the content being shoved left even
+ * though the column was exactly centred.
+ *
+ * At phone widths this is 0, so the mobile header does not move at all.
+ *
+ * (This lives in the components rather than in the navigator's screenOptions
+ * because native-stack has no headerLeftContainerStyle — that is a JS-stack
+ * option and is silently absent here.)
+ */
+function useHeaderGutter(): number {
+  const { width } = useWindowDimensions();
+  return Math.max(0, (width - CONTENT_MAX_WIDTH) / 2 - space.lg);
+}
 
 /**
  * A header overflow menu (⋯).
@@ -29,6 +53,7 @@ export function OverflowMenu({ items, accessibilityLabel = 'More actions' }: {
   accessibilityLabel?: string;
 }) {
   const t = useTheme();
+  const gutter = useHeaderGutter();
   const [open, setOpen] = useState(false);
 
   return (
@@ -38,7 +63,13 @@ export function OverflowMenu({ items, accessibilityLabel = 'More actions' }: {
         accessibilityLabel={accessibilityLabel}
         onPress={() => setOpen(true)}
         hitSlop={12}
-        style={{ paddingHorizontal: space.sm, paddingVertical: space.xs }}
+        style={{
+          width: TOUCH_TARGET,
+          height: TOUCH_TARGET,
+          alignItems: 'flex-end',
+          justifyContent: 'center',
+          marginRight: gutter,
+        }}
       >
         {/* U+22EF. Renders as text everywhere, unlike an emoji ellipsis. */}
         <Text style={{ color: t.accent, fontSize: 24, lineHeight: 28 }}>⋯</Text>
@@ -128,6 +159,7 @@ export function HeaderBackButton({ label = 'Back' }: { label?: string }) {
   const t = useTheme();
   const router = useRouter();
   const navigation = useNavigation();
+  const gutter = useHeaderGutter();
 
   return (
     <Pressable
@@ -147,6 +179,7 @@ export function HeaderBackButton({ label = 'Back' }: { label?: string }) {
         height: TOUCH_TARGET,
         alignItems: 'flex-start',
         justifyContent: 'center',
+        marginLeft: gutter,
       }}
     >
       {/* U+2039, sized to read as a chevron rather than a stray character. */}
@@ -166,6 +199,7 @@ export function HeaderGlyphButton({
   accessibilityLabel: string;
 }) {
   const t = useTheme();
+  const gutter = useHeaderGutter();
   return (
     <Pressable
       accessibilityRole="button"
@@ -179,6 +213,7 @@ export function HeaderGlyphButton({
         height: TOUCH_TARGET,
         alignItems: 'flex-end',
         justifyContent: 'center',
+        marginRight: gutter,
       }}
     >
       <Text style={{ color: t.accent, fontSize: 24, lineHeight: 28 }}>{glyph}</Text>

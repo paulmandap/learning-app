@@ -253,7 +253,14 @@ export function Notice({ tone, children }: { tone: 'ok' | 'error' | 'warn'; chil
 }
 
 const styles = StyleSheet.create({
-  screenContent: { alignItems: 'center', padding: space.lg, paddingBottom: 48 },
+  screenContent: {
+    alignItems: 'center',
+    padding: space.lg,
+    // A 28px large title sitting 16px under the navigation bar reads as text
+    // that happens to be first rather than as a heading. It needs room above it.
+    paddingTop: space.xxl,
+    paddingBottom: 48,
+  },
   card: { borderWidth: 1, borderRadius: radius.md, padding: space.lg, gap: space.md },
   row: {
     borderWidth: 1,
@@ -278,6 +285,16 @@ const styles = StyleSheet.create({
   button: {
     borderWidth: 1,
     borderRadius: radius.button,
+    // A button stops being button-shaped past about this width — at the full
+    // 720px column it read as a banner. No alignment property is needed: a
+    // column flex container stretches its children by default, and a stretched
+    // item with a max width sits at the START of the cross axis, so buttons stay
+    // flush with the title's left edge.
+    //
+    // Mobile is unaffected: the widest phone leaves 398px of content, under the
+    // cap. Buttons already inside a flex:1 row are constrained by the wrapper
+    // first, so this never binds there either.
+    maxWidth: 400,
     paddingVertical: space.md,
     paddingHorizontal: space.lg,
     alignItems: 'center',
