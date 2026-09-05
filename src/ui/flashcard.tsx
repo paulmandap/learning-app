@@ -62,9 +62,59 @@ export function FlipCard({
   // so reading state directly inside it would capture the first render's values.
   const widthRef = useRef(0);
   const gradingRef = useRef(false);
-  /** Which detent has already buzzed, so a single drag buzzes once. */
-  const armedRef = useRef<SwipeVerdict>('none');
+  /** One buzz per gesture, whichever path gets there first. */
+  const buzzedRef = useRef(false);
+  /** Latest drag offsets, for the native touchend listener. */
+  const lastDragRef = useRef({ dx: 0, dy: 0 });
+  /** The card's DOM node on web, so a real touchend listener can be attached. */
+  const cardRef = useRef<View | null>(null);
   widthRef.current = width;
+
+  /**
+   * Fire grade feedback at most once per gesture.
+   *
+   * Two paths race to do this — the native touchend listener and finish() — and
+   * which one wins depends on event ordering we do not control. Both call this.
+   */
+  const buzzOnce = (gotIt: boolean) => {
+    if (buzzedRef.current) return;
+    buzzedRef.current = true;
+    gradeFeedback(gotIt);
+  };
+
+  /**
+   * The haptic fires from a REAL touchend listener, not from PanResponder.
+   *
+   * iOS has no Vibration API, so haptics go through the hidden-switch trick,
+   * and Safari only performs that during TRANSIENT USER ACTIVATION. The events
+   * that grant activation are click, pointerdown/up, keydown and touchend —
+   * touchmove is not among them, and react-native-web's responder system
+   * dispatches its release callback asynchronously, by which point the
+   * activation has lapsed. That is why a button press buzzed and an identical
+   * call from a swipe did not.
+   *
+   * Attaching straight to the DOM node puts the call inside the touchend
+   * dispatch itself, which is the same standing a Pressable's click has.
+   * Web-only by construction; native builds have a real haptics API instead.
+   */
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const node = cardRef.current as unknown as HTMLElement | null;
+    if (!node || typeof node.addEventListener !== 'function') return;
+
+    const onTouchEnd = () => {
+      const { dx, dy } = lastDragRef.current;
+      // Distance only: velocity is not available here, and a flick too short to
+      // qualify on distance is handled by finish() instead.
+      const verdict = swipeVerdict({ dx, dy, vx: 0, width: widthRef.current });
+      if (verdict !== 'none') buzzOnce(verdict === 'gotIt');
+      lastDragRef.current = { dx: 0, dy: 0 };
+    };
+
+    node.addEventListener('touchend', onTouchEnd);
+    return () => node.removeEventListener('touchend', onTouchEnd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Flip whenever `revealed` changes, from a tap or from the keyboard.
   useEffect(() => {
@@ -81,7 +131,8 @@ export function FlipCard({
     entry.setValue(0);
     pan.setValue({ x: 0, y: 0 });
     gradingRef.current = false;
-    armedRef.current = 'none';
+    buzzedRef.current = false;
+    lastDragRef.current = { dx: 0, dy: 0 };
     Animated.spring(entry, {
       toValue: 1,
       useNativeDriver: Platform.OS !== 'web',
@@ -94,11 +145,11 @@ export function FlipCard({
     if (gradingRef.current) return;
     gradingRef.current = true;
 
-    // Only if the detent did not already fire — a fast flick can grade the card
-    // without ever crossing the distance threshold, and that still deserves a
-    // buzz. Without the guard, a normal swipe would buzz twice.
-    if (armedRef.current === 'none') gradeFeedback(verdict === 'gotIt');
-    armedRef.current = 'none';
+    // Covers a fast flick that never travelled far enough for the touchend
+    // listener to call it, and mouse or keyboard input where there is no touch
+    // event at all. On iOS this call is usually too late to be granted a
+    // haptic; the native listener is what actually buzzes.
+    buzzOnce(verdict === 'gotIt');
 
     const w = widthRef.current || 350;
 
@@ -119,28 +170,9 @@ export function FlipCard({
           if (gradingRef.current) return;
           pan.setValue({ x: g.dx, y: g.dy * 0.15 });
 
-          // DETENT. The haptic fires the moment the drag crosses the point where
-          // releasing would grade the card — finger still down, nothing animating
-          // yet — rather than after release.
-          //
-          // Two reasons. It is better feedback: you feel the card "catch" while
-          // you can still change your mind, the way iOS's own swipe actions
-          // behave, instead of being told after the fact. And firing at release
-          // was not producing a haptic on iOS at all, where the same call from a
-          // button press does — the fly-off animation starting in the same tick
-          // is the most likely reason.
-          //
-          // vx: 0 makes this distance-only. A flick that never travels far enough
-          // has no detent to cross, so it is handled at release in finish().
-          const crossed = swipeVerdict({ dx: g.dx, dy: g.dy, vx: 0, width: widthRef.current });
-          if (crossed !== 'none' && armedRef.current === 'none') {
-            armedRef.current = crossed;
-            gradeFeedback(crossed === 'gotIt');
-          } else if (crossed === 'none' && armedRef.current !== 'none') {
-            // Dragged back below the threshold: re-arm, so pushing past it again
-            // buzzes again and the detent stays honest.
-            armedRef.current = 'none';
-          }
+          // Remembered for the native touchend listener below, which is where
+          // the haptic actually fires and which is not given the gesture state.
+          lastDragRef.current = { dx: g.dx, dy: g.dy };
         },
         onPanResponderRelease: (_e, g) => {
           if (gradingRef.current) return;
@@ -165,7 +197,7 @@ export function FlipCard({
           finish(verdict);
         },
         onPanResponderTerminate: () => {
-          armedRef.current = 'none';
+          lastDragRef.current = { dx: 0, dy: 0 };
           Animated.spring(pan, {
             toValue: { x: 0, y: 0 },
             useNativeDriver: Platform.OS !== 'web',
@@ -218,6 +250,7 @@ export function FlipCard({
   return (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       <Animated.View
+        ref={cardRef}
         {...responder.panHandlers}
         style={{
           minHeight: CARD_MIN_HEIGHT,

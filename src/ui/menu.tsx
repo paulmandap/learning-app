@@ -138,11 +138,19 @@ export function HeaderBackButton({ label = 'Back' }: { label?: string }) {
         else router.replace('/');
       }}
       hitSlop={12}
-      style={{ paddingRight: space.md, paddingVertical: space.xs, flexDirection: 'row', alignItems: 'center' }}
+      // Icon only, and a full 44px target. The word "Back" alongside the
+      // chevron competed with the screen title for the same line, which is
+      // exactly what pushed long titles into collision. With the title moved
+      // below the bar, the chevron carries the meaning on its own.
+      style={{
+        width: TOUCH_TARGET,
+        height: TOUCH_TARGET,
+        alignItems: 'flex-start',
+        justifyContent: 'center',
+      }}
     >
-      {/* U+2039. Sized to read as a chevron rather than a stray character. */}
-      <Text style={{ color: t.accent, fontSize: 28, lineHeight: 30, marginTop: -2 }}>‹</Text>
-      <Text style={[type.body, { color: t.accent, marginLeft: 2 }]}>{label}</Text>
+      {/* U+2039, sized to read as a chevron rather than a stray character. */}
+      <Text style={{ color: t.accent, fontSize: 32, lineHeight: 36, marginTop: -4 }}>‹</Text>
     </Pressable>
   );
 }
@@ -164,9 +172,16 @@ export function HeaderGlyphButton({
       accessibilityLabel={accessibilityLabel}
       onPress={onPress}
       hitSlop={12}
-      style={{ paddingHorizontal: space.sm, paddingVertical: space.xs }}
+      // A full 44px target, centred: the gear was both small to hit and sitting
+      // visually high against the title's cap height.
+      style={{
+        width: TOUCH_TARGET,
+        height: TOUCH_TARGET,
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+      }}
     >
-      <Text style={{ color: t.accent, fontSize: 20, lineHeight: 24 }}>{glyph}</Text>
+      <Text style={{ color: t.accent, fontSize: 24, lineHeight: 28 }}>{glyph}</Text>
     </Pressable>
   );
 }

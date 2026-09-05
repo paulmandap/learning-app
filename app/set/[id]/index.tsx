@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, Field, Notice, Screen } from '../../../src/ui/components';
+import { Body, Button, Card, Display, Field, Notice, Screen } from '../../../src/ui/components';
 import { OverflowMenu } from '../../../src/ui/menu';
+import { space } from '../../../src/ui/theme';
 import { formatSetTitle } from '../../../src/core/title';
 import { fetchProfile } from '../../../src/data/profile';
 import { deleteSet, getSet, updateSet } from '../../../src/data/sets';
@@ -131,7 +132,11 @@ export default function SetScreen() {
           title nor the set-level actions take up content space. */}
       <Stack.Screen
         options={{
-          title: displayTitle,
+          // Empty on purpose. Set names are long ("Animal biology study
+          // reviewer") and a centred header title collided with the back
+          // control and the ••• on the same line. The title moves into the body
+          // as a large heading, iOS-style, where it can wrap freely.
+          title: '',
           headerRight: () => (
             <OverflowMenu
               items={[
@@ -143,6 +148,8 @@ export default function SetScreen() {
           ),
         }}
       />
+
+      <Display>{displayTitle}</Display>
 
       {renaming !== null ? (
         <Card>
@@ -187,17 +194,24 @@ export default function SetScreen() {
           {progress?.message ? <Notice tone="warn">{progress.message}</Notice> : null}
         </Card>
       ) : (
-        <Card>
-          <Body>
-            {itemCount} card{itemCount === 1 ? '' : 's'} ready
-            {plan && itemCount < plan.requestedCount
-              ? ` — you asked for up to ${plan.requestedCount}. Your notes supported ${itemCount} good ones, and we'd rather stop than pad.`
-              : '.'}
+        // Metadata, not a container. This was a bordered Card holding one short
+        // sentence, which read as a disabled text input and pushed the actual
+        // actions down the screen. A muted line under the title says the same
+        // thing and gets out of the way.
+        <View style={{ gap: space.xs }}>
+          <Body muted>
+            {itemCount} card{itemCount === 1 ? '' : 's'} · Ready
           </Body>
+          {plan && itemCount < plan.requestedCount ? (
+            <Body muted>
+              You asked for up to {plan.requestedCount}. Your notes supported {itemCount} good
+              ones, and we'd rather stop than pad.
+            </Body>
+          ) : null}
           {/* Only rendered when cards were actually left out, so a clean run
               shows nothing extra. This is the "why 19 of 20?" answer. */}
           {droppedLine ? <Body muted>{droppedLine}</Body> : null}
-        </Card>
+        </View>
       )}
 
       {/* One primary action. Flashcards is the main flow, so Quiz is an

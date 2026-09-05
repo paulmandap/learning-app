@@ -19,23 +19,21 @@
  *    is how MANY taps fire. Apple patched this in iOS 26.5, so on a current
  *    iPhone it is expected to do nothing.
  *
- * ## There is no sound, and that is the settled answer
+ * ## Why success gets a sound and failure does not
  *
- * A success chime was built and removed after use. Two synthesised sine notes
- * read as cheap and became distracting, which is the predictable outcome: a
- * sound that fires on most of a hundred cards has to be genuinely excellent to
- * survive the hundredth repetition, and oscillator tones will not clear that
- * bar. A recorded sample might, at the cost of bundle bytes and a licence, for
- * a signal the haptic already delivers.
+ * A deliberate asymmetry. A "wrong" noise would fire on exactly the cards a
+ * student is already struggling with, arriving at the moment they feel worst,
+ * and getting cards wrong is the normal and useful half of studying — the
+ * missed pile exists because those cards are the valuable ones. Success is
+ * marked audibly; a miss is acknowledged by touch alone.
  *
- * The `chime()` implementation is kept below, unused, because the Web Audio
- * setup is the fiddly part — the autoplay-gesture handling and the envelope
- * ramps — and it is worth having if a real sound is ever wanted.
+ * The success note has been through one revision: the first attempt was two
+ * ascending sine tones and was reported as cheap and distracting. See chime()
+ * for what replaced it and why.
  *
- * Note for whoever revisits this: a failure sound is not the thing to add. It
- * would fire on exactly the cards a student is already struggling with, at the
- * moment they feel worst, and getting cards wrong is the useful half of
- * studying. If sound returns, it returns for success only.
+ * On iOS this respects the hardware silent switch for free — Safari mutes page
+ * audio when the ringer switch is off and a page cannot override that — so
+ * nobody chirps in a lecture.
  */
 
 const SWITCH_ID = 'haptic-switch';
@@ -153,18 +151,42 @@ function ensureAudio(): AudioContext | null {
   return ctx;
 }
 
-/** Two short ascending notes: A5 then E6, a rising fifth. */
-const CHIME_HZ = [880, 1318.5] as const;
-const NOTE_GAP_S = 0.075;
-const NOTE_LEN_S = 0.16;
-/** Deliberately quiet. This fires hundreds of times a session. */
-const PEAK_GAIN = 0.07;
+/** Fundamental, G5. Low enough to feel warm rather than shrill. */
+const FUNDAMENTAL_HZ = 784;
 
 /**
- * A brief, quiet major-fifth chime.
+ * Partials, as [frequency multiple, relative gain, decay seconds].
  *
- * Synthesised rather than shipped as an audio file: no asset to load, no bytes
- * added to the bundle, and no dependency — about thirty lines of Web Audio.
+ * This is what makes it a note rather than a beep. A struck wooden bar has
+ * energy above the fundamental that dies away FASTER than the fundamental
+ * does — that decay difference is most of what the ear reads as "wood" instead
+ * of "electronics". The 3.01 rather than a clean 3.0 is slight inharmonicity;
+ * exact integer multiples sound synthetic.
+ */
+const PARTIALS: readonly (readonly [number, number, number])[] = [
+  [1, 1.0, 0.42],
+  [2, 0.28, 0.22],
+  [3.01, 0.1, 0.13],
+];
+
+const ATTACK_S = 0.006;
+/** Deliberately quiet. This fires on most of a hundred cards a session. */
+const PEAK_GAIN = 0.075;
+
+/**
+ * A short, warm success note.
+ *
+ * Replaces a two-note sine chime that was reported as sounding cheap and
+ * becoming distracting — a fair verdict. Two bare sine tones in sequence read
+ * as an electronic beep, and a rising interval makes it read as an alert.
+ *
+ * This is one note instead of two, with harmonics that decay faster than the
+ * fundamental, a gentle attack, a long-ish tail, and a lowpass to take the edge
+ * off. Closer to a struck marimba bar than a notification, which is what a
+ * sound repeated this often needs to be.
+ *
+ * Still synthesised rather than a shipped audio file: no asset, no bundle
+ * bytes, no dependency, no licence.
  */
 function chime(): void {
   try {
@@ -172,25 +194,38 @@ function chime(): void {
     if (!ctx) return;
 
     const now = ctx.currentTime;
-    CHIME_HZ.forEach((hz, i) => {
-      const at = now + i * NOTE_GAP_S;
+
+    // One shared lowpass so the upper partials cannot get glassy, plus a master
+    // gain to set the level in a single place.
+    const tone = ctx.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = 2600;
+    tone.Q.value = 0.7;
+
+    const master = ctx.createGain();
+    master.gain.value = PEAK_GAIN;
+
+    tone.connect(master);
+    master.connect(ctx.destination);
+
+    for (const [multiple, level, decay] of PARTIALS) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
       osc.type = 'sine';
-      osc.frequency.value = hz;
+      osc.frequency.value = FUNDAMENTAL_HZ * multiple;
 
-      // Fast attack, exponential decay — a blip, not a beep. A square edge here
-      // clicks audibly, which is why the ramp exists.
-      gain.gain.setValueAtTime(0, at);
-      gain.gain.linearRampToValueAtTime(PEAK_GAIN, at + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + NOTE_LEN_S);
+      // Ramp rather than a step: an instantaneous start is an audible click.
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(level, now + ATTACK_S);
+      // exponentialRamp cannot reach zero, hence the small floor.
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + decay);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(at);
-      osc.stop(at + NOTE_LEN_S + 0.02);
-    });
+      gain.connect(tone);
+      osc.start(now);
+      osc.stop(now + decay + 0.05);
+    }
   } catch {
     // Blocked autoplay, no Web Audio, a suspended context — all fine, stay quiet.
   }
@@ -227,6 +262,7 @@ const MISSED_TAP_MS = 240;
 export function gradeFeedback(gotIt: boolean): void {
   if (gotIt) {
     haptic([12, 90, 12], [0, CORRECT_TAP_MS]);
+    chime();
     return;
   }
   haptic([25, 200, 25], [0, MISSED_TAP_MS]);

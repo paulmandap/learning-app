@@ -38,7 +38,15 @@ const dark: Theme = {
   card: '#1a1d24',
   text: '#eceef2',
   textMuted: '#9aa1ad',
-  border: '#2b2f39',
+  // Raised from #2b2f39. Card surfaces sit on a near-black ground, and at the
+  // old value the edge measured 1.26:1 against the card — invisible on an OLED
+  // screen, so rows and cards had no defined shape.
+  //
+  // Worth recording: the suggestion that prompted this was "1px solid
+  // rgba(255,255,255,0.08)". Composited over the card that resolves to #2c2f36,
+  // which is the value already in place — it would have changed nothing. This
+  // is roughly 0.20 opacity, measured at 1.90:1.
+  border: '#484a50',
   accent: '#7ea0ff',
   accentText: '#0d1117',
   danger: '#f2b8b5',
@@ -77,6 +85,12 @@ export const radius = {
   md: 12,
   lg: 20,
   pill: 999,
+  /**
+   * Buttons specifically. Softer than the 8px they used to share with inputs —
+   * at that radius a full-width button reads as a form field rather than
+   * something to tap.
+   */
+  button: 16,
 } as const;
 
 /**

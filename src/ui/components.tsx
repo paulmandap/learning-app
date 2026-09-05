@@ -37,6 +37,19 @@ export function Title({ children }: { children: ReactNode }) {
   return <Text style={[styles.title, { color: t.text }]}>{children}</Text>;
 }
 
+/**
+ * A large in-body screen heading, iOS "large title" style.
+ *
+ * Used where the name is long enough to fight the navigation bar — a set called
+ * "Animal biology study reviewer" collided with the back control and the ⋯ when
+ * it sat in the header. Down here it wraps freely and the top bar stays to the
+ * two things it is for.
+ */
+export function Display({ children }: { children: ReactNode }) {
+  const t = useTheme();
+  return <Text style={[type.display, { color: t.text }]}>{children}</Text>;
+}
+
 export function Body({ children, muted }: { children: ReactNode; muted?: boolean }) {
   const t = useTheme();
   return <Text style={[styles.body, { color: muted ? t.textMuted : t.text }]}>{children}</Text>;
@@ -264,7 +277,7 @@ const styles = StyleSheet.create({
   },
   button: {
     borderWidth: 1,
-    borderRadius: radius.sm,
+    borderRadius: radius.button,
     paddingVertical: space.md,
     paddingHorizontal: space.lg,
     alignItems: 'center',
