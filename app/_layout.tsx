@@ -100,6 +100,12 @@ function RootNavigator() {
         <Stack.Screen name="set/[id]/index" options={{ title: '', ...backable }} />
         <Stack.Screen name="set/[id]/flashcards" options={{ title: 'Flashcards', ...backable }} />
         <Stack.Screen name="set/[id]/quiz" options={{ title: 'Quiz', ...backable }} />
+        {/* Without this the header falls back to the route pattern and reads
+            "set/[id]/blanks" to the user. */}
+        <Stack.Screen
+          name="set/[id]/blanks"
+          options={{ title: 'Fill in the blanks', ...backable }}
+        />
       </Stack>
     </View>
   );

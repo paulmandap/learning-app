@@ -165,6 +165,7 @@ export function Field({
   keyboardType,
   autoCapitalize = 'none',
   maxLength,
+  onSubmitEditing,
 }: {
   label: string;
   value: string;
@@ -174,6 +175,12 @@ export function Field({
   keyboardType?: 'default' | 'email-address' | 'number-pad';
   autoCapitalize?: 'none' | 'sentences';
   maxLength?: number;
+  /**
+   * Enter submits. Typing an answer and pressing return is the whole
+   * interaction on a desktop keyboard; reaching for the mouse to confirm a
+   * one-word answer is what makes a typing drill feel slow.
+   */
+  onSubmitEditing?: () => void;
 }) {
   const t = useTheme();
   return (
@@ -188,6 +195,8 @@ export function Field({
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
         maxLength={maxLength}
+        onSubmitEditing={onSubmitEditing}
+        returnKeyType={onSubmitEditing ? 'done' : undefined}
         style={[styles.input, { color: t.text, borderColor: t.border, backgroundColor: t.bg }]}
       />
     </View>

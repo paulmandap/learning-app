@@ -233,9 +233,15 @@ export default function SetScreen() {
         </View>
       )}
 
-      {/* One primary action. Flashcards is the main flow, so Quiz is an
-          outlined alternative rather than a second equal-weight blue block.
-          "Add notes" moved into the ••• menu. */}
+      {/* One primary action. Flashcards is the main flow, so the others are
+          outlined alternatives rather than more equal-weight blue blocks.
+          "Add notes" moved into the ••• menu.
+
+          "Fill in the blanks" is listed unconditionally alongside them. Knowing
+          whether a set HAS any blanks means reading every item and running the
+          cloze rules over it, which is a query and a pass this screen does not
+          otherwise need — and the screen it opens explains an empty level
+          better than a missing button would. */}
       {itemCount > 0 ? (
         <View style={{ gap: 8 }}>
           <Button label="Flashcards" onPress={() => router.push(`/set/${setId}/flashcards`)} />
@@ -243,6 +249,11 @@ export default function SetScreen() {
             label="Quiz"
             variant="outline"
             onPress={() => router.push(`/set/${setId}/quiz`)}
+          />
+          <Button
+            label="Fill in the blanks"
+            variant="outline"
+            onPress={() => router.push(`/set/${setId}/blanks`)}
           />
         </View>
       ) : null}

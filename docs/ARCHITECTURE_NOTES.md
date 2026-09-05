@@ -774,6 +774,204 @@ cannot exceed 1) and rescales using dimensions read from the PNG/JPEG header. Wi
 gate failed for the wrong reason. If label questions are ever revisited, that inconsistency is
 the first thing to design around.
 
+## 9. Phase 8 — fill-in-the-blank (built 2026-09-05; **grading deviates from the plan, needs approval**)
+
+Spec §6 lists fill-in-the-blank under "Later" and D5 gives the reason: *"Exact-match grading of
+free typing frustrates ('ATP' vs 'adenosine triphosphate'); auto-generated blanks are low value."*
+The roadmap's answer was a ≤3-word answer limit plus "the existing bigram-Dice matcher in
+`src/core/excerpt.ts` at ≥ 0.85, so 'ATP' vs 'atp.' passes and a typo does not fail you".
+
+**That grading rule was measured first, before anything was built on it, and it does not work.**
+The rest of the design follows from that measurement.
+
+### 9.1 The specified grader: 28/49, with 20 false rejects
+
+49 hand-built cases — trivial variants, single-character typos of four kinds, morphology,
+abbreviation/expansion, and confusable pairs a student must tell apart. Scored with
+`normalize` + `diceCoefficient` at ≥ 0.85, exactly as specified:
+
+| Case group | n | Verdict |
+|---|---|---|
+| Trivial variants (case, spacing, punctuation) | 9 | 8 pass — **"ATP" vs "atp." FAILS at 0.800** |
+| Single-character typos (sub / transpose / omit / insert) | 16 | **12 of 16 rejected** |
+| Article and plural variants | 4 | 1 passes |
+| Abbreviation vs expansion (the literal D5 case) | 4 | 0 pass, scores 0.000–0.400 |
+| Genuinely different answers | 16 | 15 correctly rejected |
+
+Three findings, in increasing order of importance:
+
+1. **The rule's own headline example fails.** `normalize` deliberately keeps punctuation (that is
+   documented in `text.ts` and is right for excerpt matching), so "ATP" vs "atp." scores 0.800.
+   Comparing *words* rather than raw normalised text fixes this one case, and only this one.
+2. **"A typo does not fail you" is false.** "ribosome" typed "ribsoome" scores 0.714;
+   "chloroplast" typed "chlorpolast" 0.700; "photosynthesis" typed "photosynthasis" 0.846. Dice
+   over a 3–12 character string moves ~0.1 per changed character, because one character alters two
+   bigrams out of ten. The 0.85 threshold was tuned in `excerpt.ts` for 200-character spans, where
+   a dropped word barely registers. Reusing that number on a one-word answer is a category error.
+3. **The decisive one: the two populations overlap, so no threshold exists.**
+
+   | Pair | Score | What a fair grader must say |
+   |---|---|---|
+   | "afferent" vs **"efferent"** | **0.857** | wrong — different structures |
+   | "photosynthesis" vs "photosynthasis" | 0.846 | right — one key slip |
+   | "intracellular" vs "intercellular" | 0.750 | wrong |
+   | "stoma" vs "stma" | 0.571 | right |
+
+   The lowest score that should pass is **0.571**; the highest that should fail is **0.857**. At the
+   specified 0.85, "efferent" would be marked **RIGHT** for "afferent" while a genuine typo is
+   marked wrong — exactly the wrong way round.
+
+   This is not a threshold in need of tuning, and no other character measure escapes it: a
+   one-character typo and a minimal pair are *the same edit distance apart*. Any band wide enough
+   to forgive typing is wide enough to accept a genuinely different answer. In a study app, being
+   told a wrong answer was right is worse than the frustration D5 was avoiding.
+
+### 9.2 What was built instead — and why the threshold stopped mattering
+
+`src/core/cloze.ts`, `gradeTypedAnswer` returns three verdicts, not two:
+
+- **`correct`** — identical after dropping case, punctuation, hyphenation and a leading article.
+  None of those can change which thing is meant, so this is the only automatic accept.
+- **`near`** — real overlap but not identical. The app shows the expected word and asks *"Did you
+  have it?"*, with **Yes, I had it** / **No, I missed it**.
+- **`incorrect`** — nothing like it. Marked wrong, expected word still shown.
+
+The move that makes this shippable: **the threshold no longer decides a grade, only who is offered
+the benefit of the doubt.** A mis-tuned band costs one tap, never a wrong mark. And the self-report
+is not new trust — the Missed / Got it buttons have always been self-reported; this is the same
+mechanism reached one step later.
+
+`NEAR_MISS_THRESHOLD = 0.5`, set below the lowest measured genuine typo (0.571) rather than picked
+round.
+
+**This deviates from the approved roadmap and is flagged rather than assumed.** The roadmap said to
+report rather than ship if the matcher did not hold up, so the code is written, tested and verified
+but **not deployed**. The options:
+
+| # | Option | Cost |
+|---|---|---|
+| A | Ship the three-way verdict above | Deviates from the roadmap's stated grading rule. A near miss costs one extra tap. Never marks a wrong answer right. |
+| B | Ship the rule as specified (Dice ≥ 0.85) | Marks "efferent" right for "afferent"; rejects 12 of 16 typos. Measured, not predicted. |
+| C | Exact match only, no near band | Simplest and never wrong, but restores the D5 frustration in full — a transposed letter is marked wrong. |
+| D | Drop fill-in-the-blank | Loses a feature whose supply is real (§9.4) over a grading problem that has a workable answer. |
+
+**Recommendation: A.** It is the only option that never tells a student a wrong answer was right,
+and the only one where the unreliable measurement has been demoted to something that cannot cause a
+wrong grade. B is ruled out by its own measurement.
+
+### 9.3 The blank is cut from the notes, not from the model's answer
+
+The gap is taken out of `source_excerpt` — text the app resolved from the user's own stored pages
+— so a blank inherits the grounding guarantee the source chip has. Two consequences:
+
+- The expected text is **the student's own wording**, which is most of what made "ATP" vs
+  "adenosine triphosphate" a problem in the first place. The gap expects whichever the notes use.
+- After answering, the whole sentence is shown with the answer highlighted in place.
+
+### 9.4 Supply: measured, because a feature with no cards is not a feature
+
+Run over the real cards a live generation produced (plant-anatomy fixture, `gemini-3.6-flash`,
+2026-09-05), not synthetic ones:
+
+| | Count |
+|---|---|
+| Items in the account | 28 |
+| Flashcards among them | 14 |
+| **Became a blank** | **5 — 36% of flashcards, 18% of all items** |
+| Rejected: answer over 3 words | 7 |
+| Rejected: answer is a paraphrase, not words in the notes | 1 |
+| Rejected: excerpt is a label list, not a sentence | 1 |
+
+**The dominant loss is answers longer than three words**, and the cause is structural: the
+generation prompt says *"WRITE IN YOUR OWN WORDS … Do NOT copy sentences out of the notes"*, so
+answers come back as prose ("It serves as the primary photosynthetic organ."). That rule is
+load-bearing for card quality and was **not** touched to raise blank yield. About one flashcard in
+three is the honest ceiling under the current prompt.
+
+Two fixes found by this measurement, both of which generalise beyond blanks:
+
+- **Strip a leading article before locating the gap.** The model writes "The mesophyll." where the
+  notes write "the internal mesophyll". Matching the article too lost **2 of 6** otherwise usable
+  blanks. Also applied to grading, where "leaf" and "the leaf" are plainly the same answer.
+- **Reject a transcribed label list.** A diagram read gives `"FRUIT seed dispersal structure STEM"`
+  — four words, so it clears any word-count floor, but blanking one label yields
+  `"_____ seed dispersal structure STEM"`, which is noise. A sentence carries at least one function
+  word; a label dump carries none. Not diagram-specific: §6.2 records that glossaries and
+  vocabulary lists have the same shape.
+
+### 9.5 Blanks are a Remember-tier activity, and the screen had to admit it
+
+Measured on the same set: **5 blanks at Remember, 0 at Understand, 0 at Apply.** That is intrinsic
+— asking for a term *is* recall — and with the 50/30/20 mix it will not change. The other two modes
+default to Understand per the spec's level segment; this screen would have opened empty almost
+every time. It therefore opens on a level that has cards, and stops adjusting once the student
+picks one themselves.
+
+### 9.6 `attempts.mode` needed a third value — migration 0006, **not applied**
+
+Blanks are graded differently from a flip (typed and string-compared, versus self-reported), so
+recording them as `'flashcards'` would be a lie in the data. `0006_attempt_mode_blanks.sql` adds
+`'blanks'` to the check constraint. It finds the old constraint **by what it checks rather than by
+name**, because `drop constraint if exists <guessed name>` is a silent no-op when the guess is
+wrong — leaving the old constraint in force while the migration reports success, which is invisible
+from the dashboard where this gets run.
+
+Until it is applied, `recordAttempt` catches the check violation (`23514`) and retries as
+`'flashcards'` with a `console.warn` naming the migration. Losing the answer would be worse:
+attempts are the record of truth that the missed pile, "Continue" and every schedule are built from
+(D8). The block carries its own deletion condition.
+
+**Verified live, with the migration deliberately not applied:**
+
+```
+direct insert mode='blanks'   -> 400  23514 attempts_mode_check
+app console                   -> "attempts.mode 'blanks' was rejected — recording as 'flashcards'"
+attempts table                -> "The Xylem" correct, "root collr" correct   (both landed)
+```
+
+A caution for whoever repeats this: `recordAttempt` is fire-and-forget from the screen, so querying
+the table immediately after the last answer shows nothing and looks like silent data loss. It is
+not — it is the query racing the write. That wrong conclusion was reached once here before the
+in-page diagnostic settled it.
+
+### 9.7 How it was verified
+
+`npx tsc --noEmit` clean · **285 tests** (263 before; 22 new in `tests/cloze.test.ts`) · `expo
+export` · `tests/boot.test.ts` green on the new bundle.
+
+Beyond that, the built bundle was driven in headless Chrome over the DevTools Protocol against the
+live database, because the interesting behaviour is the three-way verdict and no unit test over a
+pure function can show it:
+
+| Check | Result |
+|---|---|
+| "The Xylem" accepted for "Xylem" (article dropped) | PASS |
+| Completed sentence shown, answer highlighted | PASS |
+| One-character typo not marked wrong; expected word named; student asked | PASS |
+| "Yes, I had it" turns a near miss into Right | PASS |
+| Unrelated answer marked Not quite, no benefit of the doubt | PASS |
+| Progress advances | PASS |
+
+Two defects were caught this way and fixed, neither visible to typecheck or tests:
+
+1. The route was not registered in `app/_layout.tsx`, so the header read **"set/[id]/blanks"** to
+   the user.
+2. The screen opened on Understand and was empty — §9.5.
+
+### 9.8 Limitations, stated rather than buried
+
+- **Supply is measured on one document.** 36% of flashcards is one subject's worth of evidence, not
+  a general rate. A glossary-shaped set would yield more; a discursive one less.
+- **The 49 grading cases are hand-built and biology-heavy.** They are chosen to include the
+  confusable pairs that break the approach, which is the point, but they are not a random sample of
+  what students type.
+- **Abbreviation vs expansion is still not solved** and cannot be by this approach — "ATP" vs
+  "adenosine triphosphate" scores 0.087. It lands in `incorrect`, not even `near`. The mitigation is
+  structural rather than algorithmic: the gap expects the notes' own wording, so the student is
+  being asked for the form they actually read. This is a real remaining gap in D5's objection.
+- **Not deployed.** The grading deviation above is an owner decision, and 0006 needs applying by
+  hand. Until then blanks record under `'flashcards'`.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

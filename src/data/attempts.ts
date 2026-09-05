@@ -11,7 +11,24 @@ import type { AttemptResult } from '../core/grade';
  * possible, so this is written on every quiz answer without exception.
  */
 
-export type StudyMode = 'flashcards' | 'quiz';
+export type StudyMode = 'flashcards' | 'quiz' | 'blanks';
+
+/**
+ * Postgres check-constraint violation.
+ *
+ * Used to spot an `attempts.mode` the database has not been taught yet — see
+ * the fallback in recordAttempt.
+ */
+const CHECK_VIOLATION = '23514';
+
+/**
+ * Modes that 0001 allowed, before 0006 added 'blanks'.
+ *
+ * A mode outside this set is written optimistically and retried as 'flashcards'
+ * if the database rejects it, so the app works against a project where 0006 has
+ * not been applied yet.
+ */
+const MODE_FALLBACK: Record<string, StudyMode> = { blanks: 'flashcards' };
 
 export interface Attempt {
   id: string;
@@ -58,17 +75,38 @@ export async function recordAttempt(input: {
 }): Promise<void> {
   const user_id = await currentUserId();
 
-  const { error } = await supabase.from('attempts').insert({
+  const row = {
     user_id,
     study_item_id: input.studyItemId,
     study_set_id: input.studySetId,
-    mode: input.mode,
     result: input.result,
     score: input.score ?? null,
     max_score: input.maxScore ?? null,
     answer_text: input.answerText ?? null,
     feedback: input.feedback ?? null,
-  });
+  };
+
+  let { error } = await supabase.from('attempts').insert({ ...row, mode: input.mode });
+
+  // --- the database may not know this mode yet -----------------------------
+  // 'blanks' needs migration 0006, which is APPLIED on the live project
+  // (verified 2026-09-05), so this path is not taken there and costs nothing —
+  // the first insert succeeds and there is no second round trip.
+  //
+  // It stays for a project that does not have 0006 yet: a fresh one, or one
+  // restored from a dump taken before it. There the honest choice is between
+  // losing the answer and recording it under the closest older mode, and losing
+  // it is worse — attempts are the record of truth that the missed pile, Home's
+  // "Continue" and every schedule are built from (D8). The warning is loud
+  // rather than silent so a mislabelled row is never a mystery.
+  const fallback = MODE_FALLBACK[input.mode];
+  if (error?.code === CHECK_VIOLATION && fallback) {
+    console.warn(
+      `attempts.mode '${input.mode}' was rejected — recording as '${fallback}'. ` +
+        'Apply supabase/migrations/0006_attempt_mode_blanks.sql to fix this.',
+    );
+    ({ error } = await supabase.from('attempts').insert({ ...row, mode: fallback }));
+  }
 
   if (error) throw new Error(error.message);
 
