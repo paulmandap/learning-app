@@ -80,10 +80,20 @@ export async function reviewStatesForSet(studySetId: string): Promise<Map<string
 export async function dueCountsBySet(now: number = Date.now()): Promise<Map<string, number>> {
   const { data, error } = await supabase
     .from('review_state')
-    .select('study_set_id')
+    // The inner join is the fix for a real defect, not tidiness. A reported
+    // card is hidden from every deck by `listItems`, but nothing deletes its
+    // schedule — so counting these rows unfiltered promised cards the app
+    // would then refuse to deal, and the badge drifted further from the deck
+    // with every card reported. `!inner` drops the row when the card is gone
+    // or hidden, in the same round trip.
+    .select('study_set_id, study_items!inner(hidden)')
+    .eq('study_items.hidden', false)
     .lte('due_at', new Date(startOfUtcDay(now)).toISOString());
 
-  if (error) return new Map();
+  if (error) {
+    console.warn(`[review] due counts unavailable: ${error.message}`);
+    return new Map();
+  }
 
   const counts = new Map<string, number>();
   for (const row of (data ?? []) as { study_set_id: string }[]) {

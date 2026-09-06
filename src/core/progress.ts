@@ -96,6 +96,35 @@ export function studyStreak(attemptTimes: number[], now: number): number {
 
 // ---------------------------------------------------------------- activity --
 
+/**
+ * Keep only the schedules whose card the student can still be shown.
+ *
+ * ## The bug this exists to stop
+ *
+ * The owner: *"it says 11 cards ready for review but in my study tab, there's
+ * only a few."*
+ *
+ * `listItems` filters `hidden = false`, so a card that has been reported —
+ * *"Thanks, you won't see that one again"* — is gone from every deck. Its
+ * `review_state` row is not: nothing deletes it, and every due count read
+ * straight from that table. So a reported card stayed "due" for ever, on a
+ * screen that promised work the app would then refuse to hand over.
+ *
+ * A promised count that cannot be delivered is worse than no count: it makes
+ * the number look broken, and after a while it makes the screen look broken.
+ *
+ * Deliberately takes the ids the caller already has rather than a `hidden`
+ * flag, so it is equally correct for a card that is hidden, one whose row has
+ * gone, and any future reason a card stops being shown. The rule is "count
+ * what you would deal", not "count what is not hidden".
+ */
+export function schedulesForVisibleCards<T extends { studyItemId: string }>(
+  schedules: T[],
+  visibleItemIds: ReadonlySet<string>,
+): T[] {
+  return schedules.filter((s) => visibleItemIds.has(s.studyItemId));
+}
+
 /** Days shown in the forecast. A week is as far as a student plans. */
 export const FORECAST_DAYS = 7;
 

@@ -2437,6 +2437,76 @@ and passed six seconds later. Cloudflare had not finished propagating the new
 it is worth investigating** — every previous section's check happened to run
 after the delay rather than inside it.
 
+## 21. "11 cards ready for review" against a deck that had a few (2026-09-06)
+
+> *"i noticed this in the progress tab. it says 11 cards ready for review but in
+> my study tab, there's only a few. it's because i deleted some."*
+
+The count was wrong, and the cause was not deletion — deleting a set cascades
+its schedules away cleanly (`review_state` references both `study_items` and
+`study_sets` `on delete cascade`, confirmed in §7.4) and `removeSet` invalidates
+every query afterwards.
+
+**It was reporting a card.** `reportItem` sets `hidden = true` rather than
+deleting the row, and `listItems` filters `hidden = false` — so *"Thanks, you
+won't see that one again"* is honest about the decks. Nothing deletes the card's
+`review_state` row, and **every due count read that table directly**, so a
+reported card stayed due for ever:
+
+- `dueToday` and the week-ahead forecast on Progress
+- `dueCountsBySet`, the badge on every set row on Study
+
+Both over-counted by the same amount, which is why the drift was only visible
+against the deck the app would actually deal. From the outside it reads as the
+number being broken; after a while it reads as the screen being broken.
+
+### 21.1 The rule is "count what you would deal"
+
+`schedulesForVisibleCards` takes the ids the caller already has rather than a
+`hidden` flag, so it is equally right for a card that is hidden, a card whose
+row has gone, and whatever future reason a card stops being shown. A filter
+written against `hidden` would have to be found and updated again the next time
+a card can disappear for a new reason.
+
+On the dashboard it costs nothing: `study_items` was already being fetched with
+`hidden = false` for the mastery bands, so the visible-id set was already in
+memory and unused.
+
+On the Study tab there was no item query to reuse, so `dueCountsBySet` filters
+in the same round trip with a PostgREST embedded join —
+`.select('study_set_id, study_items!inner(hidden)').eq('study_items.hidden', false)`.
+Verified against the live database rather than assumed, because an embedded
+filter that fails to resolve its relationship returns rows rather than an error.
+
+### 21.2 Reproduced before the fix, and proved after
+
+Hiding one due card and re-running both queries:
+
+```
+unfiltered (old) : 5 rows
+inner join (new) : 5 rows
+after hiding one card -> old still says 5, new says 4
+```
+
+Then end to end against the built app, reading the number off the Progress
+screen itself:
+
+```
+dashboard "ready for review": 5 -> hide one card -> 4 -> restore -> 5
+PASS — the count follows the cards you can actually study
+```
+
+### 21.3 The dead rows are left alone, deliberately
+
+`reportItem` still does not delete the schedule. With the filter in place the
+row is harmless, and keeping it means a card that is ever un-hidden comes back
+with its history rather than starting from nothing. The correctness boundary is
+the read, which is where it can be tested.
+
+**Verified:** typecheck clean · **447 tests** (443 before; 4 new on
+`schedulesForVisibleCards`) · `expo export` · boot test green · both queries
+checked against the live database · end-to-end on the built app.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

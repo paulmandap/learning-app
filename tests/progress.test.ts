@@ -7,6 +7,7 @@ import {
   masteryCounts,
   masteryOf,
   MIN_SECTION_ATTEMPTS,
+  schedulesForVisibleCards,
   sectionSplit,
   STRONG_ACCURACY,
   studyStreak,
@@ -65,6 +66,36 @@ describe('studyStreak', () => {
   it('does not care what order the answers arrive in', () => {
     const shuffled = [daysAgo(2), daysAgo(0), daysAgo(1)];
     expect(studyStreak(shuffled, NOON)).toBe(3);
+  });
+});
+
+describe('schedulesForVisibleCards', () => {
+  const rows = [
+    { studyItemId: 'shown', dueAt: 1 },
+    { studyItemId: 'reported', dueAt: 2 },
+    { studyItemId: 'vanished', dueAt: 3 },
+  ];
+
+  it('drops a schedule whose card has been reported', () => {
+    // The reported card is gone from every deck (listItems filters hidden),
+    // so counting it as due promises work the app will then refuse to hand
+    // over. That was the owner's "11 ready for review, only a few in study".
+    const out = schedulesForVisibleCards(rows, new Set(['shown', 'vanished']));
+    expect(out.map((r) => r.studyItemId)).toEqual(['shown', 'vanished']);
+  });
+
+  it('drops a schedule whose card row is gone entirely', () => {
+    const out = schedulesForVisibleCards(rows, new Set(['shown']));
+    expect(out.map((r) => r.studyItemId)).toEqual(['shown']);
+  });
+
+  it('keeps everything when every card is still there', () => {
+    const all = new Set(['shown', 'reported', 'vanished']);
+    expect(schedulesForVisibleCards(rows, all)).toHaveLength(3);
+  });
+
+  it('counts nothing when there are no cards left', () => {
+    expect(schedulesForVisibleCards(rows, new Set())).toEqual([]);
   });
 });
 

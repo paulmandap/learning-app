@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import {
   dueForecast,
   masteryCounts,
+  schedulesForVisibleCards,
   sectionSplit,
   studyStreak,
   type ForecastDay,
@@ -149,20 +150,26 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
   );
 
   const today = startOfUtcDay(now);
-  const dueToday = schedules.error
-    ? 0
-    : scheduleRows.filter((r) => Date.parse(r.due_at) <= today).length;
+  const itemRows = (items.data ?? []) as { id: string; section_title: string | null }[];
+
+  // Only cards the student could actually be dealt. `itemRows` is already
+  // filtered to hidden = false, so this is free — and without it a reported
+  // card counts as due for ever, which is exactly what the owner saw: eleven
+  // promised on this screen against a handful he could open.
+  const visibleItemIds = new Set(itemRows.map((i) => i.id));
+  const liveSchedules = schedulesForVisibleCards(
+    scheduleRows.map((r) => ({ studyItemId: r.study_item_id, dueAt: Date.parse(r.due_at) })),
+    visibleItemIds,
+  );
+
+  const dueToday =
+    schedules.error || items.error ? 0 : liveSchedules.filter((s) => s.dueAt <= today).length;
 
   // The week ahead, from the same rows the mastery bands come from — no extra
   // query. Overdue cards fold into today inside dueForecast.
-  const forecast = schedules.error
-    ? EMPTY_DASHBOARD.forecast
-    : dueForecast(
-        scheduleRows.map((r) => ({ dueAt: Date.parse(r.due_at) })),
-        now,
-      );
+  const forecast =
+    schedules.error || items.error ? EMPTY_DASHBOARD.forecast : dueForecast(liveSchedules, now);
 
-  const itemRows = (items.data ?? []) as { id: string; section_title: string | null }[];
 
   // Every card in the account, bucketed. Cards with no schedule are new, which
   // masteryOf handles, so an untouched set shows as new rather than vanishing.
