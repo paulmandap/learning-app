@@ -9,7 +9,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
+import {
+  CONTENT_MAX_WIDTH,
+  INPUT_FONT_SIZE,
+  radius,
+  space,
+  TOUCH_TARGET,
+  type,
+  useTheme,
+} from './theme';
 
 /** Centred ≤720px column on desktop, full width on mobile. */
 export function Screen({ children }: { children: ReactNode }) {
@@ -288,7 +296,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     paddingHorizontal: space.md,
     paddingVertical: space.md,
-    fontSize: 16,
+    fontSize: INPUT_FONT_SIZE,
     minHeight: TOUCH_TARGET,
   },
   button: {

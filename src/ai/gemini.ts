@@ -55,8 +55,23 @@ import {
   type VariantResult,
 } from './provider';
 
-/** Inline requests total 100 MB; PDFs are capped at 50 MB (verified 2026-09-03). */
-export const MAX_INLINE_BYTES = 15 * 1024 * 1024;
+/**
+ * Largest file this will send in one inline request.
+ *
+ * Inline requests total 100 MB and PDFs are capped at 50 MB (verified
+ * 2026-09-03), so 45 MB sits just under Google's own wall with margin.
+ *
+ * This was 15 MB, chosen conservatively rather than measured, and the guess was
+ * wrong in an expensive direction: it turned away every scanned PDF. Measured
+ * 2026-09-06 on real reads of image-only PDFs (NOTES §15.2) — a 44.8 MB,
+ * 24-page scan came back complete in 19.9 s, all 24 pages, `finishReason` STOP,
+ * using 10.6% of the 65,536-token output ceiling. Nothing in this codebase
+ * binds below Google's 50 MB.
+ *
+ * Do not raise this to 50: a file that ticks over would be accepted here and
+ * refused by Google, which is the failure this cap exists to prevent.
+ */
+export const MAX_INLINE_BYTES = 45 * 1024 * 1024;
 
 export class GeminiCallError extends Error {
   constructor(

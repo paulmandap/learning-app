@@ -38,6 +38,7 @@ const SIDEBAR_MIN_WIDTH = 800;
 
 const TABS = [
   { name: 'index', href: '/', label: 'Study', glyph: '✎' },
+  { name: 'notes', href: '/notes', label: 'Notes', glyph: '❏' },
   { name: 'progress', href: '/progress', label: 'Progress', glyph: '◕' },
   { name: 'settings', href: '/settings', label: 'Settings', glyph: '⚙︎' },
 ] as const;

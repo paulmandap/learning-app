@@ -1549,6 +1549,778 @@ first sample).
 **Verified:** typecheck clean · **398 tests** · `expo export` · boot test green ·
 screenshots at 430px and 1280px · deployed · bundle hash `1f05b9d5…` matches.
 
+## 15. Three open items closed (2026-09-06)
+
+### 15.1 The chat cap counted but did not enforce — applied and verified
+
+Migration 0010 had been applied with the first version of `claim_chat_message`,
+the one §13.4 describes: the guard sat in a `CASE` on the `SET`, so the row was
+updated either way, `RETURNING` always yielded a number, and the caller could
+not tell a granted claim from a refused one. With a limit of 20 the 21st
+question came back "0 remaining" and `askAssistant`, which refuses only on a
+negative, waved it through. **The cap counted and enforced nothing.**
+
+The corrected function — guard in the `WHERE`, so a claim over the cap updates
+no row and `used` stays NULL — was re-applied through the dashboard SQL editor
+by the owner on 2026-09-06. Verified in the same editor against a limit of 2:
+
+```
+as iso-a@example.test -> claims returned 1 / 0 / -1  (want 1 / 0 / -1)  ==> PASS
+```
+
+The verification is worth keeping because running it is not obvious. `auth.uid()`
+is NULL in the SQL editor, so `claim_chat_message` cannot be called there at
+all without impersonating someone first — `set_config('request.jwt.claims', …)`
+inside a `DO` block, which also needs `request.jwt.claim.sub` set for older
+definitions of `auth.uid()`. The block ends in `RAISE EXCEPTION`, deliberately:
+the message carries the result **and** the abort rolls back the three test
+claims, so verifying the cap does not spend anyone's allowance. It runs as the
+dashboard role, so it exercises the counting logic and not RLS — the row-level
+rules were already proven by the counter working in the live app.
+
+No application code changed. `remaining < 0` was always the right test; it just
+never received a negative.
+
+### 15.2 The 15 MB upload cap was self-imposed — measured, then raised
+
+`MAX_FILE_BYTES` was 15 MB because `MAX_INLINE_BYTES` was, and §12.2 recorded
+the reason as *"the limit is set by the reader, not the bucket"* — a 40 MB PDF
+cannot become cards, so accepting one would spend storage on something the app
+then refuses. **That was reasoning, not a measurement, and the measurement
+reverses it.**
+
+`scripts/large-file-probe.ts` builds scan-like PDFs — every page a single
+photographic JPEG with film grain, no text layer, one unique canary per page —
+and sends them through the real `READ_SYSTEM_PROMPT` and `READ_RESPONSE_SCHEMA`.
+It calls the API directly rather than through `GeminiBrowserProvider` because
+the numbers that decide this question (`finishReason`, output tokens, thinking
+tokens) are in the envelope the provider discards.
+
+| Document | File | Base64 sent | Read | Pages back | Canaries | Output used |
+|---|---|---|---|---|---|---|
+| 12 pages | 22.4 MB | 29.8 MB | **31.6 s**, tier degraded (gate 24.5 s) | 12/12 | 12/12 | 2,788 — **4.3%** |
+| 24 pages | 44.8 MB | 59.7 MB | **19.9 s**, tier healthy (gate 4.2 s) | 24/24 | 24/24 | 6,974 — **10.6%** |
+
+Both returned `finishReason: STOP` — not truncated — with readability 1.00 on
+every page and every canary present, so the model read the pages rather than
+inventing plausible plant biology.
+
+**Where the walls actually are**, measured or derived from the two runs:
+
+| Ceiling | Value | Reached at |
+|---|---|---|
+| Google's PDF cap | 50 MB | ~26 pages of scan — **the first real wall** |
+| Inline request total | 100 MB | 75 MB of file, after base64's 4/3 |
+| Output tokens | 65,536 | ~260 pages, at ~250 tokens/page |
+| Input tokens | 1,048,576 | ~1,900 pages, at ~545 tokens/page |
+| `CALL_TIMEOUT_MS` | 100 s | ~38 pages even at the degraded rate of 2.6 s/page |
+
+**Nothing in this codebase binds below Google's 50 MB.** `MAX_INLINE_BYTES` is
+now 45 MB — under that cap with margin, since a file that cleared ours and
+failed Google's would be accepted, uploaded and then refused, which is the late
+unclear failure the limit exists to prevent.
+
+`MAX_FILE_BYTES` is **25 MB, and it is now set by storage rather than by the
+reader** — the exact inversion of §12.2. At 45 MB a student fills their 150 MB
+allowance with three files; at 25 MB the 20 MB scanned PDF this was raised for
+still goes through. The user-facing refusal no longer claims "the most we can
+read in one go", because that is no longer true and a student cannot check it.
+
+**Options (b) and (c) were declined on this evidence.** Downscaling photos with
+canvas solves nothing a 25 MB cap has not already solved — a phone photo is
+2–5 MB and never reached 15 MB — and re-encoding a student's handwriting would
+put the readability score, the only thing standing between a blurry page and
+invented cards, at risk for no gain. pdf.js render-to-JPEG would spend ~1 MB of
+a 2.0 MB bundle on the same non-problem. Neither was built.
+
+**One cost worth knowing.** Every rung of the fallback ladder re-uploads the
+whole file: the 44.8 MB read took a 429 on rung 1 and was served by rung 2, so
+that document went up twice. At a 25 MB cap a bad moment can mean ~100 MB
+uploaded from a phone for one document.
+
+**Verified:** typecheck clean · **400 tests** (398 before; 2 new in
+`tests/storage.test.ts` pinning the Google cap and the 20 MB case) · `expo
+export` · boot test green on the new bundle · shipped in the same deploy as
+§16, bundle `db0aab4c…`.
+
+### 15.3 D14 exists in the spec at last
+
+`src/ai/gemini.ts`, `prompts.ts`, `provider.ts`, `schemas.ts`,
+`src/data/assistant.ts` and `src/ui/assistant.tsx` all cited **D14** for the
+study assistant, and the spec had no such row — the decision was agreed in
+Phase 9c and never written down. Added to §1 after D13, owner-approved as
+written on 2026-09-06, carrying the three things the code depends on: one
+question and one answer with no history, card context on a study screen and set
+context elsewhere, and 20 questions per person per day claimed in the database
+before the model is called.
+
+## 16. Four iPhone defects the owner found, none visible here (2026-09-06)
+
+All four came from the owner using the app on his own phone, in dark, and none
+of them could have been caught by anything in this repository as it stood.
+That is the finding worth keeping.
+
+### 16.1 Tapping a field zoomed the whole app and left it zoomed
+
+> *"when i press the chatbot, it kinda zooms it a little bit — causing me to
+> swipe up left right down and seeing that white blank canvas."*
+
+**iOS Safari force-zooms the page when a field with text under 16px takes
+focus.** It does not zoom back out afterwards, so the app stays magnified and
+pannable, and panning shows whatever is outside it.
+
+Two fields were 15px: the assistant's question box and the paste-notes box on
+Add notes — the two a student types into most. Everything using the shared
+`Field` was already 16.
+
+Fixed by `INPUT_FONT_SIZE` in `src/ui/theme.ts`, which all three now point at.
+**The other available fix — `maximum-scale=1, user-scalable=no` — was
+deliberately not used:** it takes pinch-zoom away from everyone who needs it to
+read at all, to save one point of font size.
+
+### 16.2 And the canvas it revealed was white
+
+`html, body` had no background, so the area outside the app was the browser's
+default white — framing a dark-themed app in white the moment a zoom or an
+overscroll let you see past it. Now set in `public/index.html`, light and dark,
+matching the two `theme-color` metas already there. **Four values that must stay
+in step**, which is stated in the file itself.
+
+### 16.3 The panel opened into the middle of a busy screen
+
+> *"when i click on chatbot, it's kinda hard to focus like there's too much
+> distracting part."*
+
+It was a card anchored above the tab bar, with the set list still bright around
+it — one more thing on a crowded screen rather than the thing being used. It is
+now a dimmed overlay: tap anywhere outside to close, Escape still closes.
+
+**On a phone it opens near the TOP**, which looks wrong for a bottom-corner
+button until you watch it with the keyboard up. iOS does not shrink the page for
+its keyboard, so anything anchored to the bottom ends up behind it and Safari
+scrolls the whole app to chase the field — which is exactly what the owner's
+second screenshot shows. The top half is the only part the keyboard cannot take.
+On a desktop there is no keyboard to dodge, so it stays in its corner.
+
+**The scrim is 0.7 black, not 0.55.** Checked in dark, because that is how the
+owner uses it: black over a near-black page barely separates the panel from what
+is behind it, and separation is the whole point of a scrim. The first attempt at
+0.55 looked fine in light and did almost nothing in dark.
+
+A thing that looked like a bug and was not: the tab bar still reads lighter than
+the rest under the scrim. Hit-testing at that point returns the scrim, so it is
+covered and a tap there closes the panel — the bar simply starts lighter than
+the page, so it stays lighter when both are dimmed. Recorded because it cost a
+round of investigation and would cost another.
+
+### 16.4 The button crowded the tab bar
+
+Raised from `space.lg` to `space.xl` above the bar. 16px above furniture that
+already has the home indicator under it reads as misplaced rather than floating.
+
+### 16.5 What could not have caught any of this — and what now can
+
+- **The test suite** cannot load `src/ui/**` (it imports react-native), and has
+  no iPhone.
+- **The screenshot harness** drives headless Chrome on Windows, which has no
+  such zoom rule, and — until today — **had only ever been run in light mode**,
+  while the owner uses the app in dark. Both `openPage({ dark: true })` and
+  `--dark` now exist. Every screenshot in §§7–14 is a light-mode screenshot of a
+  dark-mode user's app.
+- `tests/input-zoom.test.ts` reads the **source** of every `.tsx` and fails on a
+  `TextInput` with `fontSize` under 16, plus the shared constant. Crude on
+  purpose, and stated as such in the file: a style computed at runtime would slip
+  past it. It is the only check that would have caught this one.
+
+Two harness repairs came out of the same session, both small and both blocking:
+
+- **`--click` now matches an accessibility label** as well as visible text. The
+  assistant's button is an icon — `✦` — so it had no text to match and could not
+  be driven at all.
+- **Git Bash rewrites a lone `/` argument into a Windows path**, so
+  `screenshot.ts / out.png` navigated to `C:/Program Files/Git` and failed with
+  "Cannot navigate to invalid URL". Not a harness bug; run it from PowerShell,
+  or pass `MSYS_NO_PATHCONV=1`. Twenty minutes were spent inside the harness
+  before the shell turned out to be the culprit.
+
+**Verified:** typecheck clean · **404 tests** (400 before; 2 new in
+`tests/input-zoom.test.ts`) · `expo export` · boot test green · screenshots at
+393×852 in **both** light and dark, panel closed and open · deployed · production
+bundle hash `db0aab4c…` matches local.
+
+**Not verified on the device that found them.** Everything above was checked in
+headless Chrome, which is the tool that missed all four in the first place. The
+zoom fix in particular can only be confirmed on a real iPhone — tap the
+assistant's box and the paste-notes box and watch whether the page moves.
+
+## 17. Four things the owner asked for after using it (2026-09-06)
+
+Two bugs he hit while studying, one thing a friend asked for after he shared
+the link, and a pet.
+
+### 17.1 Switching level threw away where you were
+
+> *"let's say i'm 5 of 9 progress in answering the flashcards in 'remember'.
+> when i suddenly switched to 'apply' then went back to 'remember' i lost my
+> progress. it went to 0 of 9 progress again."*
+
+One `index`, shared by all three levels, reset to 0 by an effect on every
+level change. Looking at another deck threw yours away.
+
+There is now a position per level. That is the right model rather than merely
+the convenient one, because **levels are exclusive** (deliberate deviation 7) —
+Understand is a different deck from Remember, not a superset of it, so each
+genuinely has its own place to keep.
+
+Entering or leaving *retry what you missed* still resets all three, because
+that changes what every deck contains.
+
+**Checked against the built bundle, because no unit test can see it** — the
+state lives in a react-native screen the Vitest suite cannot load, and the
+defect only appears across a sequence of taps:
+
+```
+Remember 10      start:      0 of 10
+Remember 10      2 answered: 2 of 10
+Apply 4          switched:   0 of 4
+Remember 10      back:       2 of 10
+PASS — your place is kept
+```
+
+Kept as `scripts/study-probe.ts` rather than thrown away. §11.3 records the
+screenshot harness being rebuilt from scratch three times before someone
+committed it; this is the same lesson applied earlier. It reads the level
+buttons off the page rather than hardcoding counts, so it runs against any set.
+
+### 17.2 The quiz asked the same questions in the same order, forever
+
+> *"the quiz isn't generating a new one after i finish answering the quiz …
+> make it randomized everytime i opened the quiz."*
+
+Questions came back in `listItems` order, and finishing was a dead end: the
+only ways on were the missed pile or leaving.
+
+The order is now drawn from a **round seed** — a timestamp taken once when the
+screen opens — and **"Ask me again"** on the results screen starts a fresh round
+by taking a new one. The questions are the same ones (a set holds what it
+holds); the sequence is redrawn, which is the part that matters, since
+answering in a memorised order tests the order as much as the material.
+
+`shuffleOptions` already held a seeded Fisher-Yates, so the shuffle itself is
+not new — `shuffleSeeded` is that function, exported. **Two callers want
+opposite things from it**, which is why the seed is a parameter rather than a
+clock: options seed by item id so a card's answers never move between viewings,
+questions seed by round so they always do. The seed is `round:level`, so
+switching level does not redeal the level you were part-way through.
+
+Verified live across six opens — the leading question was the reproductive
+organ twice, photosynthesis three times, support and transport once — and by
+driving a full five-question round to the results screen, where each question
+appeared exactly once (the double-submit guard from §10.3 still holds after the
+refactor) and "Ask me again" dealt a different order.
+
+### 17.3 Space, always visible, on one screen only
+
+> *"i shared the link to my friend and he suggested that it would be nice to
+> see the limit and how much space they consumed."*
+
+This reverses the earlier instruction — *"don't show upfront everytime
+regarding their limit"* — and both are satisfied by **where** it sits rather
+than by whether it shows. The card is on Progress and nowhere else: never on
+Add notes, never on a study screen. Someone who wants the number can find it;
+nobody is told about a limit while they are trying to work.
+
+It carries a bar as well as the figures, because the fraction is the actual
+question — "24 MB of 150 MB" needs arithmetic before it becomes "plenty left".
+Amber only above the nudge point, so the colour still means something when it
+changes, using the validated chart steps rather than UI tokens (§14.1's lesson,
+which cost a segment drawn at 1.27:1 that could not be seen).
+
+Two details worth keeping: a small first upload never renders as a zero-width
+sliver, because a bar showing nothing after an upload reads as "not counted";
+and an empty account says *"Nothing stored yet"* rather than *"0 bytes"* —
+`bytes` is on this project's own banned-words list, and `tests/storage.test.ts`
+already rejects it in the upload message.
+
+### 17.4 The streak is a pet now
+
+> *"it would be great if there's a 'pet' similar to tiktok streak … the pet
+> should grow larger every 1 (baby), 10, 20, 50, 100."*
+
+`src/core/pet.ts` maps a streak to one of five stages, pure and tested. Two
+choices in it are worth the words:
+
+- **A streak of zero returns `null`, not a stage.** No pet and a baby pet read
+  completely differently on screen — one is an invitation, the other a badge —
+  and collapsing them makes the empty case the pet's problem.
+- **Progress is measured across the current band, not the whole scale.** At day
+  55 a bar against 100 would sit past halfway and barely move for a month;
+  within the band it advances visibly every day.
+
+The exact number stays beside the pet. A streak that cannot be read precisely
+is a streak people stop believing, and the picture is an addition to it rather
+than a replacement.
+
+What is deliberately still absent, before and after: *"keep it up or lose it"*.
+The streak survives a day you have not studied yet (see `studyStreak`), so
+threatening someone with a loss they have not incurred would be a lie — and a
+pet makes that kind of pressure land harder, not softer.
+
+**The art is one image cut into five, and that is not incidental.** Five
+separate generations drift in colour, outline weight and face, and a pet that
+becomes a different animal when it grows is worse than no pet. The owner
+generated one row of five stages on flat magenta — twice, a potato and a cat —
+and `scripts/make-pet-assets.ts` cuts them into `assets/pet-1.png` … `pet-5.png`.
+Chrome's canvas does the work, so no image library was added for a command that
+runs about twice in the life of the project.
+
+### 17.5 Cutting the art out taught more than expected
+
+Four things, each of which broke the naive version:
+
+**1. The file is not called what you asked for.** Both sheets arrived as
+`.jfif` — what Windows saves a JPEG as from a right-click — so the script now
+finds `pet-stages.{png,jpg,jpeg,jfif,webp}` and reads the type from the first
+bytes rather than the extension. A data URI with the wrong type is a decode
+error, not a useful message, and the owner should not have to know what a JFIF
+is to get his potato into the app.
+
+**2. A distance to `#FF00FF` deletes the eyes.** The first key scored how far a
+pixel sat from magenta across all three channels. Pure white is 255 away in
+green and identical in red and blue, which makes it score *closer to the
+background than the brown of the body* — it would have punched holes through
+every eye, and through the cat's entire white chest.
+
+What actually distinguishes the background is its shape, not its distance:
+magenta is red and blue both high with green markedly lower than **both**.
+White has green just as high, so it survives; pink cheeks and a pink nose have
+red high but blue no higher than green, so they survive too.
+
+**3. A glow cannot be keyed by colour at all.** The top stage is drawn with a
+warm aura, and an aura does not end — it fades through magenta. Sampled along
+one row of the fifth frame:
+
+```
+253,124,155   255,135,144   254,148,134   251,157,119   255,192,95
+   pink           coral         coral         orange        gold
+```
+
+Every threshold cuts somewhere in that ramp and leaves a hard edge of whatever
+colour sits at the cut. The chroma test left **a pink disc** that read as a
+blob rather than a glow, plainly wrong on a dark background.
+
+The fix stops asking what colour a pixel is and asks **where** it is: flood
+inwards from the frame edge through anything that is not the character's dark
+outline. The outline is closed, so the flood washes around the character and
+stops, taking the glow, the pale panel borders between cells, the drop shadow
+and the loose sparkles with it, and leaving everything the outline encloses
+untouched. The magenta shadow under each character is dark enough to block the
+flood on luminance alone, so its chroma is what lets the flood through it.
+
+**4. The flood must run BEFORE the trim.** Trimming makes the character touch
+all four edges by definition, so a flood seeded from the border of a trimmed
+frame starts inside the character and eats it. Order is: key, flood, trim.
+
+Trimming matters more than it sounds on its own: the cells carry generous
+padding and the stages sit at different sizes inside them, so untrimmed frames
+would make the pet appear to shift and shrink as it grows — the opposite of the
+intended effect. Cell boundaries are rounded per cell rather than floored once:
+2064 across five is 412.8, and flooring drifts four pixels by the last frame,
+which is enough to slice a tail off.
+
+Both sheets came through clean — potato and cat, eyes, cheeks, whiskers and
+white chest all intact.
+
+### 17.6 Both pets ship, and the student picks — migration 0011
+
+The two sheets were not a draft and a final. The owner: *"the reason why i put
+two jpeg images is that the user may choose which pet they would want. cat or
+potato."* Read as a choice of art by the developer, this was going to ship as
+half a feature.
+
+**The choice lives on the profile row, not in the browser.** It is a pet — it
+is supposed to be yours, the same one on your phone and your laptop. Browser
+storage would give the same person a potato at home and a cat in the library,
+which is the one thing a pet must not do. Same reasoning as D12 for the API
+key, and it inherits the same protection: `profiles` is already restricted to
+its owner by RLS, so `0011_pet_choice.sql` adds a column and a check
+constraint and nothing else.
+
+**NULL means "has not chosen", and the default lives in the app.** Defaulting
+the column to `'potato'` in the database would mean a later change of default
+silently reassigning the pet of everyone who never picked one, with no way to
+tell the two apart.
+
+**`fetchProfile` asks for the column, and asks again without it on exactly one
+error.** This matters more than it looks: `fetchProfile` is not a screen's
+private query — Settings, quiz grading, the assistant and the variant pass all
+read the API key through it, and it throws. Naming a column the database has
+not got would not have "broken the pet"; it would have broken marking written
+answers and making cards, everywhere, until the migration was applied. That is
+the §10/§12 deploy-order hazard, and rather than make the order matter again it
+retries on `42703` and warns. One query in the normal case; a second only while
+the migration is outstanding.
+
+**The chooser shows the pets rather than naming them.** The question is which
+you would rather look at every day, and a radio button labelled "Cat" does not
+answer it. It offers the third stage of each: the baby is too small to read at
+tile size and the giant wears a crown belonging to a hundred-day streak nobody
+has yet. The selected tile carries a ✓ as well as a border, for the reason
+§10.4 gives about the quiz options — a verdict must not live in colour alone.
+A tap saves; the tile lights up immediately and reverts if the save fails,
+because a tap that appears to do nothing for a round trip reads as broken.
+
+Adding a third pet is now: drop `assets/<name>-stages.<ext>` in, run
+`npx tsx scripts/make-pet-assets.ts` (no arguments — it cuts every sheet it
+finds), add one entry to `PET_SPECIES` and one to 0011's constraint.
+
+**Verified end to end against the live database**, driving the built bundle:
+
+```
+choosing Cat…
+stored choice survived a reload: Cat
+dashboard: Your cat, small size, at 15 days in a row
+reset to Potato
+```
+
+That the choice came back after a reload is the part that matters — it proves
+the value was read from the database rather than held in screen state.
+
+Sizes on screen are **explicit pixel width and height** with `contain`, per
+§8.1's three attempts: a fixed height cropped the picture,
+width-plus-aspect-ratio collapsed it to nothing, and numbers worked.
+
+**The frames are WebP, capped at 280px, and that was worth measuring.** They
+shipped as full-size PNGs first, and the cost was only noticed while checking
+what was about to be committed:
+
+| | total for ten frames |
+|---|---|
+| PNG, straight from the sheet | **1,150 KB** |
+| PNG, resized to 280px | 805 KB |
+| **WebP, resized to 280px** | **127 KB** |
+
+The PNG version was **a third of the entire 3.4 MB web build**, spent on a
+decoration. Flat-colour cartoons with hard edges are exactly the case WebP wins
+by an order of magnitude. 280px covers the largest on-screen size (132pt) at 2×
+on a retina screen; the sheet's own frames were up to 414px, which is detail
+nobody can see paid for on a phone connection. The build went **3.4 MB → 2.4 MB**.
+
+Trimming and downscaling happen in ONE draw rather than two, because resampling
+an already-resampled frame softens the outline twice over. Verified in the
+browser that the frames actually decode — `naturalWidth` 211×280 and 194×280,
+`complete: true` — since a format the bundler passed through but the browser
+would not render is exactly the failure that would leave an invisible pet.
+
+`images.d.ts` was needed for any of this to typecheck — `expo/types` does not
+declare image modules, so a `.png` import is an error until something says what
+one is. Typed as `ImageSourcePropType` rather than `any`.
+
+**Verified:** typecheck clean · **419 tests** (404 before; 13 in
+`tests/pet.test.ts`, 4 in `tests/grade.test.ts`) · `expo export` · boot test
+green · `scripts/study-probe.ts` PASS · quiz driven to results live · all ten
+frames inspected at their real on-screen sizes on both the light and dark
+grounds · Progress screenshot at 393×1500 in dark, where a 15-day streak drew
+the second stage with *"5 more days and it grows again"* — the right stage for
+15, and the right 5 days to 20 · the chooser screenshotted in dark · pet choice
+saved, reloaded and shown on the dashboard against the live database.
+
+Deployed; production bundle hash `1c8fb410…` matches local. 0011 was applied by
+the owner before this shipped, so the retry path in `fetchProfile` is insurance
+rather than the current state.
+
+Seeded `study_days` rows were cleared after the screenshots, per §14.5: leaving
+synthetic data in a shared test account has already produced one wrong
+conclusion in this project.
+
+## 18. Both dashboard charts were wrong, for different reasons (2026-09-06)
+
+The owner, looking at his own Progress screen:
+
+> *"this chart feels wrong too. and what is the relevance of that information?
+> like 225 answers in 2 days. what do i gain from that?"*
+>
+> *"as a learner, i don't really know what's know well, getting there, and not
+> started. to me it's just a circle with different colors. maybe the logic of
+> that chart is incorrect?"*
+
+Both critiques were right, and the second one was righter than it knew.
+
+### 18.1 "What has stuck" could not move for 23 days
+
+The old bands came from the SCHEDULE: a card counted as mastered once its
+interval reached 21 days (SM-2's conventional line), struggling at three
+lapses, learning otherwise. Defensible as a statement about scheduling.
+Useless as something to show a student, and here is the arithmetic that proves
+it — intervals go 1, 6, 16, 45 days, and a card is only shown when it is due:
+
+| correct answers | interval | falls on |
+|---|---|---|
+| 1 | 1 day | day 0 |
+| 2 | 6 days | day 1 |
+| 3 | 16 days | day 7 |
+| 4 | 45 days | **day 23** |
+
+**No card could enter "Known well" before the 23rd day of using the app**,
+however well the student answered. Everything touched sat in one middle band
+and everything else in another. The chart was reporting how long ago someone
+installed the app, not what they had learned — which is exactly what "just a
+circle with different colors" describes.
+
+**Now keyed on `reps`**, the scheduler's count of consecutive successes: a
+correct answer increments it, a wrong answer resets it to zero, a partial holds
+it. Already maintained, no new storage, and it moves the same day someone
+answers.
+
+| band | meaning | shown as |
+|---|---|---|
+| known | `reps >= 3` | "right 3 times in a row" |
+| getting | `reps` 1–2 | "right once or twice so far" |
+| needsWork | has a schedule, `reps === 0` | "your last answer was wrong" |
+| notStarted | no schedule at all | "you haven't been asked these yet" |
+
+First cards reach *known* on day 7 rather than day 23. It is also the plainer
+claim: "you have got this right three times running" is something a person can
+check against their own memory; "its interval exceeds 21 days" is not.
+
+Two details that are not incidental:
+
+- **Every band now says what put a card there**, beside the label. A label
+  names a band; only the sentence tells you how to move one. That was the
+  actual complaint, and a relabelling alone would not have fixed it.
+- **"Never seen" and "got it wrong last time" are separate**, where the old
+  scheme merged a lapsed card into *learning*. They are different things to a
+  learner, and one of them is a to-do list.
+
+Keying on the current run rather than on lapses also fixes something the old
+version got right for the wrong reason: lapses never decrease, so a card that
+went badly in week one would have carried the label for ever. `reps` forgets,
+which is correct — what matters is whether you know it now.
+
+`MASTERED_INTERVAL_DAYS` and `STRUGGLING_LAPSES` are deleted rather than left
+unused. The scheduler still uses intervals and lapses; nothing outside it needs
+those numbers any more.
+
+**Existing accounts will see their counts jump**, and that is the point: cards
+sitting in "Getting there" whose last answer was wrong move to "Needs work".
+
+### 18.2 The activity chart measured effort and rewarded cramming
+
+"Answers a day, last 30 days" was honest about what it plotted and the
+plotting was fine. The problem was the question it answered.
+
+**It measured effort, not learning** — and worse, it rewarded the exact
+behaviour the scheduler exists to prevent. 225 answers crammed into two days
+drew the tallest bars on the screen; the spacing that actually makes things
+stick drew none. And "am I keeping at it?" was already answered, better, by
+the streak and the pet sitting directly above it. §14.3 had argued the chart
+earned its place by showing "something no number already says". Once the pet
+arrived, that stopped being true.
+
+**Replaced by the week ahead**: cards falling due each of the next seven days,
+from the `review_state` rows the mastery bands already fetch — no extra query.
+It answers something nothing else in the app can, namely whether tonight is
+light and tomorrow is heavy, it is the scheduler's own knowledge which the
+student otherwise discovers only by opening a deck, and it cannot be inflated
+by grinding.
+
+- **Overdue folds into today**, because that is what it is: work waiting now.
+  A past-dated column would push the useful part of the chart sideways to make
+  room for a scolding.
+- **Rows, not columns.** Seven bars need seven labels and "Tomorrow" does not
+  fit under a 40px column. Thirty columns needed no labels and could be
+  vertical; seven do. The count sits where it is read rather than hovering.
+- **A free day is drawn, not skipped** — an evening off is information, and a
+  missing row reads as a bug.
+- **One summary sentence, or none.** "Tomorrow is the busy one" only when that
+  day holds at least two cards AND at least 40% of the week; never when today
+  is heaviest, since its own row and the "cards ready for review" line above
+  have already said so. Without the threshold the sentence gets said about a
+  day holding one more card than its neighbours, and stops meaning anything.
+
+Rendered, on a seeded account:
+
+```
+What you know
+  Getting there   right once or twice so far          4
+  Needs work      your last answer was wrong          8
+  Not started     you haven't been asked these yet   16
+
+Coming up this week
+  Today       5
+  Tomorrow    7
+  Tuesday     —
+  …
+  Tomorrow is the busy one.
+```
+
+Note what the old bands could not have told him: **8 cards he got wrong last
+time**, which is a to-do list, sat merged into the same colour as 4 cards he
+had answered correctly once.
+
+**Verified:** typecheck clean · **426 tests** (419 before; the `dailyActivity`
+tests are gone with the function and 18 new ones cover `dueForecast`,
+`describeForecast`, `forecastDayLabel` and the new bands) · `expo export` ·
+boot test green · rendered on a seeded account and read back from the DOM ·
+deployed · production bundle hash `6cecd3cb…` matches local.
+
+**A limitation of this session, stated plainly:** the screenshot was taken but
+could not be viewed — image reads stopped working partway through — so the two
+charts were verified from the rendered text and geometry rather than by eye,
+and the picture was sent to the owner to look at instead. Every other UI change
+in these notes was checked by looking; this one was not.
+
+## 19. The notebook — migration 0012 (2026-09-06)
+
+> *"add a note tab. a good feature is that let's say i'm in class writing notes
+> using the learning app, it would be great if there's a button to immediately
+> transform the notes into flashcards."*
+
+Two words in that brief decide the design: **in class**.
+
+### 19.1 Losing a note is the only unacceptable failure
+
+Everything else in this app can be regenerated. Cards come back from a model
+call, schedules rebuild from attempts, the file can be re-uploaded. **An hour of
+someone's own writing during a lecture cannot.** So:
+
+- It saves 1.2 s after typing stops, not on a Save button someone forgets while
+  packing up.
+- It saves again on the way out, because leaving mid-sentence is how a lecture
+  actually ends.
+- **A failed save is stated, loudly, and the text stays on screen.** This
+  project's recorded lesson is that silent failure costs a wrong conclusion;
+  here it would cost the notes.
+- Deleting a study set does not touch the note. `study_set_id` is
+  `on delete set null` — the same reasoning as "Free up space" keeping every
+  card while dropping the file.
+
+The debounce timer is a ref, not state: at typing speed, re-rendering the
+editor on every keystroke to reschedule a timer is the difference between
+typing and fighting the field.
+
+### 19.2 Notes are not documents
+
+`documents` holds things you UPLOAD — a PDF, a photo, a paste — each attached
+to a set, read once, then finished with. A note is the opposite on every count:
+written a line at a time over an hour, belonging to the person rather than to a
+set, and still being edited after cards have been made from it. Putting notes
+in `documents` would mean a row whose extracted text goes stale the moment
+another sentence is typed, attached to a set that may not exist yet.
+
+### 19.3 "Make flashcards" reuses `/new` rather than repeating it
+
+The button navigates to `/new?noteId=…`, which loads the note and prefills the
+text. It does not run its own pipeline.
+
+That screen already owns the whole of it: the API-key check, the count picker,
+the storage backstop, the error mapping, the "adding to an existing set" path.
+A second copy in the notebook would have drifted from this one the first time
+either changed — and the count picker matters, because a note should not
+silently become twenty cards when the student wanted forty.
+
+The note is not modified by what happens there, and the screen says so, because
+seeing your own writing in an editable box under a heading called "New set"
+reads as if you are about to change the note itself.
+
+### 19.4 Two bugs found by running it, not by reading it
+
+**A missing table does not report the error you expect.** `NotesUnavailableError`
+originally keyed on Postgres's `42P01` (undefined relation). The code that
+actually arrives is **`PGRST205`**: a PostgREST request never reaches Postgres
+when the table is absent from the schema cache — it is rejected before that.
+With only `42P01` handled, the failure fell through as a generic error, the
+list rendered zero rows, and the tab showed a convincing *"Nothing written
+yet"* — an empty notebook rather than a missing one, with a "New note" button
+that could only fail. Both codes are handled now.
+
+**A saved note could still make cards from its old text.** The editor
+invalidated the notes LIST on save but not the cached copy of the note itself,
+and `/new` reads the note back from that cache. Queries here are fresh for 30
+seconds, so tapping "Make flashcards" straight after typing a paragraph would
+have generated cards from the text as it was *before* that paragraph — silently,
+with nothing on screen to suggest it. Both keys are invalidated now.
+
+Neither was reachable by typecheck or by the unit suite. The first needed a
+real database with the migration missing; the second needed the two screens in
+sequence.
+
+### 19.5 A gotcha that cost twenty minutes: route types are a dev-server artefact
+
+Adding `app/(tabs)/notes.tsx` and `app/note/[id].tsx` broke typecheck with
+`Type '"/notes"' is not assignable to…`, because Expo Router's typed routes
+live in `.expo/types/router.d.ts` and that file lists only the routes it knew
+about last time it was generated.
+
+**`npx expo export` does NOT regenerate it.** Neither does `npx expo typegen`,
+which is not a command. It is written by the dev server, so the fix is to run
+`npx expo start` for a few seconds and stop it. Worth knowing before adding a
+route, because the error points at the call site and reads like a mistake in
+the code that is actually correct.
+
+### 19.6 What is deliberately absent
+
+No folders, no tags, no formatting, no search. This is for typing with one hand
+during a lecture, and each of those is a thing to fiddle with instead of
+writing. A flat list, newest edit first, is navigable at the size a student's
+notebook actually reaches. A title is optional — the note's own first line
+becomes one, because people write a heading and never touch a title field, and
+a notebook full of "Untitled note" would fail exactly the person who used it
+most naturally.
+
+`MIN_WORDS_FOR_CARDS = 30` gates the button, not the saving: half a sentence is
+still a note and still worth keeping, but a dozen words cannot produce a study
+set, and without the gate that failure arrives after a model call, as an empty
+set, with nothing explaining why.
+
+### 19.7 Three probe bugs, and what they have in common
+
+0012 was applied and `scripts/notes-probe.ts` ran end to end. It failed three
+times first, and **every failure was in the probe, against an app that was
+plainly working in the dump printed underneath it.** The common cause is worth
+naming, because it will recur the next time anyone drives this app from Node:
+
+| The probe waited for | Why it never arrived |
+|---|---|
+| `"Start typing"` | That is the body's **placeholder**. Placeholder text is not `innerText`. |
+| the canary in the page text | The note lives in a **textarea**; a field's *value* is not `innerText` either. |
+| `/Ready\|cards/` after pressing make | Matched instantly against *"How many **cards** at most?"* on the screen it had not left yet — so it never waited, then reported the set as unmade. |
+
+Two rules come out of it. **Read field values through the DOM, not the page
+text**, for anything typed into. And **wait on the thing that can only be true
+afterwards** — here `location.pathname.startsWith('/set/')` — rather than on
+words that may already be on the previous screen.
+
+That last one is the dangerous shape: a wait that passes immediately is not a
+failure, it is a test that silently stops testing.
+
+**Verified, all ten checks, against the live database and a real generation:**
+
+```
+PASS  autosaves without a Save button
+PASS  counts the words
+PASS  offers to make cards once there is enough
+PASS  the note survives a reload
+PASS  the title survives too — got "Plant transport"
+PASS  carries the note text over — 795 chars
+PASS  the note became a set — /set/13f8a6b6…
+PASS  the note links back to its cards
+PASS  appears in the list
+PASS  deleting removes it
+```
+
+`--generate` is opt-in: it spends model quota on a tier shared with real
+studying, and it is the only check that proves the headline claim rather than
+the plumbing under it. The notes and sets the runs created were deleted
+afterwards, per §14.5.
+
+**Verified:** typecheck clean · **443 tests** (426 before; 17 new in
+`tests/notes.test.ts`) · `expo export` · boot test green · the
+migration-not-applied state checked live, which is where the `PGRST205` bug was
+found · the four-tab bar measured at 393 px — four buttons of 98 px, no
+overflow, no wrapping · `scripts/notes-probe.ts --generate` 10/10 · deployed ·
+production bundle hash `855c6392…` matches local.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

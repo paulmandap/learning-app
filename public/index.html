@@ -31,6 +31,19 @@
       html,
       body {
         height: 100%;
+        /* The page's own background, behind everything React draws.
+           It used to be unset, i.e. white. That is invisible until something
+           lets you see past the app — a zoom, an overscroll, a rotation — and
+           then a dark-themed app is framed in white. The owner hit exactly that
+           on an iPhone after a field zoomed the page.
+           These two match the theme-color metas above; keep all four in step. */
+        background-color: #f7f7f8;
+      }
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          background-color: #111318;
+        }
       }
       body {
         overflow: hidden;

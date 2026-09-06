@@ -38,7 +38,29 @@ export default function Flashcards() {
 
   // Default Understand, per the spec's level segment.
   const [level, setLevel] = useState<Level>('understand');
-  const [index, setIndex] = useState(0);
+
+  /**
+   * How far through each level you are — one position per level, not one
+   * shared position.
+   *
+   * The owner: *"let's say i'm 5 of 9 progress in 'remember'. when i suddenly
+   * switched to 'apply' then went back to 'remember' i lost my progress."* It
+   * was a single `index` reset to 0 whenever the level changed, so the three
+   * levels shared one counter and looking at another deck threw yours away.
+   *
+   * A level is a different deck, so it keeps its own place. Levels are
+   * exclusive (deliberate deviation 7), which is what makes that the right
+   * model rather than merely a convenient one.
+   */
+  const [indexByLevel, setIndexByLevel] = useState<Record<Level, number>>({
+    remember: 0,
+    understand: 0,
+    apply: 0,
+  });
+  const index = indexByLevel[level];
+  const setIndex = (next: (previous: number) => number) =>
+    setIndexByLevel((prev) => ({ ...prev, [level]: next(prev[level]) }));
+
   const [revealed, setRevealed] = useState(false);
   const [missed, setMissed] = useState<Set<string>>(new Set());
   const [reported, setReported] = useState<string | null>(null);
@@ -105,11 +127,21 @@ export default function Flashcards() {
     queryFn: () => listDocuments(setId),
   });
 
+  // Switching level no longer touches any position — that was the bug. Only
+  // the per-card state resets, because a card turned over at one level must
+  // not appear already turned over at another.
   useEffect(() => {
-    setIndex(0);
     setRevealed(false);
     setReported(null);
-  }, [level, retryOnly]);
+  }, [level]);
+
+  // Entering or leaving "retry what you missed" IS a different deck at every
+  // level, so all three positions start again.
+  useEffect(() => {
+    setIndexByLevel({ remember: 0, understand: 0, apply: 0 });
+    setRevealed(false);
+    setReported(null);
+  }, [retryOnly]);
 
   // Build the hidden haptic switch before it is needed. Created on demand, the
   // very first tap was lost to a DOM race — which read as "swipes do not buzz"
@@ -282,7 +314,8 @@ export default function Flashcards() {
           <Button
             label="Start again"
             onPress={() => {
-              setIndex(0);
+              // This level only. The other two keep their places.
+              setIndex(() => 0);
               setRevealed(false);
               setMissed(new Set());
             }}

@@ -21,19 +21,21 @@ const MB = 1024 * 1024;
 /**
  * Largest file that may be uploaded.
  *
- * **Set by the reader, not by storage.** `MAX_INLINE_BYTES` in
- * `src/ai/gemini.ts` caps an inline Gemini request at 15 MB, and
- * `readDocument` throws above it — so a 40 MB PDF cannot be turned into cards
- * at all, whatever the bucket has room for. Accepting a file the app cannot
- * read would mean spending storage to store something useless and then failing
- * anyway, one step later and less clearly.
+ * **Set by storage, and that is a reversal.** This file used to say the reader
+ * was the binding constraint — `MAX_INLINE_BYTES` was 15 MB, so a bigger file
+ * could be stored but never turned into cards. Measured 2026-09-06 (NOTES
+ * §15.2) and it was not true: a 44.8 MB scan read completely in 19.9 s. The
+ * reader's ceiling is now 45 MB, and the limit that actually binds is the one
+ * this project has always had least of — Supabase Free's 1 GB, shared.
  *
- * This is why the owner's suggested 25–50 MB per file is not the binding
- * constraint: the app's own ceiling is lower. If the Files API path is ever
- * built (§3.2.1 allows it above the inline threshold), this can rise with it —
- * but the two must move together.
+ * 25 MB, not 45. The arithmetic is the argument: at 45 MB a student fills their
+ * 150 MB allowance with three files, and every ladder fallback re-uploads the
+ * whole thing — on a phone, from a café. At 25 MB a 20 MB scanned PDF still
+ * goes through, which is the case this was raised for.
+ *
+ * The two constants must still move together, and a test pins that.
  */
-export const MAX_FILE_BYTES = 15 * MB;
+export const MAX_FILE_BYTES = 25 * MB;
 
 /**
  * Largest total a single user may keep.
@@ -70,7 +72,10 @@ export function checkUpload(input: { fileBytes: number; usedBytes: number }): Up
       ok: false,
       reason: 'file_too_large',
       message:
-        `That file is ${formatBytes(input.fileBytes)}, and the most we can read in one go is ` +
+        // Not "the most we can read": the reader handles far more than this
+        // (NOTES §15.2). Saying so would be a lie a student cannot check, and
+        // the next person to raise the cap would believe it.
+        `That file is ${formatBytes(input.fileBytes)}, and the biggest we can take is ` +
         `${formatBytes(MAX_FILE_BYTES)}. Try splitting it into a few smaller files, or ` +
         `exporting it at a lower quality.`,
     };

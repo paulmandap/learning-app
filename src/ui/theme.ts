@@ -176,6 +176,24 @@ export const type = {
  */
 export const TOUCH_TARGET = 44;
 
+/**
+ * Smallest text an input may use. **Never lower this.**
+ *
+ * iOS Safari force-zooms the page when a field with text under 16px takes
+ * focus, and it does not zoom back out afterwards. The owner hit this on an
+ * iPhone: tapping the assistant zoomed the app, and swiping around the zoomed
+ * page revealed blank canvas outside it. The field was 15px.
+ *
+ * The other fix — `maximum-scale=1, user-scalable=no` in the viewport meta —
+ * is deliberately NOT used: it takes pinch-zoom away from everyone who needs it
+ * to read at all, to save one point of font size.
+ *
+ * Neither the test suite nor the screenshot harness can see this: headless
+ * Chrome on Windows has no such rule. `tests/input-zoom.test.ts` reads the
+ * source instead, which is the only check that would have caught it.
+ */
+export const INPUT_FONT_SIZE = 16;
+
 /** Swipe feedback colours, independent of light/dark palette roles. */
 export const swipeTint = {
   gotIt: '#1d7a4c',

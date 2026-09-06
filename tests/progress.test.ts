@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
-  dailyActivity,
+  describeForecast,
+  dueForecast,
+  forecastDayLabel,
+  KNOWN_REPS,
   masteryCounts,
   masteryOf,
-  MASTERED_INTERVAL_DAYS,
   MIN_SECTION_ATTEMPTS,
   sectionSplit,
   STRONG_ACCURACY,
-  STRUGGLING_LAPSES,
   studyStreak,
   type ItemHistory,
 } from '../src/core/progress';
@@ -67,94 +68,132 @@ describe('studyStreak', () => {
   });
 });
 
-describe('dailyActivity', () => {
-  it('covers the whole window, oldest first', () => {
-    const out = dailyActivity([], NOON, 7);
+describe('dueForecast', () => {
+  const at = (n: number) => startOfUtcDay(NOON) + n * DAY + 5 * 60 * 60 * 1000;
+
+  it('covers the whole window, starting today', () => {
+    const out = dueForecast([], NOON, 7);
     expect(out).toHaveLength(7);
-    expect(out[6]!.dayStart).toBe(startOfUtcDay(NOON));
-    expect(out[0]!.dayStart).toBe(startOfUtcDay(NOON) - 6 * DAY);
+    expect(out[0]!.dayStart).toBe(startOfUtcDay(NOON));
+    expect(out[6]!.dayStart).toBe(startOfUtcDay(NOON) + 6 * DAY);
   });
 
-  it('fills days with no study as zero rather than dropping them', () => {
-    // The empty days ARE the information. Plotting only days that have rows
-    // would space them evenly whatever the gaps, so a week off would look
-    // exactly like a week of daily study.
-    const out = dailyActivity([{ dayStart: daysAgo(0), answers: 5 }], NOON, 5);
-    expect(out.map((d) => d.answers)).toEqual([0, 0, 0, 0, 5]);
+  it('shows free days rather than dropping them', () => {
+    // A day with nothing due is information — it is when you get an evening
+    // off. Omitting it would also make the remaining bars lie about spacing.
+    const out = dueForecast([{ dueAt: at(2) }], NOON, 4);
+    expect(out.map((d) => d.due)).toEqual([0, 0, 1, 0]);
   });
 
-  it('places each day in the right slot', () => {
-    const out = dailyActivity(
-      [
-        { dayStart: daysAgo(0), answers: 3 },
-        { dayStart: daysAgo(2), answers: 7 },
-      ],
-      NOON,
-      4,
-    );
-    expect(out.map((d) => d.answers)).toEqual([0, 7, 0, 3]);
+  it('folds overdue cards into today', () => {
+    // They are work waiting NOW. A past-dated column would push the useful part
+    // of the chart sideways to make room for a scolding.
+    const out = dueForecast([{ dueAt: at(-3) }, { dueAt: at(-1) }, { dueAt: at(0) }], NOON, 3);
+    expect(out.map((d) => d.due)).toEqual([3, 0, 0]);
   });
 
-  it('adds up several rows landing on the same day', () => {
-    const out = dailyActivity(
-      [
-        { dayStart: daysAgo(1), answers: 2 },
-        { dayStart: daysAgo(1) + 60_000, answers: 3 },
-      ],
-      NOON,
-      3,
-    );
-    expect(out.map((d) => d.answers)).toEqual([0, 5, 0]);
+  it('counts several cards landing on one day', () => {
+    const out = dueForecast([{ dueAt: at(1) }, { dueAt: at(1) }, { dueAt: at(1) }], NOON, 3);
+    expect(out.map((d) => d.due)).toEqual([0, 3, 0]);
   });
 
-  it('ignores anything older than the window', () => {
-    const out = dailyActivity([{ dayStart: daysAgo(40), answers: 9 }], NOON, 7);
-    expect(out.every((d) => d.answers === 0)).toBe(true);
+  it('ignores anything past the window', () => {
+    // A card due in three months is not a plan.
+    const out = dueForecast([{ dueAt: at(40) }], NOON, 7);
+    expect(out.every((d) => d.due === 0)).toBe(true);
   });
 
   it('normalises any time of day to its UTC day', () => {
-    const lateEvening = Date.UTC(2026, 8, 5, 23, 45);
-    const out = dailyActivity([{ dayStart: lateEvening, answers: 4 }], NOON, 2);
-    expect(out[1]).toEqual({ dayStart: startOfUtcDay(NOON), answers: 4 });
+    const lateEvening = startOfUtcDay(NOON) + DAY + 23 * 60 * 60 * 1000;
+    const out = dueForecast([{ dueAt: lateEvening }], NOON, 3);
+    expect(out[1]).toEqual({ dayStart: startOfUtcDay(NOON) + DAY, due: 1 });
+  });
+});
+
+describe('describeForecast', () => {
+  const today = startOfUtcDay(NOON);
+  const days = (counts: number[]) =>
+    counts.map((due, i) => ({ dayStart: today + i * DAY, due }));
+
+  it('says the week is clear when nothing is due', () => {
+    expect(describeForecast(days([0, 0, 0, 0, 0, 0, 0]), today)).toMatch(/ahead/i);
+  });
+
+  it('names a day that genuinely stands out', () => {
+    expect(describeForecast(days([1, 0, 12, 0, 1, 0, 0]), today)).toBe('Monday is the busy one.');
+  });
+
+  it('says nothing about an even week', () => {
+    // "Thursday is the busy one" about a day holding one more card than its
+    // neighbours is how a summary line stops meaning anything.
+    expect(describeForecast(days([3, 3, 4, 3, 3, 0, 0]), today)).toBeNull();
+  });
+
+  it('says nothing when today is the heaviest', () => {
+    // The row itself is the first thing read, and "cards ready for review"
+    // above has already said it.
+    expect(describeForecast(days([20, 1, 0, 0, 0, 0, 0]), today)).toBeNull();
+  });
+
+  it('does not call a single card a busy day', () => {
+    expect(describeForecast(days([0, 1, 0, 0, 0, 0, 0]), today)).toBeNull();
+  });
+});
+
+describe('forecastDayLabel', () => {
+  const today = startOfUtcDay(NOON);
+
+  it('uses the words people plan with', () => {
+    expect(forecastDayLabel(today, today)).toBe('Today');
+    expect(forecastDayLabel(today + DAY, today)).toBe('Tomorrow');
+  });
+
+  it('names the weekday after that', () => {
+    // 2026-09-05 is a Saturday, so two days on is Monday.
+    expect(forecastDayLabel(today + 2 * DAY, today)).toBe('Monday');
   });
 });
 
 describe('masteryOf', () => {
-  it('calls a card with no schedule new', () => {
-    expect(masteryOf(null)).toBe('new');
-    expect(masteryOf(undefined)).toBe('new');
+  it('calls a card with no schedule not started', () => {
+    expect(masteryOf(null)).toBe('notStarted');
+    expect(masteryOf(undefined)).toBe('notStarted');
   });
 
-  it('calls a long interval mastered', () => {
-    expect(masteryOf(state({ reps: 4, intervalDays: MASTERED_INTERVAL_DAYS }))).toBe('mastered');
+  it('calls a card right three times running known', () => {
+    expect(masteryOf(state({ reps: KNOWN_REPS }))).toBe('known');
+    expect(masteryOf(state({ reps: KNOWN_REPS + 4 }))).toBe('known');
   });
 
-  it('calls a short interval learning', () => {
-    expect(masteryOf(state({ reps: 2, intervalDays: 6 }))).toBe('learning');
+  it('calls one or two right getting there', () => {
+    expect(masteryOf(state({ reps: 1 }))).toBe('getting');
+    expect(masteryOf(state({ reps: 2 }))).toBe('getting');
   });
 
-  it('calls a repeatedly failed card struggling', () => {
-    expect(masteryOf(state({ reps: 1, intervalDays: 1, lapses: STRUGGLING_LAPSES }))).toBe(
-      'struggling',
-    );
+  it('calls a card whose last answer was wrong needs work', () => {
+    // reps is reset to 0 by a wrong answer, so this is exactly "you missed it
+    // last time" — the thing a student can act on today.
+    expect(masteryOf(state({ reps: 0, lapses: 1 }))).toBe('needsWork');
   });
 
-  it('lets a relearned card be mastered again', () => {
-    // The order that matters: mastered is tested before struggling. Holding
-    // someone's worst week against them for ever is both demotivating and untrue
-    // — a card now on a three-week interval IS known.
-    const relearned = state({ reps: 5, intervalDays: 30, lapses: 5 });
-    expect(masteryOf(relearned)).toBe('mastered');
+  it('separates never-seen from missed-last-time', () => {
+    // These are different things to a learner and the whole point of the bands
+    // is that they mean something. A card answered wrong HAS a schedule.
+    expect(masteryOf(null)).toBe('notStarted');
+    expect(masteryOf(state({ reps: 0 }))).toBe('needsWork');
   });
 
-  it('treats a card just reset by a lapse as learning, not new', () => {
-    // reps is 0 after a lapse, but the card has history — calling it "new" would
-    // quietly shrink the learning pile every time someone failed a card.
-    expect(masteryOf(state({ reps: 0, intervalDays: 1, lapses: 1 }))).toBe('learning');
+  it('does not hold an old bad run against a card that is going well now', () => {
+    // Lapses never decrease, so keying off them would leave a card labelled
+    // badly for ever. What matters is the current run.
+    expect(masteryOf(state({ reps: 5, lapses: 9 }))).toBe('known');
   });
 
-  it('calls a reset card with many lapses struggling', () => {
-    expect(masteryOf(state({ reps: 0, intervalDays: 1, lapses: 4 }))).toBe('struggling');
+  it('is reachable in a week, which the interval-based version was not', () => {
+    // The defect this replaced: intervals go 1, 6, 16, 45 days and a card is
+    // only shown when due, so a 21-day threshold could not be met before day
+    // 23 however well someone answered. Three correct answers land on day 7.
+    expect(masteryOf(state({ reps: 3, intervalDays: 16 }))).toBe('known');
   });
 });
 
@@ -162,19 +201,19 @@ describe('masteryCounts', () => {
   it('buckets every card exactly once', () => {
     const items = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
     const states: Record<string, ReviewState | null> = {
-      a: state({ reps: 4, intervalDays: 40 }),
-      b: state({ reps: 2, intervalDays: 6 }),
-      c: state({ reps: 1, intervalDays: 1, lapses: 3 }),
+      a: state({ reps: 4 }),
+      b: state({ reps: 2 }),
+      c: state({ reps: 0, lapses: 3 }),
       d: null,
     };
     const counts = masteryCounts(items, (i) => states[i.id]);
-    expect(counts).toEqual({ mastered: 1, learning: 1, struggling: 1, new: 1 });
+    expect(counts).toEqual({ known: 1, getting: 1, needsWork: 1, notStarted: 1 });
     expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(items.length);
   });
 
-  it('counts an untouched set as all new', () => {
+  it('counts an untouched set as all not started', () => {
     const counts = masteryCounts([{}, {}, {}], () => null);
-    expect(counts).toEqual({ mastered: 0, learning: 0, struggling: 0, new: 3 });
+    expect(counts).toEqual({ known: 0, getting: 0, needsWork: 0, notStarted: 3 });
   });
 });
 

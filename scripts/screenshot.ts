@@ -112,6 +112,14 @@ export async function openPage(options: {
   height?: number;
   /** Sign in as the test user before navigating. Default true. */
   auth?: boolean;
+  /**
+   * Render as a device set to dark.
+   *
+   * Worth having because of what it revealed: every screenshot taken in this
+   * project had been light, while the owner uses the app in dark on an iPhone.
+   * A screen can only be checked in the colours someone actually sees it in.
+   */
+  dark?: boolean;
 } = {}): Promise<Page> {
   const width = options.width ?? 430;
   const height = options.height ?? 900;
@@ -198,6 +206,11 @@ export async function openPage(options: {
     deviceScaleFactor: 2,
     mobile: width < 700,
   });
+  if (options.dark) {
+    await on('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: 'dark' }],
+    });
+  }
 
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -261,14 +274,22 @@ export async function openPage(options: {
   }
 
   async function click(label: string): Promise<void> {
+    // Matches the visible words OR the accessibility label. An icon-only
+    // control — the assistant's ✦ button is the one that forced this — has no
+    // text to match, and its aria-label is the only name it has.
+    const MATCH = `((n) => {
+      const want = ${JSON.stringify(label)}.toLowerCase();
+      return n.innerText.trim().toLowerCase() === want
+        || (n.getAttribute('aria-label') ?? '').trim().toLowerCase() === want;
+    })`;
     await waitFor(
       `[...document.querySelectorAll('div[role="button"], button, [tabindex]')]
-        .some((n) => n.innerText.trim().toLowerCase() === ${JSON.stringify(label)}.toLowerCase()) ? 'y' : ''`,
+        .some(${MATCH}) ? 'y' : ''`,
       `a control labelled "${label}"`,
     );
     await evaluate(`(() => {
       const el = [...document.querySelectorAll('div[role="button"], button, [tabindex]')]
-        .find((n) => n.innerText.trim().toLowerCase() === ${JSON.stringify(label)}.toLowerCase());
+        .find(${MATCH});
       el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
       el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
       el.click();
@@ -356,6 +377,7 @@ async function main() {
     width: Number(flag('--width') ?? 430),
     height: Number(flag('--height') ?? 900),
     auth: !args.includes('--no-auth'),
+    dark: args.includes('--dark'),
   });
 
   try {

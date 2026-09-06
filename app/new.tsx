@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Body, Button, Card, Field, Notice, Screen, Title } from '../src/ui/components';
-import { useTheme } from '../src/ui/theme';
+import { INPUT_FONT_SIZE, useTheme } from '../src/ui/theme';
 import { fetchProfile } from '../src/data/profile';
 import { storageUsedBytes } from '../src/data/documents';
 import { checkUpload } from '../src/core/storage';
@@ -15,6 +15,8 @@ import {
   type FileSource,
 } from '../src/data/pipeline';
 import { extractHeadings } from '../src/ai/gemini';
+import { fetchNote, linkNoteToSet } from '../src/data/notes';
+import { noteTitle } from '../src/core/notes';
 
 const COUNTS = [10, 20, 40, 60] as const;
 
@@ -31,8 +33,18 @@ export default function NewSet() {
   const router = useRouter();
   // When setId is present we are ADDING to an existing set, not creating one.
   // Only the new document is planned, so nothing already generated re-runs.
-  const { setId: existingSetId } = useLocalSearchParams<{ setId?: string }>();
+  //
+  // When noteId is present the text comes from the notebook. That arrives HERE
+  // rather than the notebook running its own pipeline, because this screen
+  // already owns the whole of it — the key check, the count picker, the
+  // storage backstop, the error mapping. A second copy would drift from this
+  // one the first time either changed.
+  const { setId: existingSetId, noteId } = useLocalSearchParams<{
+    setId?: string;
+    noteId?: string;
+  }>();
   const addingToExisting = typeof existingSetId === 'string' && existingSetId.length > 0;
+  const fromNote = typeof noteId === 'string' && noteId.length > 0;
   const t = useTheme();
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
   // Fetched up front so a file can be refused the instant it is chosen, rather
@@ -49,6 +61,24 @@ export default function NewSet() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The note being turned into cards, if we came from the notebook.
+  const { data: note } = useQuery({
+    queryKey: ['note', noteId],
+    queryFn: () => fetchNote(String(noteId)),
+    enabled: fromNote,
+  });
+
+  // Fill the fields once, and only from a note that actually loaded. Doing it
+  // in an effect rather than as initial state because the note arrives after
+  // the first render.
+  const filledFromNote = useRef(false);
+  useEffect(() => {
+    if (!note || filledFromNote.current) return;
+    setText(note.body);
+    setTitle(noteTitle(note));
+    filledFromNote.current = true;
+  }, [note]);
 
   const apiKey = profile?.gemini_api_key ?? '';
   const hasInput = text.trim().length > 0 || file !== null;
@@ -129,6 +159,10 @@ export default function NewSet() {
         await planSet(targetId, count);
       }
 
+      // Remember where a note's cards went, so the note can offer a way back
+      // to them. Best effort inside linkNoteToSet — the cards exist either way.
+      if (fromNote) await linkNoteToSet(String(noteId), targetId);
+
       router.replace(`/set/${targetId}`);
     } catch (err) {
       setError(
@@ -144,10 +178,22 @@ export default function NewSet() {
 
   return (
     <Screen>
-      <Title>{addingToExisting ? 'Add notes' : 'New set'}</Title>
+      <Title>
+        {addingToExisting ? 'Add notes' : fromNote ? 'Make cards from your note' : 'New set'}
+      </Title>
+
+      {/* Says where the text came from, and that editing here is safe. Without
+          it, seeing your own note in an editable box on a screen called
+          "New set" reads as if you are about to change the note itself. */}
+      {fromNote ? (
+        <Notice tone="ok">
+          This is your note. Anything you change here only affects the cards — your note stays as
+          you wrote it.
+        </Notice>
+      ) : null}
 
       <Card>
-        <Body>Paste your notes</Body>
+        <Body>{fromNote ? 'Your note' : 'Paste your notes'}</Body>
         <TextInput
           value={text}
           onChangeText={setText}
@@ -163,7 +209,10 @@ export default function NewSet() {
             borderRadius: 8,
             padding: 12,
             minHeight: 160,
-            fontSize: 15,
+            // Under 16 and iOS zooms the page the moment this is tapped — see
+            // INPUT_FONT_SIZE. This box is the one a student types into for
+            // longest, so it is the worst place for it.
+            fontSize: INPUT_FONT_SIZE,
             textAlignVertical: 'top',
           }}
         />

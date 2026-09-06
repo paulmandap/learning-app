@@ -48,24 +48,13 @@ export const MIN_SECTION_ATTEMPTS = 3;
  */
 export const STRONG_ACCURACY = 0.7;
 
-/**
- * Interval at which a card counts as mastered.
- *
- * 21 days is SM-2's conventional line between a card still being learned and one
- * that has stuck. It also means "mastered" cannot be claimed in a single
- * session, which is what makes it worth seeing.
+/*
+ * MASTERED_INTERVAL_DAYS (21) and STRUGGLING_LAPSES (3) used to live here and
+ * are gone rather than left unused. Both were inputs to the old mastery bands,
+ * which measured the SCHEDULE rather than the learner — see KNOWN_REPS below
+ * for what replaced them and why. The scheduler still uses intervals and
+ * lapses; nothing outside it needs to know those numbers any more.
  */
-export const MASTERED_INTERVAL_DAYS = 21;
-
-/**
- * Lapses at which a card is called out as struggling.
- *
- * The same number `src/core/variant.ts` uses to trigger a rephrasing — a card
- * failed three times is the point this project has already decided means "the
- * question, not just the fact, may be the problem". Used as a filter here rather
- * than a trigger.
- */
-export const STRUGGLING_LAPSES = 3;
 
 // ------------------------------------------------------------------ streak --
 
@@ -107,77 +96,172 @@ export function studyStreak(attemptTimes: number[], now: number): number {
 
 // ---------------------------------------------------------------- activity --
 
-/** Days shown in the activity chart. Four weeks plus the current part-week. */
-export const ACTIVITY_DAYS = 30;
+/** Days shown in the forecast. A week is as far as a student plans. */
+export const FORECAST_DAYS = 7;
 
-export interface ActivityDay {
+export interface ForecastDay {
   /** UTC day boundary, so it lines up with the streak and the due dates. */
   dayStart: number;
-  answers: number;
+  /** Cards falling due that day. */
+  due: number;
 }
 
 /**
- * Answers per day across the recent window, oldest first.
+ * What is coming, day by day, starting today.
  *
- * **Zero-filled, and that is the whole point.** Plotting only the days that have
- * rows would space them evenly regardless of the gaps between them, so a week
- * off would look identical to a week of daily study. The empty days are the
- * information — they are what makes a streak visible as a shape rather than a
- * number.
+ * ## Why this replaced "answers a day, last 30 days"
+ *
+ * The old chart plotted how many answers were given each day, and the owner
+ * asked the right question of it: *"what is the relevance of that information?
+ * like 225 answers in 2 days. what do i gain from that?"*
+ *
+ * Nothing, is the honest answer. It measured **effort rather than learning**,
+ * and worse, it rewarded the exact behaviour the scheduler exists to prevent:
+ * cramming 225 answers into two days drew the tallest bars on the screen, while
+ * the spacing that actually makes things stick drew none. "Am I keeping at it?"
+ * was already answered, better, by the streak and the pet beside it.
+ *
+ * This answers something nothing else in the app can: whether tonight is light
+ * and tomorrow is heavy. It is forward-looking, it is actionable, and it cannot
+ * be inflated by grinding.
+ *
+ * **Overdue cards fold into today**, because that is what they are: work
+ * waiting now. Giving them their own past-dated column would push the useful
+ * part of the chart sideways to make room for a scolding.
  */
-export function dailyActivity(
-  rows: { dayStart: number; answers: number }[],
+export function dueForecast(
+  states: { dueAt: number }[],
   now: number,
-  windowDays: number = ACTIVITY_DAYS,
-): ActivityDay[] {
+  windowDays: number = FORECAST_DAYS,
+): ForecastDay[] {
+  const today = startOfUtcDay(now);
   const byDay = new Map<number, number>();
-  for (const r of rows) {
-    byDay.set(startOfUtcDay(r.dayStart), (byDay.get(startOfUtcDay(r.dayStart)) ?? 0) + r.answers);
+
+  for (const s of states) {
+    const day = startOfUtcDay(s.dueAt);
+    const bucket = day < today ? today : day;
+    // Beyond the window there is nothing to show; a card due in three months
+    // is not a plan, it is a promise.
+    if (bucket > today + (windowDays - 1) * DAY_MS) continue;
+    byDay.set(bucket, (byDay.get(bucket) ?? 0) + 1);
   }
 
-  const today = startOfUtcDay(now);
-  const out: ActivityDay[] = [];
-  for (let i = windowDays - 1; i >= 0; i--) {
-    const dayStart = today - i * DAY_MS;
-    out.push({ dayStart, answers: byDay.get(dayStart) ?? 0 });
+  const out: ForecastDay[] = [];
+  for (let i = 0; i < windowDays; i++) {
+    const dayStart = today + i * DAY_MS;
+    out.push({ dayStart, due: byDay.get(dayStart) ?? 0 });
   }
   return out;
 }
 
+/**
+ * What to call a day in the forecast.
+ *
+ * "Today" and "Tomorrow" rather than dates, because those are the two days
+ * anyone actually plans around; the rest get a weekday name, which is enough
+ * to locate them inside a single week. UTC throughout, matching the day
+ * boundaries the schedule and the streak both use.
+ */
+export function forecastDayLabel(dayStart: number, todayStart: number): string {
+  const offset = Math.round((dayStart - todayStart) / DAY_MS);
+  if (offset === 0) return 'Today';
+  if (offset === 1) return 'Tomorrow';
+  return new Date(dayStart).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' });
+}
+
+/** Share of the week's cards a day must hold before it is worth naming. */
+const BUSY_DAY_SHARE = 0.4;
+
+/**
+ * The one sentence worth putting under the forecast.
+ *
+ * Seven bars still leave the reader to find the shape in them; this names it.
+ * It says nothing at all rather than manufacturing an observation, because a
+ * line of commentary under every chart is how a dashboard starts feeling like
+ * it is talking for the sake of it.
+ */
+export function describeForecast(days: ForecastDay[], todayStart: number): string | null {
+  const total = days.reduce((n, d) => n + d.due, 0);
+  if (total === 0) return "Nothing waiting this week — you're ahead.";
+
+  const heaviest = days.reduce((a, b) => (b.due > a.due ? b : a));
+  // Today needs no announcement: its own row is the first thing read, and the
+  // "cards ready for review" line above has already said it.
+  if (heaviest.dayStart === todayStart) return null;
+
+  // Worth naming only if it genuinely stands out. Without this, "Thursday is
+  // the busy one" gets said about a day holding one more card than its
+  // neighbours, and the sentence stops meaning anything.
+  const standsOut = heaviest.due >= 2 && heaviest.due / total >= BUSY_DAY_SHARE;
+  if (!standsOut) return null;
+
+  return `${forecastDayLabel(heaviest.dayStart, todayStart)} is the busy one.`;
+}
+
 // ----------------------------------------------------------------- mastery --
 
-export type MasteryBucket = 'mastered' | 'struggling' | 'learning' | 'new';
+export type MasteryBucket = 'known' | 'getting' | 'needsWork' | 'notStarted';
 
 export type MasteryCounts = Record<MasteryBucket, number>;
 
 /**
+ * Correct answers in a row before a card counts as known.
+ *
+ * ## Why this replaced a 21-day interval
+ *
+ * The first version called a card mastered once its interval reached 21 days,
+ * which is SM-2's conventional line and is defensible as a statement about
+ * scheduling. As a thing to show a student it was broken, and the owner spotted
+ * it: *"i don't really know what's know well, getting there, and not started.
+ * to me it's just a circle with different colors."*
+ *
+ * Tracing the real schedule shows why. Intervals go 1 day, 6 days, 16 days,
+ * 45 days, and a card is only shown when it comes due:
+ *
+ * | correct answers | interval | falls on |
+ * |---|---|---|
+ * | 1 | 1 day  | day 0 |
+ * | 2 | 6 days | day 1 |
+ * | 3 | 16 days | day 7 |
+ * | 4 | 45 days | **day 23** |
+ *
+ * **No card could reach "known" before the 23rd day of using the app**, however
+ * well the student answered. Everything they had touched sat in one middle band
+ * and everything else in another, so the chart could not move for three weeks —
+ * it was reporting how long ago they installed the app, not what they had
+ * learned.
+ *
+ * Three in a row lands on day 7 instead, and it is also the plainer claim: "you
+ * have got this right three times running" is something a person can check
+ * against their own memory, which "its interval exceeds 21 days" is not.
+ */
+export const KNOWN_REPS = 3;
+
+/**
  * Which bucket one card is in.
  *
- * Order matters, and `mastered` is tested before `struggling` on purpose: a card
- * you failed repeatedly and have since relearned to a three-week interval IS
- * mastered. Leaving it labelled "struggling" for ever would hold someone's worst
- * week against them permanently, which is the opposite of motivating — and it
- * would be untrue.
+ * `reps` is the scheduler's count of consecutive successes: a correct answer
+ * increments it, a wrong answer resets it to zero, and a partial holds it. That
+ * makes it exactly the number this wants, already maintained, with no new
+ * storage — and it moves the same day a student answers, which the interval
+ * never did.
  */
 export function masteryOf(state: ReviewState | null | undefined): MasteryBucket {
-  if (!state || state.reps === 0) {
-    // Never answered, or reset to zero by a lapse. A card whose streak was reset
-    // is genuinely back to being learned, so it is not "new" unless it has no
-    // history at all.
-    if (!state) return 'new';
-    return state.lapses >= STRUGGLING_LAPSES ? 'struggling' : 'learning';
-  }
-  if (state.intervalDays >= MASTERED_INTERVAL_DAYS) return 'mastered';
-  if (state.lapses >= STRUGGLING_LAPSES) return 'struggling';
-  return 'learning';
+  // No schedule at all means it has never been answered. Distinct from a card
+  // answered wrong, which HAS a schedule sitting at zero — those are different
+  // things to a learner, and the whole point is that the bands mean something.
+  if (!state) return 'notStarted';
+  if (state.reps >= KNOWN_REPS) return 'known';
+  if (state.reps > 0) return 'getting';
+  return 'needsWork';
 }
 
-/** Bucket every card in a set. Cards with no schedule count as new. */
+/** Bucket every card in a set. Cards with no schedule have not been started. */
 export function masteryCounts<T>(
   items: T[],
   stateOf: (item: T) => ReviewState | null | undefined,
 ): MasteryCounts {
-  const counts: MasteryCounts = { mastered: 0, struggling: 0, learning: 0, new: 0 };
+  const counts: MasteryCounts = { known: 0, getting: 0, needsWork: 0, notStarted: 0 };
   for (const item of items) counts[masteryOf(stateOf(item))]++;
   return counts;
 }

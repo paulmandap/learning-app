@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { Linking } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Body, Button, Card, Field, Notice, Screen, Title } from '../../src/ui/components';
-import { fetchProfile, saveGeminiKey } from '../../src/data/profile';
+import { fetchProfile, saveGeminiKey, savePetChoice } from '../../src/data/profile';
+import { PetChooser } from '../../src/ui/pet';
+import { toPetSpecies, type PetSpecies } from '../../src/core/pet';
 import { deleteAllMyData } from '../../src/data/sets';
 import { supabase } from '../../src/data/supabase';
 import { GeminiBrowserProvider } from '../../src/ai/gemini';
@@ -25,6 +27,31 @@ export default function Settings() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState<string | null>(null);
+
+  /**
+   * The pet, held locally while the save is in flight.
+   *
+   * Without this the tile does not light up until the round trip comes back,
+   * which on a phone reads as a tap that did nothing. `pending` wins over the
+   * stored value only until the refetch lands, and a failed save clears it —
+   * so a pet that could not be saved goes back to the one that is real rather
+   * than lying about what is stored.
+   */
+  const [pendingPet, setPendingPet] = useState<PetSpecies | null>(null);
+  const [petError, setPetError] = useState<string | null>(null);
+  const pet = pendingPet ?? toPetSpecies(profile?.pet);
+
+  async function choosePet(next: PetSpecies) {
+    setPendingPet(next);
+    setPetError(null);
+    try {
+      await savePetChoice(next);
+      await queryClient.invalidateQueries({ queryKey: ['profile'] });
+    } catch {
+      setPendingPet(null);
+      setPetError("Couldn't save that just now. Try again in a moment.");
+    }
+  }
 
   async function reallyDelete() {
     setDeleting(true);
@@ -151,6 +178,16 @@ export default function Settings() {
         <Body muted>
           On an iPhone, add this app to your Home Screen from the Share menu to use it like an app.
         </Body>
+      </Card>
+
+      {/* ----------------------------------------------------- your pet -- */}
+      <Card>
+        <Body>Your study pet</Body>
+        <Body muted>
+          It grows the longer you keep your streak going. Pick the one you'd rather see.
+        </Body>
+        <PetChooser value={pet} onChange={choosePet} disabled={!profile} />
+        {petError ? <Notice tone="error">{petError}</Notice> : null}
       </Card>
 
       {/* ------------------------------------------------------ account -- */}

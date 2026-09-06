@@ -116,6 +116,23 @@ export function trimFeedback(feedback: string): string {
  * position, which would teach them the position rather than the fact.
  */
 export function shuffleOptions<T>(options: T[], seed: string): T[] {
+  return shuffleSeeded(options, seed);
+}
+
+/**
+ * The shuffle underneath, for anything that needs a repeatable random order.
+ *
+ * Two callers want opposite things from the same function, which is why the
+ * seed is a parameter rather than a clock:
+ *
+ *  - `shuffleOptions` seeds with the item id, so an order that must NOT change
+ *    between two viewings of one card;
+ *  - the quiz seeds with the moment the round started, so an order that DOES
+ *    change every time you open it.
+ *
+ * Deterministic either way, so a given seed can be reproduced in a test.
+ */
+export function shuffleSeeded<T>(options: T[], seed: string): T[] {
   const out = [...options];
   let h = 2166136261;
   for (let i = 0; i < seed.length; i++) {

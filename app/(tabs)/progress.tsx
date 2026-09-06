@@ -5,8 +5,17 @@ import { Body, Button, Card, Screen, Title } from '../../src/ui/components';
 import { radius, space, useTheme } from '../../src/ui/theme';
 import { useSessionStore } from '../../src/data/session';
 import { fetchDashboard, EMPTY_DASHBOARD, type DashboardData } from '../../src/data/dashboard';
-import { MIN_SECTION_ATTEMPTS, type SectionScore } from '../../src/core/progress';
+import {
+  describeForecast,
+  forecastDayLabel,
+  KNOWN_REPS,
+  MIN_SECTION_ATTEMPTS,
+  type SectionScore,
+} from '../../src/core/progress';
 import { formatBytes, MAX_USER_BYTES } from '../../src/core/storage';
+import { PetStreak } from '../../src/ui/pet';
+import { toPetSpecies } from '../../src/core/pet';
+import { fetchProfile } from '../../src/data/profile';
 
 /**
  * Progress — am I getting anywhere, and what should I look at next?
@@ -21,15 +30,20 @@ import { formatBytes, MAX_USER_BYTES } from '../../src/core/storage';
  * much info. Keep it simple"*, and then *"just because i mentioned a few graphs
  * doesn't mean you put it all — only the appropriate ones."* So each block
  * answers one of those two questions and nothing is here for decoration: how
- * you are going, what has stuck, whether it is becoming a habit, where you
- * stand, and one thing to do next.
+ * you are going, what you know, what is coming, where you stand, and one thing
+ * to do next.
  *
- * **Two charts, and both had to earn it.** The streak is a hero number, not a
+ * **Two charts, and both had to earn it — and one was replaced when it turned
+ * out not to have.** The streak is a hero number carried by the pet, not a
  * gauge. Mastery is part-to-whole, so a stacked bar — not the donut that was
- * asked for, for the reasons on `Mastery`. The daily columns are the only form
- * showing something no number already says. There is deliberately no chart of
- * accuracy over time: with a handful of answers a day it would be mostly noise,
- * and a noisy chart of a real measure is worse than no chart.
+ * asked for, for the reasons on `Mastery`. The third block used to plot answers
+ * per day and now plots the week ahead: the owner asked what he gained from
+ * "225 answers in 2 days" and the honest answer was nothing, because it
+ * measured effort rather than learning. See `Forecast`.
+ *
+ * There is deliberately no chart of accuracy over time: with a handful of
+ * answers a day it would be mostly noise, and a noisy chart of a real measure
+ * is worse than no chart.
  *
  * ## An empty screen is the normal case, not an error
  *
@@ -78,6 +92,9 @@ export default function Progress() {
           </Body>
           <Button label="Go to your sets" onPress={() => router.push('/')} />
         </Card>
+        {/* Someone can have uploaded a large file and answered nothing yet —
+            which is exactly when "how much room have I used?" gets asked. */}
+        <Space data={data} />
       </Screen>
     );
   }
@@ -87,7 +104,7 @@ export default function Progress() {
       <Title>Progress</Title>
       <Streak data={data} />
       <Mastery data={data} />
-      <Activity data={data} />
+      <Forecast data={data} />
       <Sections data={data} />
       <NextStep data={data} />
       <Space data={data} />
@@ -95,24 +112,29 @@ export default function Progress() {
   );
 }
 
-/** How you are going: the streak, and what is waiting. */
+/**
+ * How you are going: the pet, the streak, and what is waiting.
+ *
+ * The pet carries the streak now (see `src/ui/pet.tsx`). The exact number
+ * stays alongside it rather than being replaced by a picture — a streak you
+ * cannot read precisely is a streak you stop believing.
+ *
+ * What is deliberately NOT said, before and after: "keep it up or lose it".
+ * The streak survives a day you have not studied yet (see `studyStreak`), so
+ * threatening someone with a loss they have not incurred would be a lie, and
+ * a pet makes that kind of pressure land harder rather than softer.
+ */
 function Streak({ data }: { data: DashboardData }) {
-  const t = useTheme();
   const { streak, dueToday } = data;
+
+  // Shared query key with Settings and the study screens, so this is a cache
+  // read rather than another round trip — and the pet falls back to the
+  // default while it loads, never to an empty space where a pet should be.
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
 
   return (
     <Card>
-      <Text style={{ fontSize: 28, fontWeight: '700', color: t.text }}>
-        {streak > 0 ? `${streak} day${streak === 1 ? '' : 's'} in a row` : 'Start a new streak'}
-      </Text>
-      <Body muted>
-        {streak > 0
-          ? // Deliberately not "keep it up or lose it". The streak survives a
-            // day you have not studied yet (see studyStreak), so threatening
-            // someone with a loss they have not incurred would be a lie.
-            'Answering a few cards today keeps it going.'
-          : "Answer a card today and you're on one."}
-      </Body>
+      <PetStreak streak={streak} species={toPetSpecies(profile?.pet)} />
       {dueToday > 0 ? (
         <Body>
           {dueToday} card{dueToday === 1 ? '' : 's'} ready for review.
@@ -141,21 +163,48 @@ function Streak({ data }: { data: DashboardData }) {
  */
 function Mastery({ data }: { data: DashboardData }) {
   const t = useTheme();
-  const { mastered, learning, struggling } = data.mastery;
-  const fresh = data.mastery.new;
-  const total = mastered + learning + struggling + fresh;
+  const { known, getting, needsWork, notStarted } = data.mastery;
+  const total = known + getting + needsWork + notStarted;
   if (total === 0) return null;
 
+  // Every band says what PUT a card there. The owner, on the old version:
+  // "as a learner, i don't really know what's know well, getting there, and
+  // not started. to me it's just a circle with different colors." A label
+  // names a band; only the sentence beside it tells you how to move one.
   const segments = [
-    { key: 'mastered', label: 'Known well', n: mastered, color: t.chart.known },
-    { key: 'learning', label: 'Getting there', n: learning, color: t.chart.learning },
-    { key: 'struggling', label: 'Tricky', n: struggling, color: t.chart.tricky },
-    { key: 'new', label: 'Not started', n: fresh, color: t.chart.neutral },
+    {
+      key: 'known',
+      label: 'You know these',
+      hint: `right ${KNOWN_REPS} times in a row`,
+      n: known,
+      color: t.chart.known,
+    },
+    {
+      key: 'getting',
+      label: 'Getting there',
+      hint: 'right once or twice so far',
+      n: getting,
+      color: t.chart.learning,
+    },
+    {
+      key: 'needsWork',
+      label: 'Needs work',
+      hint: 'your last answer was wrong',
+      n: needsWork,
+      color: t.chart.tricky,
+    },
+    {
+      key: 'notStarted',
+      label: 'Not started',
+      hint: "you haven't been asked these yet",
+      n: notStarted,
+      color: t.chart.neutral,
+    },
   ].filter((s) => s.n > 0);
 
   return (
     <Card>
-      <Body>What has stuck</Body>
+      <Body>What you know</Body>
 
       {/* A 2px gap in the SURFACE colour separates touching segments, rather
           than a border drawn round each — a stroke would add ink that is not
@@ -173,15 +222,24 @@ function Mastery({ data }: { data: DashboardData }) {
         ))}
       </View>
 
-      {/* Every segment is named and counted, so the bar is a summary of the
-          list rather than the only place the information lives. */}
-      <View style={{ gap: 4 }}>
+      {/* Every segment is named, explained and counted, so the bar is a summary
+          of the list rather than the only place the information lives. */}
+      <View style={{ gap: space.sm }}>
         {segments.map((s) => (
-          <View key={s.key} style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <View key={s.key} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm }}>
             <View
-              style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: s.color }}
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 5,
+                backgroundColor: s.color,
+                marginTop: 5,
+              }}
             />
-            <Text style={{ color: t.textMuted, fontSize: 14, flex: 1 }}>{s.label}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: t.text, fontSize: 14 }}>{s.label}</Text>
+              <Text style={{ color: t.textMuted, fontSize: 12 }}>{s.hint}</Text>
+            </View>
             <Text style={{ color: t.text, fontSize: 14, fontWeight: '600' }}>{s.n}</Text>
           </View>
         ))}
@@ -191,72 +249,89 @@ function Mastery({ data }: { data: DashboardData }) {
 }
 
 /**
- * Answers per day over the last month — the one thing the screen could not say.
+ * The week ahead — the one thing the screen could not say.
  *
- * ## Why columns, and why this is the chart that earns its place
+ * ## What this replaced, and why
  *
- * The job is change over time for a single series, which is a line or a column
- * chart. Columns win here because the values are discrete daily counts and the
- * gaps matter: a day with no study has to look like a gap, and a line drawn
- * through it implies study that did not happen.
+ * It used to be "answers a day, last 30 days". The owner asked the question
+ * that killed it: *"what is the relevance of that information? like 225
+ * answers in 2 days. what do i gain from that?"*
  *
- * It is also the only form on this screen showing something no number already
- * says. The streak is a hero figure, mastery is part-to-whole — both answered.
- * "Is this becoming a habit?" was not, and a shape answers it at a glance in a
- * way that "1 day in a row" cannot.
+ * Nothing. It measured effort rather than learning, and it rewarded the
+ * behaviour the scheduler exists to prevent — cramming drew the tallest bars
+ * on the screen while spacing drew none. "Am I keeping at it?" was already
+ * answered, better, by the streak and the pet directly above it.
  *
- * Drawn with plain Views: thirty columns is thirty flex children, and a
- * charting library would be a dependency for something the layout engine
- * already does.
+ * A forecast answers something nothing else in the app can: whether tonight is
+ * light and tomorrow is heavy. It is the scheduler's own knowledge, which the
+ * student otherwise discovers only by opening a deck.
+ *
+ * ## Why rows and not columns
+ *
+ * Seven bars need seven labels, and "Tomorrow" does not fit under a 40px
+ * column. Horizontal rows give each day its name in full, put the count where
+ * it is read rather than hovering above a bar, and stay legible at 340px.
+ * Thirty columns needed no labels and so could be vertical; seven do.
+ *
+ * Drawn with plain Views — a charting library would be a dependency for
+ * something the layout engine already does.
  */
-function Activity({ data }: { data: DashboardData }) {
+function Forecast({ data }: { data: DashboardData }) {
   const t = useTheme();
-  const days = data.activity;
+  const days = data.forecast;
   if (days.length === 0) return null;
 
-  const busiest = Math.max(...days.map((d) => d.answers));
-  if (busiest === 0) return null;
-
-  const studied = days.filter((d) => d.answers > 0).length;
-  const total = days.reduce((n, d) => n + d.answers, 0);
+  const busiest = Math.max(...days.map((d) => d.due));
+  const today = days[0]!.dayStart;
+  const summary = describeForecast(days, today);
 
   return (
     <Card>
-      {/* The title names the series, so a one-series chart needs no legend box
-          — a single swatch would only restate this line. */}
-      <Body>Answers a day, last {days.length} days</Body>
+      <Body>Coming up this week</Body>
 
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 64, gap: 2 }}>
-        {days.map((d) => {
-          // A day WITH answers never renders as nothing: a 1-answer day on a
-          // 40-answer scale rounds to under a pixel and would read as a day off,
-          // which is the one thing this chart must not get wrong.
-          const height = d.answers === 0 ? 2 : Math.max(4, (d.answers / busiest) * 64);
-          return (
-            <View
-              key={d.dayStart}
+      <View style={{ gap: 6 }}>
+        {days.map((d) => (
+          <View key={d.dayStart} style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+            <Text style={{ color: t.textMuted, fontSize: 13, width: 74 }}>
+              {forecastDayLabel(d.dayStart, today)}
+            </Text>
+
+            <View style={{ flex: 1, height: 10, justifyContent: 'center' }}>
+              {d.due > 0 ? (
+                <View
+                  style={{
+                    // Never a zero-width sliver: one card due on a day where
+                    // another holds forty would round below a pixel and read as
+                    // nothing due, which is the one thing this must not say.
+                    width: `${Math.max(4, (d.due / busiest) * 100)}%`,
+                    height: 10,
+                    borderRadius: 3,
+                    backgroundColor: t.chart.series,
+                  }}
+                />
+              ) : (
+                // An empty day is drawn, not skipped — a free day is
+                // information, and a missing row would just look like a bug.
+                <View style={{ width: 10, height: 2, borderRadius: 1, backgroundColor: t.border }} />
+              )}
+            </View>
+
+            <Text
               style={{
-                flex: 1,
-                height,
-                // Rounded at the data end, square at the baseline.
-                borderTopLeftRadius: 3,
-                borderTopRightRadius: 3,
-                backgroundColor: d.answers === 0 ? t.border : t.chart.series,
+                color: d.due > 0 ? t.text : t.textMuted,
+                fontSize: 13,
+                fontWeight: d.due > 0 ? '600' : '400',
+                width: 28,
+                textAlign: 'right',
               }}
-            />
-          );
-        })}
+            >
+              {d.due > 0 ? d.due : '—'}
+            </Text>
+          </View>
+        ))}
       </View>
 
-      {/* Two labels, not thirty. The ends of the axis, and the summary the
-          shape is evidence for. Never a number on every column. */}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text style={{ color: t.textMuted, fontSize: 12 }}>{days.length} days ago</Text>
-        <Text style={{ color: t.textMuted, fontSize: 12 }}>Today</Text>
-      </View>
-      <Body muted>
-        {total} answer{total === 1 ? '' : 's'} across {studied} day{studied === 1 ? '' : 's'}.
-      </Body>
+      {summary ? <Body muted>{summary}</Body> : null}
     </Card>
   );
 }
@@ -369,29 +444,76 @@ function NextStep({ data }: { data: DashboardData }) {
 }
 
 /**
- * How much room is left, mentioned only when it is nearly gone.
+ * How much room you have used, and how much there is.
  *
- * The owner was explicit: *"don't show upfront everytime regarding their limit
- * … you can put it in the dashboard."* So this is the one place the number
- * lives, and it stays silent until `summariseUsage` says it is worth raising.
- * A quota bar on a screen about learning would make the app feel like a disk
- * utility.
+ * ## Why this is now always on, when it used to be silent
  *
- * It names the way out as well as the problem, because the way out is not
- * obvious: freeing space keeps every card and every answer, and removes only
- * the original file.
+ * The original instruction was *"don't show upfront everytime regarding their
+ * limit … you can put it in the dashboard"*, so it appeared only above 80%.
+ * Then the owner shared the app: *"i shared the link to my friend and he
+ * suggested that it would be nice to see the limit and how much space they
+ * consumed."*
+ *
+ * Both are satisfied by where it sits rather than by whether it shows. It is
+ * on the Progress tab and nowhere else — never on Add notes, never on a study
+ * screen, never in the way of making cards. Someone who wants the number can
+ * find it; nobody is told about a limit while they are trying to work.
+ *
+ * The bar is here because a fraction is the actual question. "24 MB of 150 MB"
+ * needs arithmetic to become "plenty left", and the bar answers that before the
+ * words are read.
  */
 function Space({ data }: { data: DashboardData }) {
-  if (!data.usage.worthMentioning) return null;
+  const t = useTheme();
+  const { usedBytes, fraction, worthMentioning } = data.usage;
+  const free = Math.max(0, MAX_USER_BYTES - usedBytes);
+
+  // The validated chart steps, not the UI tokens — §14.1's lesson, which cost
+  // a segment that was drawn at 1.27:1 and could not be seen. Amber only when
+  // it is nearly gone, so the colour means something when it changes.
+  const fill = worthMentioning ? t.chart.tricky : t.chart.learning;
 
   return (
     <Card>
-      <Body>Running low on space</Body>
+      <Body>{worthMentioning ? 'Running low on space' : 'Space'}</Body>
+
+      <View
+        style={{
+          height: 10,
+          borderRadius: radius.sm,
+          overflow: 'hidden',
+          backgroundColor: t.chart.neutral,
+        }}
+      >
+        {/* Never a zero-width sliver: a first small upload that renders as
+            nothing reads as "not counted", which is the one thing a usage bar
+            must not say. Empty stays genuinely empty. */}
+        <View
+          style={{
+            width: `${usedBytes > 0 ? Math.max(2, fraction * 100) : 0}%`,
+            height: '100%',
+            backgroundColor: fill,
+          }}
+        />
+      </View>
+
+      {/* "0 bytes of 150 MB used" is how a developer says it, and `bytes` is
+          on this project's own banned-words list — tests/storage.test.ts
+          rejects it in the upload message for the same reason. */}
       <Body muted>
-        You're using {formatBytes(data.usage.usedBytes)} of your {formatBytes(MAX_USER_BYTES)}. On a
-        set you've finished with, "Free up space" removes the original file and keeps all your
-        cards and progress.
+        {usedBytes === 0
+          ? `Nothing stored yet · ${formatBytes(MAX_USER_BYTES)} free`
+          : `${formatBytes(usedBytes)} of ${formatBytes(MAX_USER_BYTES)} used · ${formatBytes(free)} left`}
       </Body>
+
+      {/* The way out, named only when it is needed. It is not obvious, and it
+          is the good news: freeing space keeps every card and every answer. */}
+      {worthMentioning ? (
+        <Body muted>
+          On a set you've finished with, "Free up space" removes the original file and keeps all
+          your cards and progress.
+        </Body>
+      ) : null}
     </Card>
   );
 }

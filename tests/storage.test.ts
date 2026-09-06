@@ -13,11 +13,25 @@ const MB = 1024 * 1024;
 
 describe('the limits themselves', () => {
   it('never accepts a file the reader cannot read', () => {
-    // The binding constraint is Gemini's inline request cap, not the bucket.
-    // Accepting a 40 MB PDF would spend storage on something readDocument then
-    // refuses, failing one step later and less clearly. If the Files API path
-    // is ever built, these two move together or this test fails.
+    // Accepting a file readDocument then refuses would spend storage on
+    // something useless and fail one step later, less clearly. The two move
+    // together or this test fails — which is now slack rather than tight:
+    // storage stops at 25 MB and the reader goes to 45.
     expect(MAX_FILE_BYTES).toBeLessThanOrEqual(MAX_INLINE_BYTES);
+  });
+
+  it('stays under the cap Google enforces on a PDF', () => {
+    // 50 MB per PDF, 100 MB per inline request (NOTES §2.3). A file that
+    // cleared our cap and failed Google's would be accepted, uploaded, and
+    // then refused — exactly the late, unclear failure the limit prevents.
+    // Measured at 44.8 MB on 2026-09-06: complete, 24 of 24 pages.
+    expect(MAX_INLINE_BYTES).toBeLessThan(50 * MB);
+  });
+
+  it('accepts the 20 MB scanned PDF this was raised for', () => {
+    // The case that started it: a scan of a reviewer, refused outright while
+    // the reader could handle twice it. Measured, not assumed.
+    expect(checkUpload({ fileBytes: 20 * MB, usedBytes: 0 }).ok).toBe(true);
   });
 
   it('leaves the project headroom with five users', () => {

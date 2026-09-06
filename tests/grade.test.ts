@@ -8,6 +8,7 @@ import {
   PARTIAL_THRESHOLD,
   resultFor,
   shuffleOptions,
+  shuffleSeeded,
   trimFeedback,
 } from '../src/core/grade';
 
@@ -150,6 +151,43 @@ describe('shuffleOptions', () => {
     const input = [...options];
     shuffleOptions(input, 'x');
     expect(input).toEqual(options);
+  });
+});
+
+describe('shuffleSeeded, as the quiz uses it', () => {
+  // The quiz seeds with the moment the round started, so that opening it again
+  // deals the questions in a new order — the opposite of what shuffleOptions
+  // wants from the same function. Both behaviours come from the seed, so both
+  // are worth pinning.
+  const questions = ['q1', 'q2', 'q3', 'q4', 'q5'];
+
+  it('deals a different order for a different round', () => {
+    const orders = new Set(
+      ['1770000000000', '1770000000001', '1770000042000', '1770009999999', '1770123456789'].map(
+        (round) => shuffleSeeded(questions, `${round}:remember`).join(''),
+      ),
+    );
+    // Five rounds landing on one order would mean the seed is not reaching the
+    // shuffle at all, which is the failure worth catching.
+    expect(orders.size).toBeGreaterThan(1);
+  });
+
+  it('holds still within one round, so answering does not reshuffle underfoot', () => {
+    const seed = '1770000000000:remember';
+    expect(shuffleSeeded(questions, seed)).toEqual(shuffleSeeded(questions, seed));
+  });
+
+  it('gives each level its own order within a round', () => {
+    // Seeded by round AND level, so switching level does not redeal the level
+    // you were part-way through.
+    const round = '1770000000000';
+    const remember = shuffleSeeded(questions, `${round}:remember`).join('');
+    const apply = shuffleSeeded(questions, `${round}:apply`).join('');
+    expect(remember).not.toBe(apply);
+  });
+
+  it('loses no question', () => {
+    expect([...shuffleSeeded(questions, 'x')].sort()).toEqual([...questions].sort());
   });
 });
 

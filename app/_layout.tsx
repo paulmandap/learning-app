@@ -90,6 +90,11 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="sign-in" options={{ title: 'Sign in', headerShown: false }} />
         <Stack.Screen name="new" options={{ title: 'New set', ...backable }} />
+        {/* A note is a TASK with its own back control, so it is pushed above
+            the tabs rather than being one — same rule as a flashcard session.
+            Registered explicitly, or the header reads "note/[id]" to the user,
+            which is exactly what shipped once for set/[id]/blanks. */}
+        <Stack.Screen name="note/[id]" options={{ title: 'Note', ...backable }} />
         {/* Title is set by the screen itself, to the set's own name. */}
         <Stack.Screen name="set/[id]/index" options={{ title: '', ...backable }} />
         <Stack.Screen name="set/[id]/flashcards" options={{ title: 'Flashcards', ...backable }} />

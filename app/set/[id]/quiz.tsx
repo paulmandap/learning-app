@@ -26,6 +26,7 @@ import {
   gradeWritten,
   isAnswerSubstantive,
   shuffleOptions,
+  shuffleSeeded,
   type GradedAnswer,
 } from '../../../src/core/grade';
 import type { Level } from '../../../src/core/planner';
@@ -51,6 +52,20 @@ export default function Quiz() {
 
   const [level, setLevel] = useState<Level>('understand');
   const [index, setIndex] = useState(0);
+
+  /**
+   * Which round of questions this is — and the seed its order is drawn from.
+   *
+   * The owner: *"the quiz isn't generating a new one after i finish answering
+   * … make it randomized everytime i opened the quiz."* Questions used to come
+   * back in `listItems` order, so the same set asked the same questions in the
+   * same sequence forever, and finishing left no way to go round again.
+   *
+   * A timestamp taken once, when the screen opens, rather than `Math.random()`
+   * on every render: the order has to hold still while you are answering, and
+   * only change when you ask for another round.
+   */
+  const [round, setRound] = useState(() => String(Date.now()));
   const [typed, setTyped] = useState('');
   const [chosen, setChosen] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -98,16 +113,26 @@ export default function Quiz() {
   // "understand and everything easier".
   const items = useMemo(() => {
     const atLevel = quizzable.filter((i) => i.level === level);
-    if (!retryOnly) return atLevel;
-    return atLevel.filter((i) => missed?.has(i.id));
-  }, [quizzable, level, retryOnly, missed]);
+    const pool = retryOnly ? atLevel.filter((i) => missed?.has(i.id)) : atLevel;
+    // Seeded by round AND level, so switching level does not reshuffle the
+    // level you were part-way through.
+    return shuffleSeeded(pool, `${round}:${level}`);
+  }, [quizzable, level, retryOnly, missed, round]);
 
-  useEffect(() => {
+  /** Back to question one, with everything from the last run cleared. */
+  function restart() {
     setIndex(0);
     setAnswered([]);
     setCurrent(null);
     setTyped('');
     setChosen(null);
+    submitting.current = false;
+  }
+
+  // Deliberately not depending on `restart` itself: it is redefined every
+  // render, and listing it would clear the quiz on every keystroke.
+  useEffect(() => {
+    restart();
   }, [level, retryOnly]);
 
   const item = items[index];
@@ -290,6 +315,25 @@ export default function Quiz() {
           <Button
             label={`Retry what I missed (${missedNow.length})`}
             onPress={() => router.replace(`/set/${setId}/quiz?retry=1`)}
+          />
+        ) : null}
+
+        {/* A fresh round, in a new order. Finishing used to be a dead end: the
+            only ways on were the missed pile or leaving, so a set you had
+            answered once could not simply be asked again.
+
+            The questions are the same ones — a set holds what it holds — but
+            the sequence is redrawn, which is what the owner asked for and is
+            also the part that matters: answering in a memorised order tests
+            the order as much as the material. */}
+        {answered.length > 0 ? (
+          <Button
+            label="Ask me again"
+            variant={missedNow.length > 0 && !retryOnly ? 'secondary' : 'primary'}
+            onPress={() => {
+              setRound(String(Date.now()));
+              restart();
+            }}
           />
         ) : null}
         {/* back(), not replace(): replace destroys the history entry, which is
