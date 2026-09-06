@@ -1449,6 +1449,106 @@ the assistant is named rather than left implied. Owner-approved:
 screenshots of the closed button and the open panel · live probe grounded on both
 contexts. 0010 outstanding.
 
+## 14. Charts on the dashboard (2026-09-06)
+
+The owner asked for graphs — *"donut charts time series or any appropriate
+graphs"* — and then twice narrowed it: *"just because i mentioned a few graphs
+doesn't mean you put it all, only the appropriate ones"*, and *"it must still be
+readable"*. Two charts were added and one was declined.
+
+### 14.1 The colours were wrong, and the validator said so
+
+The first version reused the UI tokens as chart fills: `border` for "Not
+started", `warnText` for "Tricky". Run through the dataviz validator against the
+card surface:
+
+| Check | Result |
+|---|---|
+| Contrast vs surface | **FAIL — `#dfe1e6` at 1.27:1** |
+| Chroma floor | FAIL — `#6b4a00` reads grey as a fill |
+
+**A segment of the bar was being drawn and could not be seen.** The lesson is
+narrow and worth keeping: a colour that works as a hairline or as text is not a
+colour that works as a fill, and this project had been reusing one set of tokens
+for all three.
+
+`theme.chart` now carries validated steps, chosen per mode rather than flipped:
+
+| | known | learning | tricky | neutral |
+|---|---|---|---|---|
+| light | `#1d7a4c` | `#2f5fe0` | `#a86a00` | `#8c93a1` |
+| dark | `#7ad6a5` | `#7ea0ff` | `#e0a458` | `#7c8492` |
+
+All four clear 3:1 against their surface. Worst adjacent pair separates by
+ΔE 16.1 under deuteranopia (light) and 17.1 under protanopia (dark).
+
+`neutral` deliberately fails the validator's chroma floor. It means "no data
+yet", and an absence should not wear a hue — every segment is labelled in text,
+so identity never rests on colour.
+
+### 14.2 No donut, and why
+
+Donuts were asked for by name. Part-to-whole reads better as a horizontal
+stacked bar: shares sit on a common baseline instead of being compared as arc
+angles, it survives 340px of phone width, and the labels sit beside the numbers
+rather than orbiting them. A donut would also have needed `react-native-svg` —
+not installed — to draw something the guidance rates worse than what was already
+on the screen.
+
+### 14.3 What was added
+
+**Answers a day, last 30 days.** Columns, not a line: the values are discrete
+daily counts and the gaps carry meaning, so a line drawn through a day off would
+imply study that did not happen. Zero-filled for the same reason — plotting only
+the days with rows would space them evenly whatever the gaps, and a week off
+would look identical to a week of daily study.
+
+A day with answers never renders as nothing: a 1-answer day on a 40-answer scale
+rounds below a pixel and would read as a day off, which is the one thing this
+chart must not get wrong. Two axis labels, not thirty.
+
+**Accuracy bars on the section rows**, replacing a coloured left border that
+carried the same signal less usefully. Two sections can now be compared without
+doing the division.
+
+**Declined: accuracy over time.** With a handful of answers a day it would be
+mostly noise, and a noisy chart of a real measure is worse than no chart.
+
+Drawn with plain `View`s throughout — thirty columns is thirty flex children, and
+no charting dependency was added.
+
+### 14.4 A collision only the screenshot found
+
+The assistant button sat squarely on top of the Settings tab. It is mounted once
+above the navigator so it floats over screens that have a tab bar and screens
+that do not, and it cleared only the safe-area inset. Typecheck and 398 tests
+were green; the screenshot showed it immediately.
+
+It now clears the bar's height, but only where there is one — the tabs group
+draws it at the bottom on a phone and down the left on a desktop, and a study
+screen pushed above the group has none. Offsetting unconditionally would have
+left the button floating in mid-air on every deck.
+
+### 14.5 `scripts/seed-progress.ts`
+
+The dashboard has three genuinely different looks — empty, thin, and a real
+month — and only the empty one occurs naturally on a fresh account. This writes a
+plausible month into `study_days`: a keen first week, a four-day gap, a quiet
+stretch, then a run into today. The gap is the point, since it is what proves the
+streak counts back from the last day rather than totalling every day studied.
+
+**It refuses to run against anything but the disposable test users**, checked on
+the account that actually signed in rather than on the argument passed. It writes
+fabricated answers, and on a real account that would corrupt the one thing the
+app is trusted to remember, invisibly, mixed in with genuine history.
+
+The seeded rows were cleared after verification: synthetic data left in a shared
+test account has already produced one wrong conclusion in this project (§9.4's
+first sample).
+
+**Verified:** typecheck clean · **398 tests** · `expo export` · boot test green ·
+screenshots at 430px and 1280px · deployed · bundle hash `1f05b9d5…` matches.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

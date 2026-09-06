@@ -64,15 +64,22 @@ begin
   insert into public.chat_usage (user_id, day, messages)
   values (auth.uid(), (now() at time zone 'utc')::date, 1)
   on conflict (user_id, day) do update
-    -- The guard is here rather than in a WHERE, so the row is always present
-    -- and the count never silently stops rising past the cap.
-    set messages = case
-      when public.chat_usage.messages >= daily_limit then public.chat_usage.messages
-      else public.chat_usage.messages + 1
-    end
+    set messages = public.chat_usage.messages + 1
+    -- The guard belongs HERE, in the WHERE, not in a CASE on the SET.
+    --
+    -- A CASE that clamps the value looks equivalent and is not: it updates the
+    -- row either way, so RETURNING always yields a number and the caller cannot
+    -- tell a granted claim from a refused one. Measured on the first version —
+    -- with a limit of 2, the third claim came back "0 remaining" exactly like
+    -- the second, so every question past the cap was waved through. The counter
+    -- stopped at 2 and enforced nothing.
+    --
+    -- With the guard in the WHERE, a claim over the cap updates NO row, so
+    -- RETURNING yields nothing and `used` stays NULL. That is the refusal.
+    where public.chat_usage.messages < daily_limit
   returning messages into used;
 
-  if used > daily_limit then
+  if used is null then
     return -1;
   end if;
   return daily_limit - used;

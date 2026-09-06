@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  dailyActivity,
   masteryCounts,
   masteryOf,
   MASTERED_INTERVAL_DAYS,
@@ -10,7 +11,7 @@ import {
   studyStreak,
   type ItemHistory,
 } from '../src/core/progress';
-import { NEW_CARD, type ReviewState } from '../src/core/schedule';
+import { NEW_CARD, startOfUtcDay, type ReviewState } from '../src/core/schedule';
 
 /** A fixed UTC noon, so nothing here depends on when the tests run. */
 const NOON = Date.UTC(2026, 8, 5, 12, 0, 0);
@@ -63,6 +64,58 @@ describe('studyStreak', () => {
   it('does not care what order the answers arrive in', () => {
     const shuffled = [daysAgo(2), daysAgo(0), daysAgo(1)];
     expect(studyStreak(shuffled, NOON)).toBe(3);
+  });
+});
+
+describe('dailyActivity', () => {
+  it('covers the whole window, oldest first', () => {
+    const out = dailyActivity([], NOON, 7);
+    expect(out).toHaveLength(7);
+    expect(out[6]!.dayStart).toBe(startOfUtcDay(NOON));
+    expect(out[0]!.dayStart).toBe(startOfUtcDay(NOON) - 6 * DAY);
+  });
+
+  it('fills days with no study as zero rather than dropping them', () => {
+    // The empty days ARE the information. Plotting only days that have rows
+    // would space them evenly whatever the gaps, so a week off would look
+    // exactly like a week of daily study.
+    const out = dailyActivity([{ dayStart: daysAgo(0), answers: 5 }], NOON, 5);
+    expect(out.map((d) => d.answers)).toEqual([0, 0, 0, 0, 5]);
+  });
+
+  it('places each day in the right slot', () => {
+    const out = dailyActivity(
+      [
+        { dayStart: daysAgo(0), answers: 3 },
+        { dayStart: daysAgo(2), answers: 7 },
+      ],
+      NOON,
+      4,
+    );
+    expect(out.map((d) => d.answers)).toEqual([0, 7, 0, 3]);
+  });
+
+  it('adds up several rows landing on the same day', () => {
+    const out = dailyActivity(
+      [
+        { dayStart: daysAgo(1), answers: 2 },
+        { dayStart: daysAgo(1) + 60_000, answers: 3 },
+      ],
+      NOON,
+      3,
+    );
+    expect(out.map((d) => d.answers)).toEqual([0, 5, 0]);
+  });
+
+  it('ignores anything older than the window', () => {
+    const out = dailyActivity([{ dayStart: daysAgo(40), answers: 9 }], NOON, 7);
+    expect(out.every((d) => d.answers === 0)).toBe(true);
+  });
+
+  it('normalises any time of day to its UTC day', () => {
+    const lateEvening = Date.UTC(2026, 8, 5, 23, 45);
+    const out = dailyActivity([{ dayStart: lateEvening, answers: 4 }], NOON, 2);
+    expect(out[1]).toEqual({ dayStart: startOfUtcDay(NOON), answers: 4 });
   });
 });
 

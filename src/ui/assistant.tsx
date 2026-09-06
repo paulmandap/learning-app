@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
+import { useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, space, useTheme } from './theme';
 import { fetchProfile } from '../data/profile';
@@ -48,6 +49,23 @@ const PANEL_WIDTH = 380;
 /** Below this the panel goes nearly full width, as a sheet. */
 const NARROW_MAX_WIDTH = 520;
 
+/**
+ * Height of the bottom tab bar, cleared so the button does not sit on it.
+ *
+ * The assistant is mounted once above the navigator, so it floats over screens
+ * that have a tab bar and screens that do not. Without this it landed squarely
+ * on top of the Settings tab — visible the moment the screen was screenshotted,
+ * and invisible to typecheck and 398 tests.
+ *
+ * Matches app/(tabs)/_layout.tsx: space.xs of top padding plus a 44px minimum
+ * touch target. The safe-area inset is added separately by both, so it is not
+ * counted twice.
+ */
+const TAB_BAR_HEIGHT = space.xs + 44;
+
+/** Sidebar layouts put navigation on the left, so nothing to clear at the bottom. */
+const SIDEBAR_MIN_WIDTH = 800;
+
 export function StudyAssistant() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -66,6 +84,14 @@ export function StudyAssistant() {
 
   const narrow = width < NARROW_MAX_WIDTH;
   const panelWidth = narrow ? Math.min(width - space.lg * 2, 420) : PANEL_WIDTH;
+
+  // Clear the tab bar, but only where there IS one: the tabs group draws it at
+  // the bottom on a phone and down the left side on a desktop, and a study
+  // screen pushed above the group has none at all. Offsetting unconditionally
+  // would leave the button floating in mid-air on every deck.
+  const segments = useSegments();
+  const overTabs = segments[0] === '(tabs)' && width < SIDEBAR_MIN_WIDTH;
+  const bottomOffset = insets.bottom + space.lg + (overTabs ? TAB_BAR_HEIGHT : 0);
 
   // Escape closes it, the way any overlay should on a keyboard.
   useEffect(() => {
@@ -108,7 +134,7 @@ export function StudyAssistant() {
         style={{
           position: 'absolute',
           right: space.lg,
-          bottom: insets.bottom + space.lg,
+          bottom: bottomOffset,
           width: CLOSED_SIZE,
           height: CLOSED_SIZE,
           borderRadius: CLOSED_SIZE / 2,
@@ -135,7 +161,7 @@ export function StudyAssistant() {
       style={{
         position: 'absolute',
         right: narrow ? space.md : space.lg,
-        bottom: insets.bottom + space.md,
+        bottom: bottomOffset,
         width: panelWidth,
         // Tall enough to read a four-sentence answer without scrolling, and
         // never taller than the window it floats in.

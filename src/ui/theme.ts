@@ -17,6 +17,39 @@ export interface Theme {
   ok: string;
   warnBg: string;
   warnText: string;
+  /** Fills for the Progress screen. See the note above `chartLight`. */
+  chart: ChartPalette;
+}
+
+/**
+ * Chart fills, kept separate from the UI tokens on purpose.
+ *
+ * A colour that works as text or as a hairline is not a colour that works as a
+ * FILL, and using the UI tokens for both was measurably wrong. Run through the
+ * dataviz validator, the first attempt — reusing `border` for "Not started" and
+ * `warnText` for "Tricky" — failed on contrast at **1.27:1** against the card.
+ * That segment was effectively invisible.
+ *
+ * These steps are validated: every fill clears 3:1 against its surface, and the
+ * worst adjacent pair separates by ΔE 16.1 under deuteranopia (light) and 17.1
+ * under protanopia (dark). They are CHOSEN per mode rather than flipped — a
+ * light-mode fill on a dark card fails contrast in the other direction.
+ *
+ * `neutral` is deliberately grey and deliberately fails the validator's chroma
+ * floor: it means "no data yet", and an absence should not wear a hue. Identity
+ * never rests on colour alone here anyway — every segment is labelled in text.
+ */
+export interface ChartPalette {
+  /** Cards on a long interval — the good state. */
+  known: string;
+  /** Cards in progress. */
+  learning: string;
+  /** Cards repeatedly failed. */
+  tricky: string;
+  /** Never answered. Grey by intent. */
+  neutral: string;
+  /** Single-series marks: the activity columns. */
+  series: string;
 }
 
 const light: Theme = {
@@ -31,6 +64,13 @@ const light: Theme = {
   ok: '#1d7a4c',
   warnBg: '#fff6e5',
   warnText: '#6b4a00',
+  chart: {
+    known: '#1d7a4c',
+    learning: '#2f5fe0',
+    tricky: '#a86a00',
+    neutral: '#8c93a1',
+    series: '#2f5fe0',
+  },
 };
 
 const dark: Theme = {
@@ -53,6 +93,13 @@ const dark: Theme = {
   ok: '#7ad6a5',
   warnBg: '#2e2413',
   warnText: '#f2d9a3',
+  chart: {
+    known: '#7ad6a5',
+    learning: '#7ea0ff',
+    tricky: '#e0a458',
+    neutral: '#7c8492',
+    series: '#7ea0ff',
+  },
 };
 
 export function useTheme(): Theme {

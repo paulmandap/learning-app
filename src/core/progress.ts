@@ -105,6 +105,45 @@ export function studyStreak(attemptTimes: number[], now: number): number {
   return streak;
 }
 
+// ---------------------------------------------------------------- activity --
+
+/** Days shown in the activity chart. Four weeks plus the current part-week. */
+export const ACTIVITY_DAYS = 30;
+
+export interface ActivityDay {
+  /** UTC day boundary, so it lines up with the streak and the due dates. */
+  dayStart: number;
+  answers: number;
+}
+
+/**
+ * Answers per day across the recent window, oldest first.
+ *
+ * **Zero-filled, and that is the whole point.** Plotting only the days that have
+ * rows would space them evenly regardless of the gaps between them, so a week
+ * off would look identical to a week of daily study. The empty days are the
+ * information — they are what makes a streak visible as a shape rather than a
+ * number.
+ */
+export function dailyActivity(
+  rows: { dayStart: number; answers: number }[],
+  now: number,
+  windowDays: number = ACTIVITY_DAYS,
+): ActivityDay[] {
+  const byDay = new Map<number, number>();
+  for (const r of rows) {
+    byDay.set(startOfUtcDay(r.dayStart), (byDay.get(startOfUtcDay(r.dayStart)) ?? 0) + r.answers);
+  }
+
+  const today = startOfUtcDay(now);
+  const out: ActivityDay[] = [];
+  for (let i = windowDays - 1; i >= 0; i--) {
+    const dayStart = today - i * DAY_MS;
+    out.push({ dayStart, answers: byDay.get(dayStart) ?? 0 });
+  }
+  return out;
+}
+
 // ----------------------------------------------------------------- mastery --
 
 export type MasteryBucket = 'mastered' | 'struggling' | 'learning' | 'new';

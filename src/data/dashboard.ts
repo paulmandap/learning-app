@@ -1,8 +1,10 @@
 import { supabase } from './supabase';
 import {
+  dailyActivity,
   masteryCounts,
   sectionSplit,
   studyStreak,
+  type ActivityDay,
   type ItemHistory,
   type MasteryCounts,
   type SectionSplit,
@@ -50,6 +52,8 @@ export interface DashboardData {
   totalAttempts: number;
   /** How full the storage allowance is. Only surfaced when it matters. */
   usage: UsageSummary;
+  /** Answers per day across the recent window, oldest first, zero-filled. */
+  activity: ActivityDay[];
 }
 
 export const EMPTY_DASHBOARD: DashboardData = {
@@ -60,6 +64,7 @@ export const EMPTY_DASHBOARD: DashboardData = {
   sections: { strong: [], weak: [], tooEarly: 0 },
   totalAttempts: 0,
   usage: { usedBytes: 0, fraction: 0, worthMentioning: false },
+  activity: [],
 };
 
 interface StatsRow {
@@ -111,6 +116,13 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
   const dayRows = (days.data ?? []) as { day: string; answers: number }[];
   let times = dayRows.map((r) => Date.parse(`${r.day}T00:00:00Z`));
   let totalAttempts = dayRows.reduce((n, r) => n + r.answers, 0);
+  // Counts per day, kept alongside `times` rather than zipped to it by index:
+  // on the fallback path below `times` becomes one entry per ANSWER rather than
+  // per day, and pairing the two by position would silently mis-attribute them.
+  let perDay = dayRows.map((r) => ({
+    dayStart: Date.parse(`${r.day}T00:00:00Z`),
+    answers: r.answers,
+  }));
 
   if (days.error) {
     // study_days needs migration 0009. Falling back to `attempts` matters
@@ -122,10 +134,14 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
       const rows = (fallback.data ?? []) as { created_at: string }[];
       times = rows.map((r) => Date.parse(r.created_at));
       totalAttempts = rows.length;
+      // One answer per row here rather than a daily total. `dailyActivity` sums
+      // whatever lands on the same day, so both shapes produce the same chart.
+      perDay = rows.map((r) => ({ dayStart: Date.parse(r.created_at), answers: 1 }));
     }
   }
 
   const streak = studyStreak(times, now);
+  const activity = dailyActivity(perDay, now);
 
   // --- mastery, and what is due -------------------------------------------
   const scheduleRows = (schedules.data ?? []) as {
@@ -187,5 +203,6 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
     sections,
     totalAttempts,
     usage: summariseUsage(usedBytes),
+    activity,
   };
 }
