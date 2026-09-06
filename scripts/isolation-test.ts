@@ -170,6 +170,25 @@ async function main() {
     readability: 0.9,
   });
 
+  // Phase 10: a note for A. This is the strongest case in the whole app for
+  // this test — every other table holds something DERIVED from what a student
+  // uploaded, and `notes` holds what they actually wrote, in their own words,
+  // during a lecture. If anything here must not leak, it is this.
+  await A.client.from('notes').insert({
+    user_id: A.userId,
+    title: 'probe note title',
+    body: 'probe note body — private to A',
+  });
+
+  // Phase 9c: A's assistant usage for today. It holds no content, but the count
+  // is a behavioural record — how much someone leaned on help, and on which
+  // days — and it is the same class of thing as review_state.
+  await A.client.from('chat_usage').insert({
+    user_id: A.userId,
+    day: new Date().toISOString().slice(0, 10),
+    messages: 1,
+  });
+
   const storagePath = `${A.userId}/${doc?.id ?? 'x'}/probe.txt`;
   const upload = await A.client.storage
     .from('documents')
@@ -189,6 +208,13 @@ async function main() {
     // Phase 6. Holds no notes, but it maps a user's item ids to a study
     // rhythm — leaking it would leak what someone is struggling with.
     'review_state',
+    // Phase 10. Holds a student's own writing, verbatim. Every other table
+    // here holds something derived from what they uploaded; this one holds
+    // what they typed.
+    'notes',
+    // Phase 9c. No content, but a per-day record of how much someone leaned on
+    // the assistant.
+    'chat_usage',
   ] as const;
 
   for (const table of tables) {
@@ -274,6 +300,29 @@ async function main() {
   const hbRpc = await B.client.rpc('touch_heartbeat');
   if (hbRpc.error) fail('touch_heartbeat RPC', `RPC failed: ${hbRpc.error.message}`);
   else ok('touch_heartbeat RPC', 'write succeeded through the RPC');
+
+  // --------------------------------------------------------------- tidy up --
+  //
+  // Every run used to leave its probe set, note and usage row behind, and they
+  // accumulated: four study_sets on the test account, two of them called
+  // "Isolation probe set". That is the hazard this project has already paid
+  // for once — synthetic data left in a shared test account produced a wrong
+  // conclusion (NOTES §9.4) — so the test now clears up after itself.
+  //
+  // Deleting the set cascades its documents, pages, items, attempts and
+  // schedules. Matched by title rather than by the id from this run, so a
+  // sweep also collects what earlier runs left.
+  await A.client.storage.from('documents').remove([storagePath]);
+  await A.client.from('notes').delete().eq('title', 'probe note title');
+  await A.client
+    .from('chat_usage')
+    .delete()
+    .eq('day', new Date().toISOString().slice(0, 10));
+  const { error: sweepError } = await A.client
+    .from('study_sets')
+    .delete()
+    .eq('title', 'Isolation probe set');
+  if (sweepError) console.log(`  (cleanup note: ${sweepError.message})`);
 
   // ---------------------------------------------------------------- report --
   console.log(`\n${checks - failures}/${checks} checks passed.`);
