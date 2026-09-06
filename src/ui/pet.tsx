@@ -12,6 +12,11 @@ import cat2 from '../../assets/cat-2.webp';
 import cat3 from '../../assets/cat-3.webp';
 import cat4 from '../../assets/cat-4.webp';
 import cat5 from '../../assets/cat-5.webp';
+import dog1 from '../../assets/dog-1.webp';
+import dog2 from '../../assets/dog-2.webp';
+import dog3 from '../../assets/dog-3.webp';
+import dog4 from '../../assets/dog-4.webp';
+import dog5 from '../../assets/dog-5.webp';
 
 /**
  * The streak, as a pet that grows.
@@ -54,12 +59,14 @@ import cat5 from '../../assets/cat-5.webp';
 const ART: Record<PetSpecies, ImageSourcePropType[]> = {
   potato: [potato1, potato2, potato3, potato4, potato5],
   cat: [cat1, cat2, cat3, cat4, cat5],
+  dog: [dog1, dog2, dog3, dog4, dog5],
 };
 
 /** What each one is called, for the chooser and for screen readers. */
 export const PET_LABELS: Record<PetSpecies, string> = {
   potato: 'Potato',
   cat: 'Cat',
+  dog: 'Dog',
 };
 
 /** One frame, for the chooser to show what it is offering. */

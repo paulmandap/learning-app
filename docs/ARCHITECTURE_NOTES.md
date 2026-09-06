@@ -2321,6 +2321,122 @@ found · the four-tab bar measured at 393 px — four buttons of 98 px, no
 overflow, no wrapping · `scripts/notes-probe.ts --generate` 10/10 · deployed ·
 production bundle hash `855c6392…` matches local.
 
+## 20. Reading the dashboard back, in the owner's words (2026-09-06)
+
+Four changes, all from using it rather than from reading the code.
+
+### 20.1 The space figure had been lying since 0009
+
+> *"could you double check whether the space is working?"*
+
+It was not. `0009_storage_and_study_days.sql` added `documents.byte_size` and
+**never backfilled it**, and `uploadOriginal` is the only thing that writes it.
+So every file uploaded before 0009 landed carried a null size, `storageUsedBytes`
+summed nulls as zero, and the dashboard could report *"Nothing stored yet"* over
+a bucket full of PDFs. The 150 MB per-user limit had not been counting any of it
+either.
+
+Reproduced on the test account before writing a line of fix:
+
+```
+documents: 2
+  with a size recorded : 0  (0.00 MB)
+  file but NO size     : 2   <- counted as 0
+```
+
+**The sizes were recoverable, and the code said they were not.** The note on
+`storageUsedBytes` read *"the sizes are not recoverable through PostgREST"*,
+which is true from the browser and false from SQL: Supabase records the real
+byte count of every object in `storage.objects.metadata->>'size'`, and
+`documents.storage_path` is exactly that object's name inside the bucket. So
+`0013_backfill_byte_size.sql` is a recovery, not an estimate. It touches only
+null rows, which is what makes it safe to run twice.
+
+After applying: **2 sized, 0.13 MB, zero orphans**, and the card reads
+*"129 KB of 150 MB used"*.
+
+The general lesson is worth more than the fix: **adding a column to a table
+that already has rows is half a migration.** 0009 shipped the half that
+compiles.
+
+### 20.2 Three wordings the owner would not have written
+
+> *"could you reword into something more simple and direct? more meaningful? i
+> don't like that 'where you stand'."*
+
+**"Where you stand" → "How each part is going."** The old heading said nothing
+about what the rows were or what would move them.
+
+**`22 of 22` → `100%`.** The code carried an argument against exactly this —
+that "4 of 5" is checkable and carries its own sample size, which a bare 80%
+hides. That argument is sound in general and does not apply here, because
+`MIN_SECTION_ATTEMPTS` already withholds a section until it has three answers,
+so the misleading `1 of 1` the count was guarding against cannot reach the row.
+Recorded because the comment defending the old form was persuasive and wrong
+about this case.
+
+**The empty state was still describing the old screen**, promising "what has
+stuck" and "worth another look" after both headings had been rewritten. That is
+how an empty state quietly stops introducing the thing it introduces — it is
+the copy nobody re-reads, because it is the copy you see least.
+
+### 20.3 The forecast speaks one vocabulary now
+
+> *"for the coming up this week, just make it sunday to saturday. i don't like
+> that today and tomorrow."*
+
+Rows read Sunday, Monday, Tuesday — including the first two, which said "Today"
+and "Tomorrow" on the reasoning that those are the days people plan around.
+
+The real fault was not the words but the mixture: five weekday names with two
+relative words on top makes the reader translate between two systems to work
+out whether Thursday falls before or after tomorrow. One kind of label is
+simply read.
+
+**The window still starts today** rather than on a Sunday. A fixed Sunday-to-
+Saturday week was the literal request and was put back to the owner with what
+it costs — by Friday most rows are days already gone, and cards due early next
+week become invisible — and he chose the rolling week. Same names, no dead
+rows, always a full week ahead.
+
+One knock-on: `describeForecast` still says nothing when today is the heaviest
+day. That mattered less when the row said "Today"; now *"Wednesday is the busy
+one"* on a Wednesday would read as a statement about some other Wednesday.
+
+### 20.4 A third pet, and the extension path holding up
+
+`0014_pet_dog.sql` widens 0011's check constraint to `('potato', 'cat', 'dog')`,
+finding the constraint by what it checks rather than by name for the reason
+0006 records. Verified live: `dog` accepted, `dragon` rejected with `23514`, so
+the constraint widened without ceasing to guard.
+
+§17.6 claimed adding a pet would be "drop a sheet in, run one command, add one
+line to `PET_SPECIES` and one to the constraint". **Measured against a real
+third pet, that was accurate** — the whole change was the sheet, one
+`make-pet-assets.ts` run, one array entry, one label, one `ART` row, five
+imports and the constraint. Worth recording because an extension point is a
+claim until someone extends it.
+
+The dog's frames came out at 10–19 KB, in line with the cat's 9–20 KB, which is
+the cheap check that the background key and the flood fill did not eat anything:
+a frame that lost its character comes back tiny.
+
+Verified end to end: all three tiles fit at 393 px (105/103/103), all three
+frames decode (`naturalWidth` 211, 194, 183, `complete: true`), and choosing Dog
+in Settings put `dog-2.webp` on the dashboard — stage 2, correct for a 15-day
+streak.
+
+**Verified:** typecheck clean · **443 tests** · `expo export` · boot test green ·
+both migrations applied and checked against the live database · the reworded
+screen read back from the DOM · deployed · production bundle hash `df48830e…`
+matches local.
+
+One operational note: the hash check failed on the first read after this deploy
+and passed six seconds later. Cloudflare had not finished propagating the new
+`index.html`. **A mismatch immediately after a deploy is worth re-reading before
+it is worth investigating** — every previous section's check happened to run
+after the delay rather than inside it.
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

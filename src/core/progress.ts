@@ -157,15 +157,22 @@ export function dueForecast(
 /**
  * What to call a day in the forecast.
  *
- * "Today" and "Tomorrow" rather than dates, because those are the two days
- * anyone actually plans around; the rest get a weekday name, which is enough
- * to locate them inside a single week. UTC throughout, matching the day
- * boundaries the schedule and the streak both use.
+ * Every row is a weekday name — Sunday, Monday, Tuesday — including the first
+ * two. It said "Today" and "Tomorrow" for those, on the reasoning that they are
+ * the days people plan around, and the owner disliked it: *"i don't like that
+ * today and tomorrow."*
+ *
+ * He was right, and the reason is that the list then spoke two vocabularies at
+ * once. Five weekday names with two relative words at the top makes the reader
+ * translate between them to work out whether Thursday is before or after
+ * tomorrow. One kind of label throughout is simply read.
+ *
+ * The window still starts today rather than on a Sunday, so no row is a day
+ * that has already gone and a full week ahead is always visible.
+ *
+ * UTC throughout, matching the day boundaries the schedule and the streak use.
  */
-export function forecastDayLabel(dayStart: number, todayStart: number): string {
-  const offset = Math.round((dayStart - todayStart) / DAY_MS);
-  if (offset === 0) return 'Today';
-  if (offset === 1) return 'Tomorrow';
+export function forecastDayLabel(dayStart: number, _todayStart?: number): string {
   return new Date(dayStart).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' });
 }
 
@@ -186,7 +193,9 @@ export function describeForecast(days: ForecastDay[], todayStart: number): strin
 
   const heaviest = days.reduce((a, b) => (b.due > a.due ? b : a));
   // Today needs no announcement: its own row is the first thing read, and the
-  // "cards ready for review" line above has already said it.
+  // "cards ready for review" line above has already said it. This matters more
+  // now that rows are named rather than relative — "Wednesday is the busy one"
+  // on a Wednesday reads as a statement about some other Wednesday.
   if (heaviest.dayStart === todayStart) return null;
 
   // Worth naming only if it genuinely stands out. Without this, "Thursday is

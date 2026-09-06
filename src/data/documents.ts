@@ -114,9 +114,18 @@ export async function uploadOriginal(
 /**
  * How many bytes of originals this user is keeping.
  *
- * Rows uploaded before `byte_size` existed report null and count as 0. That
- * under-reports rather than guessing: the sizes are not recoverable through
- * PostgREST, and a wrong total would refuse uploads for no visible reason.
+ * Rows with a null `byte_size` count as 0. Since `0013_backfill_byte_size.sql`
+ * the only rows left like that are documents whose file has genuinely gone —
+ * "Free up space" nulls the path and the size together — so zero is the right
+ * answer for them.
+ *
+ * Before that migration it was NOT: every file uploaded before 0009 added the
+ * column had a null size, so the dashboard could report "Nothing stored yet"
+ * over a bucket full of PDFs. The note that used to sit here said the sizes
+ * were "not recoverable", which was true from the browser and false from SQL —
+ * Supabase records the real byte count on every object it stores. Worth
+ * remembering the next time a column is added to a table that already has rows:
+ * adding it is half the migration.
  *
  * Degrades to 0 rather than throwing — a usage figure is not worth blocking an
  * upload over, and the per-file limit still applies.

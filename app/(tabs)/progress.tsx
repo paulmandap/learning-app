@@ -86,9 +86,13 @@ export default function Progress() {
         <Title>Progress</Title>
         <Card>
           <Body>Nothing to show yet — you haven't answered any cards.</Body>
+          {/* Names the blocks it will fill in, in the words those blocks
+              actually use. It said "what has stuck" and "worth another look"
+              after those headings had been rewritten, which is how an empty
+              state quietly stops describing the screen it introduces. */}
           <Body muted>
-            Study a set and this fills in: how many days in a row you've kept going, what has
-            stuck, and which parts of your notes are worth another look.
+            Study a set and this fills in: how many days in a row you've kept going, what you
+            know, what's coming up, and how each part of your notes is going.
           </Body>
           <Button label="Go to your sets" onPress={() => router.push('/')} />
         </Card>
@@ -336,14 +340,21 @@ function Forecast({ data }: { data: DashboardData }) {
   );
 }
 
-/** Where you stand, by the sections your notes are actually divided into. */
+/**
+ * How each part is going, by the sections the notes are actually divided into.
+ *
+ * The heading was "Where you stand", which the owner disliked — and it was
+ * vague in a way the card is not: it says nothing about what the rows are or
+ * what would change them. "How each part is going" is the same words a person
+ * would use to describe it out loud.
+ */
 function Sections({ data }: { data: DashboardData }) {
   const { strong, weak, tooEarly } = data.sections;
 
   if (strong.length === 0 && weak.length === 0) {
     return (
       <Card>
-        <Body>Where you stand</Body>
+        <Body>How each part is going</Body>
         <Body muted>
           {tooEarly > 0
             ? // Says WHY it is empty. Without this the block looks broken to
@@ -358,7 +369,7 @@ function Sections({ data }: { data: DashboardData }) {
 
   return (
     <Card>
-      <Body>Where you stand</Body>
+      <Body>How each part is going</Body>
       <SectionList heading="Going well" tone="ok" sections={strong} />
       <SectionList heading="Worth another look" tone="warn" sections={weak} />
       {tooEarly > 0 ? (
@@ -394,10 +405,16 @@ function SectionList({
             <Text style={{ color: t.text, fontSize: 15, flex: 1 }} numberOfLines={2}>
               {s.section}
             </Text>
-            {/* The raw count, not just a percentage: "4 of 5" is checkable and
-                carries its own sample size, which a bare 80% hides. */}
+            {/* A percentage, on the owner's call: "instead of 22 of 22, just
+                make it in percentage like 100%".
+
+                The old argument for "4 of 5" was that it carries its own
+                sample size, which a bare 80% hides. That still holds in
+                general — but not here, because nothing is ranked until it has
+                MIN_SECTION_ATTEMPTS answers behind it, so the n=1 percentage
+                the count was guarding against cannot reach this row. */}
             <Text style={{ color: t.textMuted, fontSize: 13 }}>
-              {s.correct} of {s.attempts}
+              {Math.round(s.accuracy * 100)}%
             </Text>
           </View>
           {/* A bar so two sections can be compared at a glance rather than by

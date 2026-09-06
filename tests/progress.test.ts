@@ -143,14 +143,20 @@ describe('describeForecast', () => {
 describe('forecastDayLabel', () => {
   const today = startOfUtcDay(NOON);
 
-  it('uses the words people plan with', () => {
-    expect(forecastDayLabel(today, today)).toBe('Today');
-    expect(forecastDayLabel(today + DAY, today)).toBe('Tomorrow');
+  it('speaks one vocabulary, not two', () => {
+    // Every row is a weekday name, the first two included. "Today" and
+    // "Tomorrow" among five weekday names made the reader translate between
+    // two kinds of label to work out whether Thursday came before or after
+    // tomorrow. 2026-09-05 is a Saturday.
+    expect(forecastDayLabel(today, today)).toBe('Saturday');
+    expect(forecastDayLabel(today + DAY, today)).toBe('Sunday');
+    expect(forecastDayLabel(today + 2 * DAY, today)).toBe('Monday');
   });
 
-  it('names the weekday after that', () => {
-    // 2026-09-05 is a Saturday, so two days on is Monday.
-    expect(forecastDayLabel(today + 2 * DAY, today)).toBe('Monday');
+  it('names every day in the window', () => {
+    const names = [0, 1, 2, 3, 4, 5, 6].map((n) => forecastDayLabel(today + n * DAY, today));
+    expect(new Set(names).size).toBe(7);
+    expect(names.every((n) => /day$/.test(n))).toBe(true);
   });
 });
 

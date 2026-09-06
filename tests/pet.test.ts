@@ -10,10 +10,12 @@ import {
 
 describe('choosing a pet', () => {
   it('offers the pets there is art for', () => {
-    // Each name here needs assets/<name>-1.png … -5.png, cut by
-    // scripts/make-pet-assets.ts. Adding a name without the art is a blank
-    // space where the pet should be.
-    expect([...PET_SPECIES]).toEqual(['potato', 'cat']);
+    // Each name here needs assets/<name>-1.webp … -5.webp, cut by
+    // scripts/make-pet-assets.ts, AND a matching entry in 0011's check
+    // constraint as widened by 0014. Adding a name without the art is a blank
+    // space where the pet should be; adding one without the constraint is a
+    // save that fails.
+    expect([...PET_SPECIES]).toEqual(['potato', 'cat', 'dog']);
   });
 
   it('falls back to the default rather than leaving no pet', () => {

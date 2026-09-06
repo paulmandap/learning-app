@@ -33,7 +33,7 @@
  * means dropping a sheet into `assets/`, running the slicing script, and adding
  * one line here and one to the constraint.
  */
-export const PET_SPECIES = ['potato', 'cat'] as const;
+export const PET_SPECIES = ['potato', 'cat', 'dog'] as const;
 
 export type PetSpecies = (typeof PET_SPECIES)[number];
 
