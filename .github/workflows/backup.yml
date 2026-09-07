@@ -19,16 +19,34 @@ name: Database backup
 # the CLI, and `set -x` is deliberately not used), and no step prints it.
 #
 # Set it under: Settings → Secrets and variables → Actions
-#   SUPABASE_DB_URL  postgresql://postgres.<ref>:<password>@<host>:5432/postgres
+#   SUPABASE_DB_URL     postgresql://postgres.<ref>:<password>@<host>:5432/postgres
+#   BACKUP_PASSPHRASE   a long random string, stored somewhere you will still
+#                       have it the day you need to restore
 #
-# Get it from: Supabase dashboard → Project Settings → Database → Connection
-# string → URI. The password must be percent-encoded if it contains @ : / ? # or %.
+# Get SUPABASE_DB_URL from: Supabase dashboard → Project Settings → Database →
+# Connection string → URI. The password must be percent-encoded if it contains
+# @ : / ? # or %.
 # ---------------------------------------------------------------------------
 #
 # PRIVACY: the dump contains students' notes and everything they have answered.
-# It is uploaded as a GitHub Actions artifact on a private repository and kept
-# for 90 days. It is not sent to any third-party storage. Do not add a step that
-# copies it anywhere else without deciding that deliberately.
+#
+# THIS REPOSITORY IS PUBLIC. Artifacts on a public repository can be downloaded
+# by anyone with a GitHub account, so a plaintext dump uploaded here would hand
+# every student's notes to whoever asked. (An earlier revision of this file said
+# the repo was private. It was, until 2026-09-07. That is exactly the kind of
+# assumption that stops being true without anything in the file changing.)
+#
+# So the dump is encrypted with AES-256 before it is uploaded, and the plaintext
+# .sql files are deleted from the runner in the same step. The artifact is inert
+# without BACKUP_PASSPHRASE, which never leaves GitHub's encrypted secrets.
+#
+# Kept for 90 days, sent to no third-party storage. Do not add a step that
+# uploads, prints or copies the plaintext dump anywhere.
+#
+# To restore:
+#   gpg --decrypt --output backup.tar.gz backup.tar.gz.gpg
+#   tar -xzf backup.tar.gz          # -> schema.sql, data.sql
+#   psql "$SUPABASE_DB_URL" -f schema.sql && psql "$SUPABASE_DB_URL" -f data.sql
 
 on:
   schedule:
@@ -140,16 +158,59 @@ jobs:
           done
           [ "$fail" -eq 0 ] || exit 1
 
+      - name: Encrypt the dump
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+
+          # Fail here rather than upload plaintext. A missing passphrase must
+          # cost a backup, never a disclosure.
+          if [ -z "${BACKUP_PASSPHRASE:-}" ]; then
+            echo "::error::BACKUP_PASSPHRASE repo secret is not set. See the comment at the top of this file."
+            exit 1
+          fi
+
+          tar -czf backup.tar.gz schema.sql data.sql
+
+          # --passphrase-fd 0 keeps the secret off the process command line,
+          # where it would be readable by any other process on the runner.
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --quiet \
+            --symmetric --cipher-algo AES256 --passphrase-fd 0 \
+            --output backup.tar.gz.gpg backup.tar.gz
+
+          # The plaintext must not survive into the upload step.
+          rm -f schema.sql data.sql backup.tar.gz
+
+          if [ ! -s backup.tar.gz.gpg ]; then
+            echo "::error::encryption produced no output."
+            exit 1
+          fi
+
+          # Prove it is really encrypted before it is published: the magic bytes
+          # must say GPG, and the word COPY (which every data dump contains)
+          # must not appear anywhere in the file.
+          if ! file backup.tar.gz.gpg | grep -qi 'gpg\|pgp\|encrypted'; then
+            echo "::error::backup.tar.gz.gpg is not an encrypted file."
+            exit 1
+          fi
+          if grep -qa 'COPY public\.' backup.tar.gz.gpg; then
+            echo "::error::plaintext SQL found inside the encrypted artifact."
+            exit 1
+          fi
+
+          echo "backup.tar.gz.gpg $(wc -c < backup.tar.gz.gpg) bytes, encrypted."
+
       - name: Upload backup
         # v7 rather than v4: v4 declares Node 20, which GitHub deprecated and now
         # force-runs on Node 24 — a warning today, a broken backup whenever they
         # stop forcing it. Checked before bumping: name, path, if-no-files-found
         # and retention-days all still exist in v7's inputs.
+        #
+        # Only the encrypted file is listed. Do not add the .sql files back.
         uses: actions/upload-artifact@v7
         with:
           name: supabase-backup-${{ github.run_id }}
-          path: |
-            schema.sql
-            data.sql
+          path: backup.tar.gz.gpg
           retention-days: 90
           if-no-files-found: error
