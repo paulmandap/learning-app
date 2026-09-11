@@ -322,6 +322,22 @@ export async function openPage(options: {
     // supabase-js keeps the session in localStorage under this key, so writing
     // it there is indistinguishable from having signed in through the UI. The
     // app is OTP-only, so there is no form a script could fill instead.
+    //
+    // ## expires_at is not optional, and its absence looks like nothing
+    //
+    // This harness silently stopped working: every route rendered the sign-in
+    // screen, including Home, while the token request itself succeeded and this
+    // function reported 'ok'. The cause is that `/auth/v1/token` returns
+    // `expires_in` and NOT `expires_at` — auth-js computes that field itself
+    // when it saves a session, so a session written straight from the response
+    // is missing it. Recovering one without `expires_at` fails closed:
+    // `getUser()` answers "Auth session missing!" and the app redirects to
+    // sign-in exactly as it would for a signed-out visitor.
+    //
+    // So the failure is indistinguishable from working code — the write
+    // succeeds, the key is right, and the app is simply signed out. Verified
+    // against supabase-js 2.114 while building the Phase B test seam, which
+    // needs the same field for the same reason.
     const ref = new URL(url).hostname.split('.')[0];
     const result = await evaluate<string>(
       `(async () => {
@@ -332,12 +348,52 @@ export async function openPage(options: {
         });
         const s = await r.json();
         if (!s.access_token) return 'sign-in failed: ' + JSON.stringify(s).slice(0, 200);
+        s.expires_at = Math.floor(Date.now() / 1000) + (s.expires_in ?? 3600);
         localStorage.setItem('sb-${ref}-auth-token', JSON.stringify(s));
         return 'ok';
       })()`,
       true,
     );
     if (result !== 'ok') throw new Error(result);
+
+    // 'ok' meant "a token was written", which is what let the defect above hide
+    // for a whole session. Assert the app actually comes up SIGNED IN, so a
+    // session the library will not accept fails here instead of silently
+    // producing screenshots of the sign-in screen.
+    await goto('/');
+    // Polled, not sampled once. The app restores its session asynchronously —
+    // startSessionListener awaits getSession() before the auth gate knows
+    // anyone is signed in — so the sign-in screen is a legitimate first frame
+    // and only a lasting one means the session was refused.
+    let signedIn = false;
+    for (let i = 0; i < 40 && !signedIn; i++) {
+      signedIn = await evaluate<boolean>(
+        `!document.querySelector('#root')?.innerText.includes('6-digit code')`,
+      );
+      if (!signedIn) await pause(250);
+    }
+    if (!signedIn) {
+      const diag = await evaluate<string>(
+        `JSON.stringify({
+          keys: Object.keys(localStorage),
+          stored: (() => {
+            const raw = localStorage.getItem('sb-${ref}-auth-token');
+            if (!raw) return null;
+            try { const o = JSON.parse(raw); return { fields: Object.keys(o), expires_at: o.expires_at, now: Math.floor(Date.now()/1000), user: !!o.user }; }
+            catch (e) { return 'unparseable: ' + String(raw).slice(0, 60); }
+          })(),
+          path: location.pathname,
+          root: (document.querySelector('#root')?.innerText ?? '').slice(0, 160).replace(/\\n/g, ' | '),
+        })`,
+      );
+      throw new Error(
+        'A valid session was written but the app stayed on sign-in for 10s.\n' +
+          'KNOWN UNSOLVED — see docs/ARCHITECTURE_NOTES.md §24.3. The stored session is\n' +
+          'well-formed and auth-js keeps it (an invalid one is deleted), so the remaining\n' +
+          'suspect is the app restoring it, not the shape of what is stored.\n' +
+          `Diagnostics: ${diag}`,
+      );
+    }
   }
 
   return {

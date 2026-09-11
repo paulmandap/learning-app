@@ -2763,6 +2763,153 @@ against the live database · CI sequence rehearsed locally end to end · all thr
 workflow files parse and every `run:` block passes `bash -n`. **Not deployed,
 and no restore drill.**
 
+## 24. Phase B — a test seam for the data layer (2026-09-11)
+
+§23 found four defects in screen code and named the reason all four shipped:
+**447 tests covered `src/core` and `src/ai` and nothing else.** `src/data/**`
+had never been tested, and the reason was not that it imports react-native —
+it imports none — but convention. This closes that, for the three functions the
+audit named.
+
+### 24.1 A real client over a stubbed fetch, not a mock builder
+
+`createClient(url, key, { global: { fetch } })` routes **PostgREST, Auth, RPC
+and Storage through one injected fetch** — measured 2026-09-11 against
+supabase-js 2.114, all four in a single stub. That is the same `fetchImpl` seam
+`GeminiBrowserProvider` has always used, so it is the house pattern rather than
+a new one.
+
+The consequence is the point: a test drives the **real query builder** and can
+assert on the URL it produces.
+
+```
+GET /rest/v1/review_state
+    ?select=study_set_id,study_items!inner(hidden)
+    &study_items.hidden=eq.false
+    &due_at=lte.2026-09-11T00:00:00.000Z
+```
+
+A hand-written builder mock would have agreed with whatever the code asked it
+for. That matters most on exactly this query, because §21.1 records that **an
+embedded filter which fails to resolve its relationship returns rows rather than
+an error** — a silently wrong count that looks like a working screen. The URL is
+the only place that failure is visible before it reaches the database.
+
+### 24.2 The shape: an optional trailing parameter
+
+```ts
+export async function dueCountsBySet(now = Date.now(), db: Db = supabase) { … }
+```
+
+`Db` is exported from `src/data/supabase.ts` with the seam documented there.
+Seven functions carry it — `fetchDashboard`, `recordAttempt`, `dueCountsBySet`,
+`dueCountForSet`, `currentState`, `saveSchedule`, `storageUsedBytes` — and
+because the parameter is optional, **no call site had to change.**
+
+**Except one, and it is the hazard worth recording.** `app/new.tsx` passed
+`queryFn: storageUsedBytes` — the function **by reference**. TanStack Query
+calls a bare `queryFn` with its own context object, which would have arrived as
+the `db` argument and been used as a database client. Typecheck caught it; it
+would otherwise have been a runtime failure on the upload screen.
+
+So the rule this pattern comes with: **an optional trailing parameter is only
+safe while nothing passes the function by reference to a caller that supplies
+arguments.** Every other `queryFn` in the app already wrapped (`() => f()`);
+that one was the exception, and now is not.
+
+### 24.3 The screenshot harness — one cause found, another still open
+
+§23.8 recorded, untested, that `scripts/screenshot.ts` writes the raw
+`/auth/v1/token` response, which carries `expires_in` but not `expires_at`.
+
+**That is now confirmed.** auth-js `_isValidSession` requires exactly
+`access_token`, `refresh_token` and `expires_at`; a session missing the third is
+discarded and `getUser()` answers *"Auth session missing!"*. Measured directly
+against supabase-js 2.114. The same field is required by the test stub in
+`tests/data.test.ts` for the same reason, which is how it was found.
+
+**The fix is in and it is not sufficient.** With `expires_at` written, the
+session is well-formed and auth-js **keeps** it — an invalid one is deleted, and
+this one survives the navigation with valid fields and ~3588s of life left — yet
+the app still lands on `/sign-in` after ten seconds of polling:
+
+```
+stored : fields=[access_token, token_type, expires_in, expires_at,
+                 refresh_token, user, weak_password]
+         expires_at=1789141207  now=1789137619   (valid, ~1h ahead)
+path   : /sign-in
+root   : "Study | Enter your email and we'll send you a 6-digit code…"
+```
+
+So the remaining suspect is the app restoring the session rather than the shape
+of what is stored. `startSessionListener` has **two writers to one store** —
+`getSession().then()` and `onAuthStateChange`, both calling `setSession` and
+`markReady` — and last writer wins. That is a hypothesis, not a finding: it has
+not been tested, and real sign-in works in daily use.
+
+What did change is that the harness **fails loudly instead of lying**. It
+previously reported `'ok'` because a token had been written, and then produced
+screenshots of the sign-in screen — which is how §18's two charts came to be
+"verified" from geometry rather than by eye. It now asserts the app actually
+comes up signed in, and prints the diagnostics above when it does not.
+
+**Visual verification remains unavailable.** Nothing in Phase B was checked by
+eye.
+
+### 24.4 A shared mutable constant the tests would have tripped over
+
+`EMPTY_DASHBOARD` is an exported object and `fetchDashboard`'s degraded paths
+returned its `mastery`, `sections` and `forecast` **by reference**. One caller
+sorting a returned forecast in place would have edited the constant itself, and
+every later degraded dashboard in the process would have served the corruption.
+
+Nothing did that — which is exactly why it was worth fixing first. The Phase B
+tests are the first code to hold a returned dashboard and poke at it, and shared
+mutable state that only misbehaves across two tests gets blamed on the test.
+Confirmed real by mutation: with the by-reference version restored, a `999`
+written into the first dashboard appeared in the second.
+
+### 24.5 Every assertion was run against a broken version first
+
+A regression test that has never failed is a guess. Both load-bearing
+assertions were mutation-tested, with the source restored afterwards:
+
+| Mutation | Result |
+|---|---|
+| Drop `study_items!inner(hidden)` + the hidden filter | FAILS — *expected 'select=study_set_id&due_at=…' to contain 'study_items!inner(hidden)'* |
+| Return `EMPTY_DASHBOARD.mastery` by reference again | FAILS — *expected 999 to be +0* |
+
+The sixteen tests pin, among others: the embedded join and the UTC-day boundary
+on `dueCountsBySet`; that the dashboard answers in **five queries and no more**;
+that `retryTarget`/`dueTarget` reach the screen (§23.1 end to end rather than
+`busiestSet` alone); that a reported card counts as neither due nor to-retry;
+that one failed query does not take the screen down and says so; the
+`study_days` → `attempts` fallback; and on `recordAttempt` the **order** —
+answer, then day, then schedule — the `23514` `blanks`→`flashcards` retry, that
+a failed schedule write does not lose the answer, and that a failed answer write
+does throw.
+
+### 24.6 The seam pays for itself twice
+
+It also makes **live** verification trivial, because a signed-in client can now
+be handed to the real function from Node. Run against the live project:
+
+```
+dueCountsBySet -> 2 sets: [6d29b263…, 5], [4abb8b3b…, 7]
+fetchDashboard -> dueToday=12  toRetry=8
+                  retryTarget=4abb8b3b…  dueTarget=4abb8b3b…
+                  mastery={known:0, getting:4, needsWork:8, notStarted:16}
+```
+
+5 + 7 = 12 agrees with `dueToday`, and the embedded join returns real rows under
+real RLS — the thing the URL assertion cannot prove on its own.
+
+**Verified:** typecheck clean · **491 tests** (475 before; +16) · `expo export` ·
+boot **6/6** against a fresh bundle · both key assertions mutation-tested ·
+both queries run against the live database · `vitest.config.mts` gains `test.env`
+because `src/data/supabase.ts` throws at import without it, and that fail-fast
+stays. **Not deployed. No restore drill. Nothing checked by eye.**
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

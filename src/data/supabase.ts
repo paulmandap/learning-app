@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /**
  * Supabase client.
@@ -22,6 +22,44 @@ if (!url || !publishableKey) {
       'EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY.',
   );
 }
+
+/**
+ * The client a data function talks to — the test seam for `src/data/**`.
+ *
+ * ## Why this exists
+ *
+ * Until Phase B nothing under `src/data/**` had a single test, and the reason
+ * was not that it imports react-native (it does not) but that every function
+ * reached straight for the module singleton below. A dashboard button wired to
+ * the wrong route shipped and stayed shipped because no test could reach the
+ * function that built it.
+ *
+ * ## How it is used
+ *
+ * Every seam-carrying function takes the client as an OPTIONAL trailing
+ * parameter defaulting to `supabase`:
+ *
+ * ```ts
+ * export async function dueCountsBySet(now = Date.now(), db: Db = supabase) { … }
+ * ```
+ *
+ * So no caller changes, anywhere. The app keeps calling `dueCountsBySet()` and
+ * gets the real client; a test passes one built over a stubbed `fetch`.
+ *
+ * ## Why a whole client rather than a hand-written mock
+ *
+ * `createClient(url, key, { global: { fetch } })` routes PostgREST, Auth, RPC
+ * and Storage through one injected fetch — the same `fetchImpl` seam
+ * `GeminiBrowserProvider` already uses. A test therefore exercises the REAL
+ * query builder and asserts on the URL it produces.
+ *
+ * That matters more here than it sounds. `dueCountsBySet` filters on an
+ * embedded relationship, and NOTES §21.1 records that an embedded filter which
+ * fails to resolve returns rows rather than an error — a silent wrong answer. A
+ * hand-written builder mock would happily agree with whatever the code asked
+ * for; a URL assertion catches it.
+ */
+export type Db = SupabaseClient;
 
 export const supabase = createClient(url, publishableKey, {
   auth: {

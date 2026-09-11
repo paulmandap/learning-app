@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, type Db } from './supabase';
 import { NEW_CARD, startOfUtcDay, type Scheduled } from '../core/schedule';
 import type { AttemptResult } from '../core/grade';
 
@@ -77,8 +77,11 @@ export async function reviewStatesForSet(studySetId: string): Promise<Map<string
  * a useful number into noise. "Due" here means "you have seen this and it is
  * time to see it again".
  */
-export async function dueCountsBySet(now: number = Date.now()): Promise<Map<string, number>> {
-  const { data, error } = await supabase
+export async function dueCountsBySet(
+  now: number = Date.now(),
+  db: Db = supabase,
+): Promise<Map<string, number>> {
+  const { data, error } = await db
     .from('review_state')
     // The inner join is the fix for a real defect, not tidiness. A reported
     // card is hidden from every deck by `listItems`, but nothing deletes its
@@ -106,8 +109,9 @@ export async function dueCountsBySet(now: number = Date.now()): Promise<Map<stri
 export async function dueCountForSet(
   studySetId: string,
   now: number = Date.now(),
+  db: Db = supabase,
 ): Promise<number> {
-  return (await dueCountsBySet(now)).get(studySetId) ?? 0;
+  return (await dueCountsBySet(now, db)).get(studySetId) ?? 0;
 }
 
 /**
@@ -116,8 +120,8 @@ export async function dueCountForSet(
  * Returned as plain state rather than Scheduled: the caller is about to compute
  * the next state, and a due date it is about to overwrite would be noise.
  */
-export async function currentState(studyItemId: string) {
-  const { data, error } = await supabase
+export async function currentState(studyItemId: string, db: Db = supabase) {
+  const { data, error } = await db
     .from('review_state')
     .select(COLUMNS)
     .eq('study_item_id', studyItemId)
@@ -135,14 +139,17 @@ export async function currentState(studyItemId: string) {
  * grading the same card race to a well-defined winner instead of inserting two
  * schedules for one item.
  */
-export async function saveSchedule(input: {
-  userId: string;
-  studyItemId: string;
-  studySetId: string;
-  state: Scheduled;
-  lastResult: AttemptResult;
-}): Promise<void> {
-  await supabase.from('review_state').upsert(
+export async function saveSchedule(
+  input: {
+    userId: string;
+    studyItemId: string;
+    studySetId: string;
+    state: Scheduled;
+    lastResult: AttemptResult;
+  },
+  db: Db = supabase,
+): Promise<void> {
+  await db.from('review_state').upsert(
     {
       user_id: input.userId,
       study_item_id: input.studyItemId,

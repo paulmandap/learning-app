@@ -51,7 +51,12 @@ export default function NewSet() {
   // than after it has been sent. Shared query key with the Progress screen.
   const { data: usedBytes = 0 } = useQuery({
     queryKey: ['storageUsed'],
-    queryFn: storageUsedBytes,
+    // Wrapped, not passed by reference. storageUsedBytes now takes an optional
+    // client as its last argument (the Phase B test seam), and TanStack Query
+    // calls a bare queryFn with its own context object — which would arrive as
+    // that argument and be used as a database client. Every other queryFn in
+    // the app already wraps for consistency; this one was the exception.
+    queryFn: () => storageUsedBytes(),
   });
 
   const [text, setText] = useState('');

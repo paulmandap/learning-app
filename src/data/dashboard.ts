@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, type Db } from './supabase';
 import {
   busiestSet,
   dueForecast,
@@ -82,6 +82,30 @@ export const EMPTY_DASHBOARD: DashboardData = {
   dueTarget: null,
 };
 
+/**
+ * A fresh empty value for one failed section, never the shared constant.
+ *
+ * `EMPTY_DASHBOARD` is an exported mutable object, and the error paths below
+ * used to hand out its `forecast`, `mastery` and `sections` BY REFERENCE. One
+ * caller sorting a returned `forecast` in place, or bumping a mastery count,
+ * would have edited the constant itself — so every later dashboard on a
+ * degraded query would return the corrupted value, in a module nothing can
+ * reload.
+ *
+ * Nothing does that today, which is exactly why it was worth fixing before
+ * anything started: the tests in Phase B are the first code to hold a returned
+ * dashboard and poke at it, and a shared-mutable-state bug that only appears
+ * across two tests is the kind that gets blamed on the test.
+ */
+const emptyMastery = (): MasteryCounts => ({
+  known: 0,
+  getting: 0,
+  needsWork: 0,
+  notStarted: 0,
+});
+const emptySections = (): SectionSplit => ({ strong: [], weak: [], tooEarly: 0 });
+const emptyForecast = (): ForecastDay[] => [];
+
 interface StatsRow {
   study_item_id: string;
   study_set_id: string;
@@ -105,27 +129,30 @@ function warnIfFailed(what: string, error: { message: string } | null): void {
   if (error) console.warn(`[dashboard] ${what} query failed: ${error.message}`);
 }
 
-export async function fetchDashboard(now: number = Date.now()): Promise<DashboardData> {
+export async function fetchDashboard(
+  now: number = Date.now(),
+  db: Db = supabase,
+): Promise<DashboardData> {
   const [days, schedules, stats, items, usedBytes] = await Promise.all([
     // The streak reads from study_days, NOT from attempts. attempts cascades
     // from study_sets, so deleting a set would erase the days its answers
     // happened on and reset a streak for having tidied up. study_days
     // references only auth.users. It is also far cheaper: one small row per day
     // studied, instead of every answer ever recorded.
-    supabase.from('study_days').select('day, answers'),
+    db.from('study_days').select('day, answers'),
     // study_set_id rides along on both of these so the "what next" button has
     // somewhere to go. Both already carry the column, so this is two more
     // fields on queries that were being made anyway, not a sixth round trip.
-    supabase
+    db
       .from('review_state')
       .select('study_item_id, study_set_id, reps, interval_days, lapses, due_at'),
     // Runs with security_invoker, so RLS applies and this is only ever the
     // caller's own history (the isolation test asserts that explicitly).
-    supabase
+    db
       .from('item_stats')
       .select('study_item_id, study_set_id, attempts, misses, partials, last_result'),
-    supabase.from('study_items').select('id, section_title').eq('hidden', false),
-    storageUsedBytes(),
+    db.from('study_items').select('id, section_title').eq('hidden', false),
+    storageUsedBytes(db),
   ]);
 
   warnIfFailed('study_days', days.error);
@@ -145,7 +172,7 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
     // because the alternative is telling someone with months of history that
     // they have never studied — a far worse failure than the slower query this
     // replaced. Only on the error path, so it costs nothing once 0009 is in.
-    const fallback = await supabase.from('attempts').select('created_at');
+    const fallback = await db.from('attempts').select('created_at');
     if (!fallback.error) {
       const rows = (fallback.data ?? []) as { created_at: string }[];
       times = rows.map((r) => Date.parse(r.created_at));
@@ -198,13 +225,13 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
   // The week ahead, from the same rows the mastery bands come from — no extra
   // query. Overdue cards fold into today inside dueForecast.
   const forecast =
-    schedules.error || items.error ? EMPTY_DASHBOARD.forecast : dueForecast(liveSchedules, now);
+    schedules.error || items.error ? emptyForecast() : dueForecast(liveSchedules, now);
 
 
   // Every card in the account, bucketed. Cards with no schedule are new, which
   // masteryOf handles, so an untouched set shows as new rather than vanishing.
   const mastery = items.error
-    ? EMPTY_DASHBOARD.mastery
+    ? emptyMastery()
     : masteryCounts(itemRows, (item) => stateById.get(item.id));
 
   // --- per-section history -------------------------------------------------
@@ -221,7 +248,7 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
     partials: s.partials,
   }));
 
-  const sections = stats.error || items.error ? EMPTY_DASHBOARD.sections : sectionSplit(history);
+  const sections = stats.error || items.error ? emptySections() : sectionSplit(history);
 
   // Keyed on the LAST result rather than on ever having missed it, matching
   // missedItemIds — something you got wrong once and have since learned should

@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, type Db } from './supabase';
 import { currentState, saveSchedule } from './review';
 import { maybeRephrase } from './variants';
 import { nextState } from '../core/schedule';
@@ -45,8 +45,8 @@ export interface Attempt {
   created_at: string;
 }
 
-async function currentUserId(): Promise<string> {
-  const { data, error } = await supabase.auth.getUser();
+async function currentUserId(db: Db = supabase): Promise<string> {
+  const { data, error } = await db.auth.getUser();
   if (error) throw new Error(error.message);
   const id = data.user?.id;
   if (!id) throw new Error('Not signed in.');
@@ -82,8 +82,8 @@ export async function recordAttempt(input: {
    * pass one simply never triggers it.
    */
   apiKey?: string;
-}): Promise<void> {
-  const user_id = await currentUserId();
+}, db: Db = supabase): Promise<void> {
+  const user_id = await currentUserId(db);
 
   const row = {
     user_id,
@@ -96,7 +96,7 @@ export async function recordAttempt(input: {
     feedback: input.feedback ?? null,
   };
 
-  let { error } = await supabase.from('attempts').insert({ ...row, mode: input.mode });
+  let { error } = await db.from('attempts').insert({ ...row, mode: input.mode });
 
   // --- the database may not know this mode yet -----------------------------
   // 'blanks' needs migration 0006, which is APPLIED on the live project
@@ -115,7 +115,7 @@ export async function recordAttempt(input: {
       `attempts.mode '${input.mode}' was rejected — recording as '${fallback}'. ` +
         'Apply supabase/migrations/0006_attempt_mode_blanks.sql to fix this.',
     );
-    ({ error } = await supabase.from('attempts').insert({ ...row, mode: fallback }));
+    ({ error } = await db.from('attempts').insert({ ...row, mode: fallback }));
   }
 
   if (error) throw new Error(error.message);
@@ -128,7 +128,7 @@ export async function recordAttempt(input: {
   //
   // Best effort, and after the attempt: the attempt is the record of truth.
   try {
-    await supabase.rpc('touch_study_day');
+    await db.rpc('touch_study_day');
   } catch {
     // A missing streak day is not worth losing an answer over. It also lets
     // this ship before 0009 is applied.
@@ -138,7 +138,7 @@ export async function recordAttempt(input: {
   // After the attempt row, never instead of it: the attempt is the record of
   // truth and the missed pile (D8) is built from it, so it must land first.
   try {
-    const prev = await currentState(input.studyItemId);
+    const prev = await currentState(input.studyItemId, db);
     const next = nextState(prev, input.result, Date.now());
     await saveSchedule({
       userId: user_id,
@@ -146,7 +146,7 @@ export async function recordAttempt(input: {
       studySetId: input.studySetId,
       state: next,
       lastResult: input.result,
-    });
+    }, db);
 
     // --- rephrase a card that keeps beating them (Phase 8) -----------------
     // Here for the same reason the schedule write is here: every answer in the

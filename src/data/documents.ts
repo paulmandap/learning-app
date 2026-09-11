@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, type Db } from './supabase';
 import type { ReadResult } from '../ai/provider';
 
 /**
@@ -130,8 +130,8 @@ export async function uploadOriginal(
  * Degrades to 0 rather than throwing — a usage figure is not worth blocking an
  * upload over, and the per-file limit still applies.
  */
-export async function storageUsedBytes(): Promise<number> {
-  const { data, error } = await supabase.from('documents').select('byte_size');
+export async function storageUsedBytes(db: Db = supabase): Promise<number> {
+  const { data, error } = await db.from('documents').select('byte_size');
   if (error) {
     console.warn(`[storage] could not read usage: ${error.message}`);
     return 0;
