@@ -2552,6 +2552,217 @@ chat_usage 0, and `study_sets` back to the two real diagram fixtures.
 **Verified:** typecheck clean · **447 tests** · isolation **19/19** with cleanup
 confirmed · every factual claim in the new handoff checked against the repo.
 
+## 23. Phase A — four broken flows, and the checks that let them ship (2026-09-11)
+
+An audit against `7218329` found four defects in screen code and three holes in
+what protects the repository. The four had one thing in common, and it is the
+most useful fact in this section: **447 tests covered `src/core` and `src/ai`
+and nothing else.** Not one test imported `src/data/**`, `src/ui/**` or `app/**`.
+That boundary is deliberate and correct — it is what makes Vitest work without
+react-native — but it means every defect below lived in the one part of the
+codebase nothing could reach.
+
+### 23.1 The dashboard's one decision did nothing
+
+`NextStep` is the last block on Progress and the screen's whole purpose: five
+blocks of evidence ending in one action. All three of its branches called
+`router.push('/')`. So *"Retry what you missed (12)"* read the missed pile,
+counted it, printed the number on a button, and then dropped the student on the
+list of sets to go and find it themselves.
+
+Worse than having no button, because the label is a promise. And it had been
+there since the dashboard shipped in Phase 9b.
+
+**The fix needed a set id the dashboard did not have.** A count on that screen
+spans every set; a destination is one set. Rather than a sixth query, the id
+rides along on two that were already being made — `review_state` and
+`item_stats` both carry `study_set_id` and neither was selecting it.
+
+`busiestSet` (`src/core/progress.ts`) picks the target: most rows wins, ties
+break on the id so the same data always produces the same button. **Most-of-them
+rather than most-recent, which is deliberately the opposite of Home's
+`continueTarget`** — Home answers *where was I*, Progress answers *where is the
+work*, and someone who studied one set this morning with a backlog in another
+should be sent to the backlog.
+
+**Null is a real answer.** `busiestSet` returns null when there is nowhere to
+send anyone, and both branches fall through to the set list rather than building
+`/set/null/flashcards`.
+
+One thing this turned up: `toRetry` was counting stat rows for cards the app
+would no longer deal. That is §21's bug in a second place — a stat row outlives
+the card it describes, so a reported card kept inflating the number. It mattered
+less while the figure was decoration and matters now that a button opens it, so
+the count is filtered to visible cards and the destination is computed from the
+same list. The count, the route and the deck cannot drift apart.
+
+### 23.2 Three smaller ones, each verified against the original
+
+- **Quiz level buttons showed no counts.** `countByLevel` was computed, carried a
+  docstring explaining that a button promising 10 and dealing 3 is a lie, and was
+  then never used. Flashcards and Blanks both showed theirs. Only rendered
+  outside retry mode, so the count over `quizzable` is what the tap deals.
+- **Blanks had no retry mode** while Flashcards and Quiz did. Now reads the same
+  `?retry=1`, from the same `missedItemIds` pile, under the same query key — one
+  retry pile, three ways of being asked about it. Its `countByLevel` narrows in
+  retry mode for the reason its own docstring already gave.
+- **The set screen decided what to render from a ref.** `{isGenerating &&
+  !started.current}` — and mutating a ref schedules no re-render, so "Keep going"
+  appeared or did not depending on whether unrelated state happened to re-render
+  the screen afterwards. **The ref is kept and a state flag added beside it**,
+  because the two do different jobs: the ref is set synchronously and is what
+  stops a second `generateSet`, which a state setter cannot do; the state is what
+  renders. Replacing the ref outright would have traded a cosmetic bug for a
+  duplicated generation run.
+
+### 23.3 `app/+not-found.tsx`, which did not exist
+
+Reachable in normal use, not only by mistyping: `router.replace` after creating
+and after deleting a set rewrites the URL, and an installed PWA reopened on a
+deep link rebuilds the stack from that URL alone. Without the file, Expo Router
+falls back to its own screen, which names the route pattern it could not match
+and offers nothing to do about it.
+
+Registered on the stack with `backable`, which matters more here than anywhere
+else — the usual way to arrive is a stack with no history, and
+`HeaderBackButton` already falls back to Home when the navigator cannot go back.
+
+### 23.4 The tests that could not reach any of this
+
+`tests/screens.test.ts` is new, and it reads source text for the same reason
+`tests/input-zoom.test.ts` does: `app/**` imports react-native and this suite
+cannot load it. Crude, deliberately so, and it cannot prove a screen behaves —
+only that the specific thing that was wrong has not been written back.
+
+**Every guard was run against the pre-fix source before being kept**, because a
+regression test that has never failed is a guess:
+
+```
+original push('/') count in NextStep : 3   (guard requires 1)
+original NextStep had retry route    : false (guard requires true)
+quiz level segment had countByLevel  : false (guard requires true)
+blanks read ?retry=1                 : false (guard requires true)
+set screen render read started.current: true  (guard requires false)
+```
+
+Anything genuinely computable went into `src/core` instead and is properly
+tested there — `busiestSet` has five unit tests in `tests/progress.test.ts`.
+
+### 23.5 CI, and a boot check that had been skipping
+
+`.github/workflows/ci.yml` runs on push and pull_request. Until now the two
+workflows here were both cron jobs; 447 tests, a typecheck and a boot check ran
+only when the owner remembered.
+
+**Order is typecheck → export → test, and that is not arbitrary.**
+`tests/boot.test.ts` runs against `dist/` and is the only check that executes the
+app — it exists because a react/react-dom mismatch shipped a blank white page
+while the build succeeded and every test passed. On a clean checkout it *skips*,
+which is right for a developer and wrong for CI: a run that skips it reports
+success for exactly the failure it was written to catch.
+
+So `REQUIRE_BUILD=1` turns a missing build into a failure. Nothing about the five
+checks changed — only whether their absence may pass unnoticed. Verified both
+ways: with `dist/` renamed away it fails with the message telling you to build;
+with the export run first it passes.
+
+**The workflow uses no secrets at all.** `expo export` inlines `EXPO_PUBLIC_*`
+and `src/data/supabase.ts` throws at import without them, which would fail the
+boot test for the wrong reason — so CI builds with an obviously fake URL and key.
+The boot check asks whether the bundle executes and mounts, not whether it can
+reach a database, and nothing in it makes a network call. Putting the real
+publishable key in a public repository's build logs would buy nothing. **Verified
+locally with the exact CI values: export succeeded, bundle mounted, 6/6 boot
+checks.**
+
+### 23.6 The backup's table list had failed four times out of four
+
+`backup.yml` checked eight tables and printed *"All eight tables … are
+present."* Three had shipped since: `study_days` (0009), `chat_usage` (0010) and
+**`notes` (0012)** — the only table holding something a student wrote
+themselves. A dump that dropped `notes` entirely would have passed and reported
+success.
+
+The comment beside that list said *"any future migration that adds a table must
+add it here too"*. It was written after `review_state` went unchecked for two
+days, and was then broken three more times. **A rule that depends on remembering
+has now failed on every occasion it was tested, so it is gone.**
+
+The list is derived from `supabase/migrations/` on each run. Every table in this
+schema is created with the same form and every added column likewise, so both
+are read out:
+
+```
+TABLES  (11): attempts chat_usage document_pages documents heartbeat notes
+              profiles review_state study_days study_items study_sets
+COLUMNS  (4): byte_size pet rubric_verified variant_prompt
+```
+
+Three details that are not incidental:
+
+- **Only `public.` objects from this repo's own migrations** are considered,
+  which is what keeps Supabase's internal `auth`/`storage` tables out.
+- **An empty derivation fails the job.** A list that found nothing would pass
+  every check below it without testing anything — the same silent success in a
+  new costume.
+- **A dropped table is subtracted.** Nothing drops one today; it is there so
+  that doing so does not start failing the backup for the wrong reason.
+
+The job now needs `actions/checkout`, which it never had — it had never read the
+repository at all. And the message says *what* was checked rather than a count,
+because a number nobody can check against anything is how the old one stayed
+wrong through three migrations.
+
+**Verified against a synthetic dump containing ten of the eleven tables: the
+check fails, naming `notes`.** That is the exact drift that shipped.
+
+**Not verified, and stated plainly: no backup has been restored.** This section
+makes the structural check accurate. It does not make the backup known-good, and
+the restore drill remains the one failure mode in this project where the loss is
+permanent and silent.
+
+### 23.7 `study_days` joins the isolation test — 20/20
+
+It was the only user-scoped table the test did not cover. It also deliberately
+survives deleting a set (it references only `auth.users`), which makes it the
+longest-lived record of a person's habits in the database: when they study, and
+how long they have kept it up.
+
+**Seeded on a sentinel day, `2000-01-01`, and that is the difference between a
+test and a bug.** `study_days` is real streak data. A row dated today would join
+the account's actual run, and the cleanup would then delete a day someone really
+studied — precisely the §9.4 hazard the cleanup exists to prevent. No day in 2000
+can be genuine, the `unique (user_id, day)` constraint makes a re-run idempotent,
+and deleting that exact day cannot touch anything real.
+
+**No RLS problem was found.** B sees zero of A's streak rows, so no policy was
+changed. Cleanup confirmed afterwards: sentinel rows 0, probe notes 0, probe sets 0.
+
+### 23.8 What could not be verified, and one thing found on the way
+
+**The screenshot harness could not sign in, so nothing here was checked by eye.**
+`scripts/screenshot.ts` injects a session into `localStorage`; against the live
+project every route now renders the sign-in screen instead, including Home.
+Ruled out by inspection: the storage key is right (`sb-<ref>-auth-token`, which
+matches supabase-js 2.114's own `defaultStorageKey` derivation exactly), and
+`goto` uses `Page.navigate`, a full load, so a stale in-memory session is not the
+cause. The remaining suspect, **untested**: the harness writes the raw
+`/auth/v1/token` response, which has `expires_in` but no `expires_at` — auth-js
+computes that field itself when it saves, and may discard a recovered session
+without it.
+
+This is a pre-existing harness defect, not a Phase A change, and it was left
+alone. It matters beyond this phase: "verify UI changes by looking at them" is
+one of this project's better habits and it is currently unavailable.
+
+**Verified:** typecheck clean · **475 tests** (447 before; +5 `busiestSet`, +22
+`tests/screens.test.ts`, +1 boot build guard) · `expo export` · boot **6/6**
+against a fresh bundle · every new regression guard run against the pre-fix
+source and confirmed to fail · isolation **20/20** with cleanup confirmed
+against the live database · CI sequence rehearsed locally end to end · all three
+workflow files parse and every `run:` block passes `bash -n`. **Not deployed,
+and no restore drill.**
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

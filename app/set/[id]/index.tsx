@@ -43,7 +43,23 @@ export default function SetScreen() {
   // quietly overwriting the original with its prettified version.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [savingName, setSavingName] = useState(false);
+  /**
+   * Has this mount already kicked generation off?
+   *
+   * Two copies of one fact, and both are load-bearing:
+   *
+   *  - **The ref is the guard.** It is set synchronously, so an effect that runs
+   *    twice before React commits anything still starts one run. A state flag
+   *    cannot do that job — the setter is asynchronous, so the second pass would
+   *    read the old value and start a second `generateSet` over the same set.
+   *  - **The state is what renders.** "Keep going" used to test `started.current`
+   *    during render, and mutating a ref schedules nothing, so the button's
+   *    visibility depended on whether some unrelated state happened to re-render
+   *    the screen afterwards. It could sit there through a run that had already
+   *    begun, or vanish correctly, with nothing in the code deciding which.
+   */
   const started = useRef(false);
+  const [hasStarted, setHasStarted] = useState(false);
 
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
   const { data: set, refetch: refetchSet } = useQuery({
@@ -161,6 +177,7 @@ export default function SetScreen() {
     if (!set || !apiKey) return;
     if (set.status !== 'generating') return;
     started.current = true;
+    setHasStarted(true);
     void run();
   }, [set, apiKey, run]);
 
@@ -348,9 +365,10 @@ export default function SetScreen() {
         <Notice tone="error">Add your Gemini key in Settings before making cards.</Notice>
       ) : null}
 
-      {isGenerating && !started.current ? (
-        <Button label="Keep going" onPress={run} />
-      ) : null}
+      {/* Reads the state, never the ref — see the note on `started`. This is
+          the manual way in when the automatic one could not take it: arriving
+          with no key set, or coming back to a set left half-generated. */}
+      {isGenerating && !hasStarted ? <Button label="Keep going" onPress={run} /> : null}
 
       {/* The Home button is gone, and Delete no longer sits underneath where it
           was — the header back chevron handles navigation, and Delete lives in

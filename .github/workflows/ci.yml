@@ -1,0 +1,82 @@
+name: CI
+
+# Everything this repository uses to protect itself already existed — 447 unit
+# tests, a typecheck, and a boot check that executes the built bundle — and none
+# of it ran anywhere but on the owner's machine, when he remembered. The two
+# other workflows here are cron jobs; there was no push or pull_request check at
+# all.
+#
+# ---------------------------------------------------------------------------
+# WHY THE ORDER IS TYPECHECK -> EXPORT -> TEST
+#
+# tests/boot.test.ts runs against ./dist and is the only check that EXECUTES the
+# app. It exists because a react/react-dom version mismatch once shipped a blank
+# white page while the build succeeded, every test passed, and the URL returned
+# HTTP 200 — because nothing had ever run the bundle.
+#
+# On a clean checkout there is no ./dist, and the boot checks skip. That is
+# right for a developer and wrong here: a run that skips them reports success
+# for exactly the failure they were written to catch. So the export happens
+# BEFORE the tests, and REQUIRE_BUILD=1 turns a missing build into a failure
+# instead of a skip.
+#
+# The cost is that a broken unit test is reported after the export rather than
+# before it. That is the trade for the boot checks meaning something.
+# ---------------------------------------------------------------------------
+#
+# CREDENTIALS: none. This workflow uses no secrets at all.
+#
+# `expo export` inlines EXPO_PUBLIC_* at build time, and src/data/supabase.ts
+# throws at import if they are absent — which would fail the boot test for the
+# wrong reason. The placeholders below are deliberately not real: the boot check
+# asks whether the bundle executes and mounts, not whether it can reach a
+# database, and nothing in it makes a network call (fetch is stubbed in jsdom).
+# Using the real publishable key would add nothing and would put a credential in
+# a public repository's build logs for no gain.
+
+on:
+  push:
+  pull_request:
+
+# A second push to the same branch makes the first run pointless. Free-tier
+# minutes are not infinite and neither is the queue.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # Syntactically valid, obviously fake, and never contacted. See the note
+      # above on why these are not the real values.
+      EXPO_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Reads .nvmrc, so CI and the owner's machine cannot drift apart.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build the web bundle
+        run: npm run export:web
+
+      - name: Test
+        # REQUIRE_BUILD=1 makes tests/boot.test.ts FAIL rather than skip if the
+        # export above produced nothing. Without it a broken build would pass
+        # this job in silence.
+        env:
+          REQUIRE_BUILD: '1'
+        run: npm test

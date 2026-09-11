@@ -15,7 +15,7 @@ import {
 import { gradeFeedback, primeFeedback } from '../../../src/ui/feedback';
 import { space, type, useTheme } from '../../../src/ui/theme';
 import { listItems, type StudyItem } from '../../../src/data/items';
-import { recordAttempt } from '../../../src/data/attempts';
+import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
 import { fetchProfile } from '../../../src/data/profile';
 import { reviewStatesForSet } from '../../../src/data/review';
 import { reviewOrder } from '../../../src/core/schedule';
@@ -62,8 +62,16 @@ type Phase =
   | { state: 'wrong' };
 
 export default function Blanks() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  /**
+   * `?retry=1` means the same here as it does in Flashcards and Quiz: deal only
+   * the cards whose LAST answer was wrong or partly right, taken from the same
+   * `missedItemIds` pile, under the same query key. One retry pile, three ways
+   * of being asked about it — a second definition would drift from the first
+   * the moment either changed.
+   */
+  const { id, retry } = useLocalSearchParams<{ id: string; retry?: string }>();
   const setId = String(id);
+  const retryOnly = retry === '1';
   const router = useRouter();
   const t = useTheme();
 
@@ -89,6 +97,13 @@ export default function Blanks() {
     queryFn: () => reviewStatesForSet(setId),
   });
 
+  // Shared query key with Flashcards and Quiz, so opening retry from either of
+  // those and landing here is a cache read rather than another round trip.
+  const { data: missedSet } = useQuery({
+    queryKey: ['missed', setId],
+    queryFn: () => missedItemIds(setId),
+  });
+
   // Only so a card missed three times can be rephrased (Phase 8). Shared query
   // key, so this is a cache read rather than another round trip.
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
@@ -112,19 +127,37 @@ export default function Blanks() {
     return out;
   }, [allItems]);
 
+  /**
+   * What this screen can deal at all, before a level is chosen.
+   *
+   * In retry mode that is the blankable cards you got wrong last time. Counting
+   * and queueing both read from here rather than from `blanks`, so the numbers
+   * on the level buttons describe the deck the tap actually produces — which is
+   * the whole reason `countByLevel` counts blankable cards and not every card.
+   */
+  const dealable = useMemo(
+    () => (retryOnly ? blanks.filter((b) => missedSet?.has(b.item.id)) : blanks),
+    [blanks, retryOnly, missedSet],
+  );
+
   /** Counts over BLANKABLE items only — a button promising 12 that then shows 3 is a lie. */
   const countByLevel = useMemo(() => {
     const counts: Partial<Record<Level, number>> = {};
-    for (const b of blanks) counts[b.item.level] = (counts[b.item.level] ?? 0) + 1;
+    for (const b of dealable) counts[b.item.level] = (counts[b.item.level] ?? 0) + 1;
     return counts;
-  }, [blanks]);
+  }, [dealable]);
 
   // Due first, then never seen, then the rest — the same order the flashcard
   // deck uses, so a card's turn does not depend on which mode you opened.
+  //
+  // Retry mode is filtered and left in its natural order, matching Flashcards:
+  // the missed pile is already the answer to "what next", so re-sorting it by a
+  // schedule that says "tomorrow" for every card it just reset achieves nothing.
   const queue = useMemo(() => {
-    const atLevel = blanks.filter((b) => b.item.level === level);
+    const atLevel = dealable.filter((b) => b.item.level === level);
+    if (retryOnly) return atLevel;
     return reviewOrder(atLevel, (b) => schedules?.get(b.item.id), Date.now());
-  }, [blanks, level, schedules]);
+  }, [dealable, level, schedules, retryOnly]);
 
   /**
    * Open on a level that actually has blanks.
@@ -139,21 +172,23 @@ export default function Blanks() {
    * Runs once, and never again after the student picks a level themselves.
    */
   useEffect(() => {
-    if (levelChosen || blanks.length === 0) return;
+    if (levelChosen || dealable.length === 0) return;
     if ((countByLevel[level] ?? 0) > 0) return;
     const best = LEVELS.map((l) => l.key).reduce((a, b) =>
       (countByLevel[b] ?? 0) > (countByLevel[a] ?? 0) ? b : a,
     );
     if ((countByLevel[best] ?? 0) > 0) setLevel(best);
-  }, [blanks, countByLevel, level, levelChosen]);
+  }, [dealable, countByLevel, level, levelChosen]);
 
+  // Entering or leaving retry changes what every level contains, so the run
+  // starts over — the same rule Flashcards applies for the same reason.
   useEffect(() => {
     setIndex(0);
     setTyped('');
     setPhase({ state: 'asking' });
     setGot(0);
     setAnswered(0);
-  }, [level]);
+  }, [level, retryOnly]);
 
   useEffect(() => {
     primeFeedback();
@@ -220,7 +255,7 @@ export default function Blanks() {
 
   return (
     <Screen>
-      <Title>Fill in the blanks</Title>
+      <Title>{retryOnly ? 'Retry what you missed' : 'Fill in the blanks'}</Title>
 
       <View style={{ flexDirection: 'row', gap: 8 }}>
         {LEVELS.map((l) => (
@@ -239,10 +274,15 @@ export default function Blanks() {
 
       {queue.length === 0 ? (
         <Card>
-          <Body muted>No blanks at this level yet.</Body>
+          <Body muted>
+            {retryOnly
+              ? 'Nothing to retry here — you have not missed any of these at this level yet.'
+              : 'No blanks at this level yet.'}
+          </Body>
           {/* Explains itself rather than looking broken. Only cards whose answer
               is a short phrase written in the notes can have that phrase taken
-              out, and that is a minority of them. */}
+              out, and that is a minority of them — which is also why a retry
+              deck can come up empty while you have plenty to retry elsewhere. */}
           <Body muted>
             Blanks only work when a card's answer is a short phrase your notes actually use, so
             they come from some cards and not others. Try another level, or use Flashcards.

@@ -442,20 +442,44 @@ function SectionList({
  *
  * A single action, not a menu. The whole screen exists to end in a decision,
  * and offering three buttons would put that decision back on the student.
+ *
+ * ## It used to name a decision and then not take it
+ *
+ * All three branches called `router.push('/')`, so "Retry what you missed (12)"
+ * read the missed pile, counted it, put the number on a button and then dropped
+ * you on the list of sets to find it yourself. The screen's whole purpose is its
+ * last line and the last line did nothing — which is a worse failure than having
+ * no button, because the label is a promise.
+ *
+ * The destinations are the ones Home already uses (`/set/:id/flashcards?retry=1`
+ * for the missed pile), so there is one retry route in the app rather than two.
+ *
+ * **A missing target falls back to the set list rather than building a route
+ * from nothing.** `retryTarget` and `dueTarget` are null exactly when there is
+ * no set worth opening, and `/set/null/flashcards` would be a broken screen
+ * where the list is merely a plain one.
  */
 function NextStep({ data }: { data: DashboardData }) {
   const router = useRouter();
 
-  if (data.toRetry > 0) {
+  if (data.toRetry > 0 && data.retryTarget) {
     return (
       <Button
         label={`Retry what you missed (${data.toRetry})`}
-        onPress={() => router.push('/')}
+        onPress={() => router.push(`/set/${data.retryTarget}/flashcards?retry=1`)}
       />
     );
   }
-  if (data.dueToday > 0) {
-    return <Button label="Study what's due" onPress={() => router.push('/')} />;
+  if (data.dueToday > 0 && data.dueTarget) {
+    // Straight into the deck, not to the set screen: the flashcard queue is
+    // already ordered due-first (`reviewOrder`), so this lands on the card the
+    // button is talking about.
+    return (
+      <Button
+        label="Study what's due"
+        onPress={() => router.push(`/set/${data.dueTarget}/flashcards`)}
+      />
+    );
   }
   return <Button label="Go to your sets" variant="outline" onPress={() => router.push('/')} />;
 }

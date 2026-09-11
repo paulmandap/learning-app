@@ -58,6 +58,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Needed since the structure check stopped carrying its own list of
+      # tables and started reading supabase/migrations/ instead. Before that
+      # this job never touched the repository at all.
+      - uses: actions/checkout@v4
+
       - name: Dump schema and data
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
@@ -88,13 +93,46 @@ jobs:
             fi
           done
 
-          # review_state was added by migration 0005 AFTER this list was written,
-          # and was silently unchecked until 2026-09-05. A backup check that does
-          # not know about a table is exactly the "looks like protection" failure
-          # this step exists to prevent — so any future migration that adds a
-          # table must add it here too.
+          # ---------------------------------------------------------------
+          # THE LIST IS DERIVED, NOT MAINTAINED.
+          #
+          # This used to be a hardcoded list of eight table names with a comment
+          # saying "any future migration that adds a table must add it here
+          # too". That rule was written after review_state went unchecked for
+          # two days — and was then broken three more times. study_days (0009),
+          # chat_usage (0010) and notes (0012) all shipped without being added,
+          # while the step below printed "All eight tables are present" and
+          # passed. notes holds the only thing in this database a student wrote
+          # themselves, and nothing was verifying it came across.
+          #
+          # A rule that depends on remembering has now failed four times out of
+          # four, so it is gone. supabase/migrations/ is the definition of what
+          # this database contains, and every table in it is created with the
+          # same form, so the list is read from there each run and cannot fall
+          # behind. Only `public.` objects from this repo's own migrations are
+          # considered, which is what keeps Supabase's internal auth/storage
+          # tables out of it.
+          # ---------------------------------------------------------------
+          created=$(grep -hoiE 'create table( if not exists)? +public\.[a-z0-9_]+' \
+            supabase/migrations/*.sql | sed -E 's/.*public\.//' | sort -u)
+
+          # A table a later migration dropped is not expected in the dump.
+          # Nothing drops one today; this is here so that doing so does not
+          # start failing the backup for the wrong reason.
+          dropped=$(grep -hoiE 'drop table( if exists)? +public\.[a-z0-9_]+' \
+            supabase/migrations/*.sql | sed -E 's/.*public\.//' | sort -u)
+          tables=$(comm -23 <(echo "$created") <(echo "$dropped"))
+
+          # An empty list would pass every check below without testing anything —
+          # the same silent-success failure in a new costume. If the derivation
+          # ever finds nothing, that is a broken check, not a clean database.
+          if [ -z "$tables" ]; then
+            echo "::error::No tables found in supabase/migrations/ — the check itself is broken."
+            exit 1
+          fi
+
           missing=0
-          for t in profiles study_sets documents document_pages study_items attempts heartbeat review_state; do
+          for t in $tables; do
             if ! grep -qi "CREATE TABLE[^;]*\"\?$t\"\?" schema.sql; then
               echo "::error::schema.sql has no CREATE TABLE for $t"
               missing=1
@@ -102,18 +140,26 @@ jobs:
           done
           [ "$missing" -eq 0 ] || exit 1
 
-          # The Phase 8 columns ride on study_items rather than adding a table,
-          # so they are checked by name — a dump missing them would restore a
-          # database the current app cannot query.
-          for c in variant_prompt rubric_verified; do
+          # Columns added to an existing table by a later migration, derived the
+          # same way. A dump missing one would restore a database the current app
+          # cannot query — which is how 0007's two columns came to be checked by
+          # name here in the first place.
+          columns=$(grep -hoiE 'add column( if not exists)? +[a-z0-9_]+' \
+            supabase/migrations/*.sql | sed -E 's/.*[[:space:]]//' | sort -u)
+
+          for c in $columns; do
             if ! grep -qi "$c" schema.sql; then
-              echo "::error::schema.sql has no $c column on study_items"
+              echo "::error::schema.sql has no $c column"
               exit 1
             fi
           done
 
           echo "schema.sql $(wc -c < schema.sql) bytes, data.sql $(wc -c < data.sql) bytes"
-          echo "All eight tables and the Phase 8 columns are present."
+          # Says WHAT was checked, not how many. The old message named a count
+          # that had been wrong for three migrations, and a number nobody can
+          # check against anything is how that went unnoticed.
+          echo "Tables verified ($(echo "$tables" | wc -w)): $(echo $tables)"
+          echo "Columns verified ($(echo "$columns" | wc -w)): $(echo $columns)"
 
       - name: Check the rows actually came across
         env:

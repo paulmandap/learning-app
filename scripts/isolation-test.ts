@@ -6,10 +6,13 @@
  * because RLS is enforced by Postgres, not by anything we could unit test.
  *
  * Coverage, each asserted separately:
- *   - every base table, including review_state (Phase 6)
+ *   - every user-scoped base table: study_sets, documents, document_pages,
+ *     study_items, attempts, review_state (Phase 6), notes (0012),
+ *     chat_usage (0010) and study_days (0009)
  *   - item_stats and topic_stats  <-- the views, tested in their own right
  *   - storage objects under A's prefix
  *   - profiles.gemini_api_key specifically
+ *   - heartbeat: direct writes refused, the RPC accepted
  *
  * The views matter most. A Postgres view runs as its OWNER by default, which
  * bypasses RLS on the tables underneath. Testing only base tables would pass
@@ -50,6 +53,16 @@ if (!creds.a.email || !creds.a.password || !creds.b.email || !creds.b.password) 
   );
   process.exit(2);
 }
+
+/**
+ * The day this test writes a streak row on.
+ *
+ * Deliberately impossible: the app did not exist in 2000, so a row on this day
+ * is unambiguously the test's and nothing else's. Seeding today instead would
+ * put a synthetic day inside A's real streak and the cleanup would then delete
+ * a day they had actually studied.
+ */
+const STUDY_DAY_PROBE = '2000-01-01';
 
 let failures = 0;
 let checks = 0;
@@ -189,6 +202,22 @@ async function main() {
     messages: 1,
   });
 
+  // Phase 9b: A's streak days — the last user-scoped table this test did not
+  // cover. It survives deleting a set on purpose (it references only
+  // auth.users), so it is the one record here that outlives everything else a
+  // student might tidy away, and a leak would expose exactly when someone
+  // studies and how long they have kept it up.
+  //
+  // Seeded on a SENTINEL DAY rather than today, which is the difference between
+  // a test and a bug. `study_days` is real streak data on this account, so a
+  // row dated today would join A's actual run and the cleanup below would then
+  // delete a day they really studied. No day in 2000 can be genuine, the unique
+  // (user_id, day) constraint makes a re-run idempotent, and deleting exactly
+  // that day cannot touch anything real.
+  await A.client
+    .from('study_days')
+    .upsert({ user_id: A.userId, day: STUDY_DAY_PROBE, answers: 1 }, { onConflict: 'user_id,day' });
+
   const storagePath = `${A.userId}/${doc?.id ?? 'x'}/probe.txt`;
   const upload = await A.client.storage
     .from('documents')
@@ -215,6 +244,10 @@ async function main() {
     // Phase 9c. No content, but a per-day record of how much someone leaned on
     // the assistant.
     'chat_usage',
+    // Phase 9b. When someone studies and how long they have kept it up. The
+    // only user-scoped table that deliberately survives deleting a set, so it
+    // is also the longest-lived record of a person's habits in the database.
+    'study_days',
   ] as const;
 
   for (const table of tables) {
@@ -318,6 +351,8 @@ async function main() {
     .from('chat_usage')
     .delete()
     .eq('day', new Date().toISOString().slice(0, 10));
+  // Exact, and safe because no real streak day can fall on the sentinel.
+  await A.client.from('study_days').delete().eq('day', STUDY_DAY_PROBE);
   const { error: sweepError } = await A.client
     .from('study_sets')
     .delete()

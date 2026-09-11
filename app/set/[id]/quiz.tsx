@@ -353,8 +353,14 @@ export default function Quiz() {
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {LEVELS.map((l) => (
             <View key={l.key} style={{ flex: 1 }}>
+              {/* The count was computed and then not shown — see countByLevel,
+                  whose own note explains why a button that promises 10 and
+                  deals 3 is a lie. Flashcards and Blanks both carried theirs;
+                  this was the one segment that did not. Only rendered outside
+                  retry mode, so the count over `quizzable` is what the tap
+                  actually deals. */}
               <Button
-                label={l.label}
+                label={`${l.label} ${countByLevel[l.key] ?? 0}`}
                 variant={level === l.key ? 'primary' : 'secondary'}
                 onPress={() => setLevel(l.key)}
               />

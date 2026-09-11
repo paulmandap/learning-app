@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import {
+  busiestSet,
   dueForecast,
   masteryCounts,
   schedulesForVisibleCards,
@@ -55,6 +56,17 @@ export interface DashboardData {
   usage: UsageSummary;
   /** Cards falling due over the week ahead, starting today. */
   forecast: ForecastDay[];
+  /**
+   * Where "Retry what you missed" should go — the set holding most of the
+   * missed pile, or null when there is nowhere valid to send anyone.
+   *
+   * A count on this screen spans every set; a button has to lead to one. Null
+   * is a real answer and the caller must not navigate on it: the alternative is
+   * a route built from an id that is not there.
+   */
+  retryTarget: string | null;
+  /** Where "Study what's due" should go, chosen the same way. */
+  dueTarget: string | null;
 }
 
 export const EMPTY_DASHBOARD: DashboardData = {
@@ -66,10 +78,13 @@ export const EMPTY_DASHBOARD: DashboardData = {
   totalAttempts: 0,
   usage: { usedBytes: 0, fraction: 0, worthMentioning: false },
   forecast: [],
+  retryTarget: null,
+  dueTarget: null,
 };
 
 interface StatsRow {
   study_item_id: string;
+  study_set_id: string;
   attempts: number;
   misses: number;
   partials: number;
@@ -98,10 +113,17 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
     // references only auth.users. It is also far cheaper: one small row per day
     // studied, instead of every answer ever recorded.
     supabase.from('study_days').select('day, answers'),
-    supabase.from('review_state').select('study_item_id, reps, interval_days, lapses, due_at'),
+    // study_set_id rides along on both of these so the "what next" button has
+    // somewhere to go. Both already carry the column, so this is two more
+    // fields on queries that were being made anyway, not a sixth round trip.
+    supabase
+      .from('review_state')
+      .select('study_item_id, study_set_id, reps, interval_days, lapses, due_at'),
     // Runs with security_invoker, so RLS applies and this is only ever the
     // caller's own history (the isolation test asserts that explicitly).
-    supabase.from('item_stats').select('study_item_id, attempts, misses, partials, last_result'),
+    supabase
+      .from('item_stats')
+      .select('study_item_id, study_set_id, attempts, misses, partials, last_result'),
     supabase.from('study_items').select('id, section_title').eq('hidden', false),
     storageUsedBytes(),
   ]);
@@ -136,6 +158,7 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
   // --- mastery, and what is due -------------------------------------------
   const scheduleRows = (schedules.data ?? []) as {
     study_item_id: string;
+    study_set_id: string;
     reps: number;
     interval_days: number;
     lapses: number;
@@ -158,12 +181,19 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
   // promised on this screen against a handful he could open.
   const visibleItemIds = new Set(itemRows.map((i) => i.id));
   const liveSchedules = schedulesForVisibleCards(
-    scheduleRows.map((r) => ({ studyItemId: r.study_item_id, dueAt: Date.parse(r.due_at) })),
+    scheduleRows.map((r) => ({
+      studyItemId: r.study_item_id,
+      studySetId: r.study_set_id,
+      dueAt: Date.parse(r.due_at),
+    })),
     visibleItemIds,
   );
 
-  const dueToday =
-    schedules.error || items.error ? 0 : liveSchedules.filter((s) => s.dueAt <= today).length;
+  const dueNow = liveSchedules.filter((s) => s.dueAt <= today);
+  const dueToday = schedules.error || items.error ? 0 : dueNow.length;
+  // Null when nothing is due, which is the same condition that hides the
+  // button — so the two cannot disagree.
+  const dueTarget = schedules.error || items.error ? null : busiestSet(dueNow);
 
   // The week ahead, from the same rows the mastery bands come from — no extra
   // query. Overdue cards fold into today inside dueForecast.
@@ -196,9 +226,23 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
   // Keyed on the LAST result rather than on ever having missed it, matching
   // missedItemIds — something you got wrong once and have since learned should
   // leave the pile.
-  const toRetry = stats.error
-    ? 0
-    : statRows.filter((s) => s.last_result === 'incorrect' || s.last_result === 'partial').length;
+  //
+  // Restricted to cards the app would actually deal, for the reason §21 records
+  // about due counts: a stat row outlives the card it describes, so a reported
+  // card kept inflating this number while every deck refused to show it. That
+  // mattered less when the figure was decoration; it matters now that a button
+  // promises to open it. `retryItems` is what the retry deck will contain, so
+  // the count, the destination and the deck cannot drift apart.
+  const retryItems = stats.error
+    ? []
+    : statRows.filter(
+        (s) =>
+          visibleItemIds.has(s.study_item_id) &&
+          (s.last_result === 'incorrect' || s.last_result === 'partial'),
+      );
+
+  const toRetry = retryItems.length;
+  const retryTarget = busiestSet(retryItems.map((s) => ({ studySetId: s.study_set_id })));
 
   return {
     streak,
@@ -209,5 +253,7 @@ export async function fetchDashboard(now: number = Date.now()): Promise<Dashboar
     totalAttempts,
     usage: summariseUsage(usedBytes),
     forecast,
+    retryTarget,
+    dueTarget,
   };
 }

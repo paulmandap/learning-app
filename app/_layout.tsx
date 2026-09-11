@@ -105,6 +105,12 @@ function RootNavigator() {
           name="set/[id]/blanks"
           options={{ title: 'Fill in the blanks', ...backable }}
         />
+        {/* Registered for the same reason as the routes above: without it the
+            header reads "+not-found". `backable` matters more here than
+            anywhere else — the usual way to reach this screen is a deep link
+            into a stack with no history, and HeaderBackButton is what turns
+            that into a way out rather than a dead end. */}
+        <Stack.Screen name="+not-found" options={{ title: 'Not found', ...backable }} />
       </Stack>
       {showAssistant ? <StudyAssistant /> : null}
     </View>

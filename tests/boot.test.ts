@@ -13,11 +13,35 @@ import { describe, expect, it } from 'vitest';
  * Runs against ./dist, so it only means something after `expo export`. It is
  * skipped rather than failed when dist is absent, so `vitest run` on a clean
  * checkout is not a false alarm.
+ *
+ * ## REQUIRE_BUILD, and why skipping is not acceptable everywhere
+ *
+ * Skipping is right for a developer who has not built yet and wrong for CI:
+ * these five checks exist because a blank white page reached production while
+ * every other check passed, and a run that quietly skips them reports success
+ * for exactly the thing they were written to catch. Silently doing nothing is
+ * the failure mode this project has paid for four times.
+ *
+ * So the skip stays local and `REQUIRE_BUILD=1` turns a missing build into a
+ * failure. The CI workflow sets it and runs `expo export` first. Nothing about
+ * the checks themselves changes — only whether their absence is allowed to
+ * pass unnoticed.
  */
 
 const DIST = 'dist';
 const BUNDLE_DIR = join(DIST, '_expo/static/js/web');
 const hasBuild = existsSync(join(DIST, 'index.html')) && existsSync(BUNDLE_DIR);
+const requireBuild = process.env.REQUIRE_BUILD === '1';
+
+describe.runIf(requireBuild)('the build these checks need', () => {
+  it('is there, so the boot checks below actually ran', () => {
+    expect(
+      hasBuild,
+      `REQUIRE_BUILD=1 but ${DIST} has no bundle — run \`npm run export:web\` before the tests. ` +
+        'Skipping here would report a pass for the checks that catch a white screen.',
+    ).toBe(true);
+  });
+});
 
 describe.skipIf(!hasBuild)('built web bundle', () => {
   it('has exactly one React version (mismatch = blank page)', () => {

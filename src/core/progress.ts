@@ -125,6 +125,39 @@ export function schedulesForVisibleCards<T extends { studyItemId: string }>(
   return schedules.filter((s) => visibleItemIds.has(s.studyItemId));
 }
 
+/**
+ * Which set holds the most of something — the set to send someone to.
+ *
+ * ## Why the dashboard needs this
+ *
+ * Progress counts across every set at once, which is right for a number and
+ * useless for a button: "Retry what you missed (12)" has to lead somewhere, and
+ * the twelve may be spread over four sets. This picks the one worth opening.
+ *
+ * Most-of-them rather than most-recent, which is the opposite of Home's
+ * `continueTarget`, and deliberately so. Home answers *where was I*; this
+ * answers *where is the work*. A student who studied one set this morning and
+ * has a backlog in another should be sent to the backlog.
+ *
+ * Ties break on the set id so the same data always produces the same button.
+ * Returns null for an empty list, which the caller must treat as "no valid
+ * destination" rather than navigating anyway.
+ */
+export function busiestSet(rows: { studySetId: string }[]): string | null {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.studySetId, (counts.get(row.studySetId) ?? 0) + 1);
+
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [setId, count] of counts) {
+    if (count > bestCount || (count === bestCount && best !== null && setId < best)) {
+      best = setId;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 /** Days shown in the forecast. A week is as far as a student plans. */
 export const FORECAST_DAYS = 7;
 

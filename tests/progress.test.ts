@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  busiestSet,
   describeForecast,
   dueForecast,
   forecastDayLabel,
@@ -359,5 +360,50 @@ describe('sectionSplit', () => {
 
   it('returns nothing at all for an unstudied set', () => {
     expect(sectionSplit([])).toEqual({ strong: [], weak: [], tooEarly: 0 });
+  });
+});
+
+/*
+ * busiestSet — where the dashboard's one button sends you.
+ *
+ * The bug this guards: every branch of NextStep called router.push('/'), so
+ * "Retry what you missed (12)" counted the pile, printed the number and then
+ * dropped the student on the list of sets to find it themselves. A count that
+ * spans every set has to be narrowed to one before it can be a destination, and
+ * `null` has to stay a real answer — a route built from a missing id is a
+ * broken screen where the set list is merely a plain one.
+ */
+describe('busiestSet', () => {
+  it('picks the set holding most of the work', () => {
+    expect(
+      busiestSet([
+        { studySetId: 'a' },
+        { studySetId: 'b' },
+        { studySetId: 'b' },
+        { studySetId: 'c' },
+      ]),
+    ).toBe('b');
+  });
+
+  it('returns null when there is nowhere to send anyone', () => {
+    expect(busiestSet([])).toBeNull();
+  });
+
+  it('still answers when every row is the same set', () => {
+    expect(busiestSet([{ studySetId: 'only' }, { studySetId: 'only' }])).toBe('only');
+  });
+
+  it('breaks ties the same way every time, whatever the row order', () => {
+    const rows = [{ studySetId: 'zeta' }, { studySetId: 'alpha' }];
+    expect(busiestSet(rows)).toBe('alpha');
+    expect(busiestSet([...rows].reverse())).toBe('alpha');
+  });
+
+  it('prefers the bigger pile over the alphabetically earlier set', () => {
+    // Guards the tie-break from swallowing the actual comparison: 'zeta' wins
+    // on count even though 'alpha' would win a tie.
+    expect(
+      busiestSet([{ studySetId: 'alpha' }, { studySetId: 'zeta' }, { studySetId: 'zeta' }]),
+    ).toBe('zeta');
   });
 });
