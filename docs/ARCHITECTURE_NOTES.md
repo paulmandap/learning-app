@@ -3166,8 +3166,12 @@ however long that takes. Both changes are written to be correct in either state:
   with the view still present; it will report it as retired once dropped.
 
 That is the same tolerance `recordAttempt` keeps for `23514` and `notes` keeps
-for `PGRST205`, and it is why **migration 0015 is safe to run whenever** — it is
-not applied yet.
+for `PGRST205`, and it is why **migration 0015 is safe to run whenever**.
+
+> **Applied since. Verified against the live database on 2026-09-12 (§28):**
+> `study_items.form` answers `42703 column does not exist` and `topic_stats`
+> answers `PGRST205`. The sentences below that say it is unapplied were written
+> before that and are corrected here rather than rewritten in place.
 
 ### 26.6 What was looked at, and what could not be
 
@@ -3236,7 +3240,8 @@ is an owner's decision.
 against a fresh bundle · the gate measured by simulation, the rejected setting
 recorded, and the family-wise rate measured after review · trend run against the
 live database · isolation **20/20** · seeded study days cleared afterwards.
-**Migration 0015 written and NOT applied. Not deployed. No restore drill.**
+**Migration 0015 written and NOT applied** *(applied and verified since — see
+§28)*. **Not deployed. No restore drill.**
 
 ## 27. Phase D — the deck deals what is going worst (2026-09-12)
 
@@ -3346,7 +3351,304 @@ mutation is not a backup** — later runs assert the file is non-empty first.
 **Verified:** typecheck clean · **556 tests** (534 before; +22) · `expo export` ·
 boot **6/6** against a fresh bundle · both guards mutation-tested and the source
 confirmed restored · both orderings compared on the live database · screenshotted
-and looked at. **Migration 0015 still not applied. Not deployed. No restore drill.**
+and looked at. **Migration 0015 still not applied** *(applied and verified
+since — see §28)*. **Not deployed. No restore drill.**
+
+## 28. Phase E1 — question-type control, measured and deferred (2026-09-12)
+
+The roadmap asked to restore `study_items.form` with a deterministic validator
+per form. **No feature was built.** This section is the experiment that decided
+that; the conclusion is in §28.10 and the feature is deferred, not abandoned.
+The only production change is a prompt cleanup, measured before it was made
+(§28.9).
+
+### 28.1 The premise was wrong in a way that mattered
+
+`GENERATE_RESPONSE_SCHEMA` has **no `form` property**. Gemini structured output
+emits only schema fields, so the model reads *"Allowed forms: definition,
+question and answer, compare, process, cause and effect, application"* and has
+nowhere to answer. **No card has ever claimed a form.** That is why 0015 found
+the column null on every row — not drift, a field that was never wired.
+
+So the roadmap's framing — "nothing checks that a card matches the form it
+claims" — was too generous. There was no claim to check.
+
+Two more things were available for free, before any model call: `application`
+restates `level: apply`, which the app already has and already shows counts
+for, and a definition *is* a question and answer. The six were never a
+partition.
+
+### 28.2 Migration 0015 is applied, and the notes said otherwise
+
+Checked against the live database at the start of this work: `study_items.form`
+→ `42703 column does not exist`, `topic_stats` → `PGRST205`. §26.5 and §27.5
+both still read "not applied". Corrected in place.
+
+### 28.3 The instrument, and the three failures it had to tell apart
+
+`src/core/form.ts` implements one rule per candidate label. **All six**,
+including the two hypothesised to fail — a strawman for either would have
+guaranteed the hypothesis confirmed. No rule reads `level`, or the redundancy
+question would answer itself.
+
+A negative result had to be attributable, so three failures were separated:
+
+- **TAXONOMY** — the labels carve nothing. Measured by how often a human
+  labeller answers *several* or *none*.
+- **RULE** — the distinction is real and the surface heuristic cannot see it.
+- **MODEL** — it cannot produce the forms, or cannot self-report them.
+
+The instrument found its own first false positive before any data was
+collected: `isCompare` accepted *"the storage tissue lying between the
+epidermis and the vascular cylinder"*, because a bare `between … and …` is a
+location at least as often as a contrast. The comparative cue is now required.
+
+### 28.4 The real deck is monotonous — E1.1, zero model calls
+
+The 28 stored cards, classified deterministically:
+
+```
+question and answer   23   82.1%
+definition             6   21.4%
+cause and effect       5   17.9%
+application            3   10.7%
+compare                0
+process                0
+claimed by nothing     0
+claimed by several     9   32.1%
+```
+
+So there is a problem in principle. But this corpus is labelled-figure plant
+notes, which can only legitimately yield definitions and part/function pairs —
+a process card from them would be invented content, which HARD RULE 1 forbids.
+**Measuring form variety here measures the notes.** That is what the ceiling
+run exists to control for.
+
+### 28.5 The first ceiling run was not a controlled comparison
+
+Arms A1/A2 were served by `gemini-3.5-flash-lite` (rung 4) and arm B by
+`gemini-3.8-flash` (rung 3), because availability rotates and `LIGHT_LADDER`
+falls through silently. The distance between them measured **the model as much
+as the treatment**. It reported "asking for a form moved the output beyond
+run-to-run noise" off a B-vs-A of 0.250 against a floor of 0.220 — where the
+floor was a *single* A-vs-A pair, which is one sample of a random quantity and
+not a floor at all.
+
+Both faults are now refused by the probe: it records the served model, declares
+`NOT COMPARABLE` when arms differ, and `NOT DECIDABLE` on fewer than two
+within-condition pairs. **Pinning defeats the fallback ladder**, so a pinned run
+dies when that rung is busy — `gemini-3.8-flash` was, and the real run used
+`gemini-3.5-flash-lite`.
+
+### 28.6 The controlled run — 68 items, one model, three runs per arm
+
+Synthetic notes containing an explicit three-step process, a real comparison
+and a causal chain: the model's best case. Six arms on `gemini-3.5-flash-lite`,
+2026-09-12. Nothing written to any database.
+
+**Supply is not the problem. 35/35 items carried a form when asked** — spread
+across definition 9, cause and effect 8, application 8, compare 5, process 4,
+question and answer 1. The model can choose a form and does.
+
+**Asking for a form did not change the cards.** Within-condition distances
+(A-A and B-B) ran 0.128–0.353; across-condition (A-B) ran 0.154–0.392. Complete
+overlap.
+
+```
+=> WITHIN NOISE: asking for a form did not measurably change what came back.
+```
+
+The model relabels; it does not rewrite. **That alone is close to decisive: a
+control that changes no output is not a control.**
+
+### 28.7 Blind labels — the numbers that decide it
+
+All 68 items were labelled from `items.jsonl`, which carries no claim and no
+rule output, before `claims.jsonl` was opened.
+
+```
+carried several forms  15/68   22%
+carried none            0/68    0%
+
+human labels: cause and effect 36 · application 18 · question and answer 12
+              compare 10 · definition 6 · process 1
+```
+
+| form | coverage | true-form | non-form | verdict |
+|---|---|---|---|---|
+| definition | 33% (6) | 50% | 2% | **UNMEASURED** — under the 10-item floor |
+| question and answer | 100% (12) | — | **32%** | fails NON-FORM |
+| compare | 70% (10) | 60% | 0% | fails COVERAGE |
+| process | 0% (1) | — | 0% | **UNMEASURED** — under the floor |
+| cause and effect | 67% (36) | 50% | 0% | fails COVERAGE |
+| application | **11%** (18) | 13% | 2% | fails COVERAGE |
+
+**Every measured rule fails, and all but one fail on COVERAGE, not on false
+alarms.** Non-form acceptance is 0–2% almost everywhere. The heuristics are
+precise and blind — `application` recognises 2 of 18 legitimate examples. This
+is exactly the failure a precision-only gate would have hidden, which is why
+coverage was added as a first-class metric.
+
+**Model self-report: 23/35 (66%) agreed with a human label.** Its errors are
+structured, not random:
+
+```
+ 5  claimed definition       -> humans said question and answer
+ 4  claimed process          -> humans said cause and effect
+ 2  claimed definition       -> humans said cause and effect
+ 1  claimed question and answer -> humans said definition
+```
+
+**Intervention rate 71%** (25/35). Relabelling seven claims in ten, on rules
+measured to be blind, is not a validator — it is noise with a schema.
+
+### 28.8 What each hypothesis did
+
+- **H1 — `question and answer` is a catch-all.** *Supported, not proven.* Its
+  rule was written to yield to the structural forms and still accepted 32% of
+  items that were not it, the worst non-form rate measured. But humans used it
+  for a coherent 12 items, so the LABEL is real even where the rule over-fires.
+- **H2 — `application` is redundant with `level: apply`.** **Confirmed, 97%.**
+  All 18 items labelled `application` were `level: apply`; only 2 apply-tier
+  items were not. **The `level` dimension the app already has captures
+  essentially every application-labelled item**, and it is already exclusive
+  and already carries counts on the level buttons. Separately, HARD RULE 1
+  forbids outside knowledge, which makes genuine transfer to a new case hard
+  even to *define* from source-grounded material: under a strict reading —
+  transfer to a case the notes do not already state — all 18 collapse to recall
+  or causal inference wearing scenario dressing, and the count is **0**. One
+  definitional choice moves the label by 26% of the corpus. **No separate
+  application form is to be built.**
+- **H3 — `definition` and `question and answer` are not separable.** *Refuted
+  for humans, confirmed for the model.* The blind labelling separated them
+  without hesitation (6 vs 12, no ambiguity marked); the model confused them in
+  6 of its 12 errors.
+
+**On `process`, narrowly stated.** One human label in 68, from notes containing
+an explicit *first / then / finally* sequence, and all four of the model's
+`process` claims were wrong. What this supports is that **process cards are
+poorly supported and poorly distinguishable under the current one-question,
+one-short-answer format** — not that process questions are inherently
+impossible. A format that allowed a multi-step answer was never tested and is
+not ruled out by anything measured here.
+
+### 28.9 The dead `Allowed forms:` line, checked then removed
+
+The line had never had a field to answer it, but removing text from a prompt
+can move output, so it was measured before deletion rather than after. Six runs
+on one pinned model (`gemini-3.5-flash-lite`, 2026-09-12), line present vs line
+removed, everything else identical.
+
+The instrument is deliberately **not** this phase's own classifiers — E1.4
+measured them as precise but blind, and an instrument that fails its own
+coverage gate is a poor way to detect a change. `kind`, `level` and item count
+come straight from the model:
+
+```
+items per run      L 11.7          N 11.3
+kind               total variation 0.015
+level              total variation 0.020
+label distribution within 0.093-0.280 · across 0.121-0.455  (overlapping)
+```
+
+**No measurable regression.** The line is removed from `buildGeneratePrompt`,
+along with the now-unused `allowedForms` parameter and the `ALLOWED_FORMS`
+export it fed. The vocabulary's single home is now `CANDIDATE_FORMS` in
+`src/core/form.ts`, on no code path. `tests/form.test.ts` pins both the list
+and the absence of the instruction, and the second guard was mutation-tested by
+writing the line back.
+
+The probe's `--inert` mode will now correctly refuse to run — it asserts the
+line is present before stripping it, and it is gone. That is the guard working,
+and the mode is kept as the record of how the check was made.
+
+### 28.10 Conclusion
+
+> **The six-form taxonomy remains potentially useful as a descriptive
+> vocabulary, but the current generation pipeline does not demonstrate
+> meaningful controllability by form, and the tested deterministic validators
+> are insufficient for enforcement. Therefore question-type enforcement does
+> not ship and is deferred.**
+
+E1 found **two independent problems**, and the order matters:
+
+1. **Requesting a form does not produce materially different card content.**
+   Across-condition distances sat inside the within-condition range. The model
+   relabels; it does not rewrite. **This is the primary product conclusion, and
+   a better validator would not touch it** — there is no demonstrated control
+   to enforce.
+2. The deterministic validators have poor coverage despite low false
+   acceptance. Precise and blind.
+
+Characterising the result as "the rules failed on a fixable axis" would be
+wrong: fixing the rules addresses only the second problem.
+
+**What is decided:**
+
+- Question-type enforcement does not ship. Deferred.
+- `study_items.form` is not restored. No migration 0016.
+- No validators on the production path. No E2.
+- No separate `application` form — `level: apply` already captures it.
+- `compare` (70% coverage / 0% non-form) and `cause and effect` (67% / 0%)
+  are kept as **future candidates only**, not implemented.
+- **If this is ever revisited, the first experiment must test whether
+  generation can be made materially different by form — before any validator
+  is designed.** Designing validators first is what this phase did, and the
+  controllability question turned out to sit upstream of all of it.
+
+### 28.11 What this did not establish
+
+- **Not a statistically powered study.** 68 items, ~10 per class at the floor,
+  one rater. The gates are engineering thresholds for a build decision, not
+  confidence claims.
+- **Single rater, no true cold re-label.** The strict/loose split on
+  `application` (18 vs 0) is reported as the honest measure of label
+  instability instead of a fabricated re-labelling pass.
+- **E1.3 against real notes was never run, and was not justified.** E1.2
+  answered the feasibility question: forms were supplied 35/35 and still moved
+  nothing beyond run-to-run noise. A second corpus changes which *content* is
+  available, not whether requesting a form controls generation — the finding
+  that decided the phase. Spending real notes and quota on it would have
+  refined a measurement that had already stopped being the question.
+- **The planned separate `level`-only arm was not run.** H2 was answered from
+  the level field already on every generated item — 97% — which is the same
+  question answered with data in hand rather than another six model calls.
+- Nothing was checked by eye; there is no UI in this phase.
+
+### 28.12 The record, in one place
+
+```
+supply                35/35 items carried a form when asked        (100%)
+model self-report     23/35 agreed with a blind human label         (66%)
+controllability       within-condition 0.128-0.353
+                      across-condition 0.154-0.392   -> overlapping
+validator coverage    q&a 100% · compare 70% · cause 67% · application 11%
+                      definition 33% (n=6) · process 0% (n=1)  -> both UNMEASURED
+non-form acceptance   q&a 32% · compare 0% · cause 0% · application 2% · definition 2%
+intervention rate     25/35 claims the rules would relabel          (71%)
+taxonomy              several forms 15/68 (22%) · no form 0/68 (0%)
+application vs level  18/18 application items were level: apply     (97% agreement)
+process               1/68 human labels; all 4 model claims wrong
+inert-line removal    kind TV 0.015 · level TV 0.020 -> no regression
+```
+
+**Two probe mistakes, both corrected.** The first ceiling run compared arms
+served by *different models* (§28.5) and called a 0.250-vs-0.220 gap an effect
+when the floor was a single sample. The probe now records the served model,
+reports `NOT COMPARABLE` when arms differ, and `NOT DECIDABLE` on fewer than
+two within-condition pairs. The `stripFormsLine` mutation likewise throws
+rather than silently matching nothing, because a no-op there would have
+manufactured the "no regression" result it was run to test.
+
+**Verified:** typecheck clean · **584 tests** (556 before; +28) · `expo export`
+· boot **6/6** against a fresh bundle · all five new guards mutation-tested and
+the sources confirmed restored by checksum, each backup verified non-empty
+*before* its mutation (§27.5) · 68 items generated on one pinned model and
+labelled blind, plus 69 more for the inert-line control · **no database writes
+and nothing to clean up** · migration 0015 confirmed applied and §26.5/§27.5
+corrected. **Phase E closed. Nothing shipped beyond the prompt cleanup. Not
+deployed. No restore drill.**
+
 
 ## Sources
 

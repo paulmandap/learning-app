@@ -21,7 +21,6 @@ import {
 import { parseRetryAfter, RateLimitedError } from '../core/queue';
 import { MAX_REPLY_TOKENS, type AssistantContext } from '../core/chat';
 import {
-  ALLOWED_FORMS,
   buildGeneratePrompt,
   buildGradePrompt,
   buildChatPrompt,
@@ -241,7 +240,6 @@ export class GeminiBrowserProvider implements AIProvider {
       sectionTitle: input.sectionTitle,
       budget: input.budget,
       pagesText: input.sectionText,
-      allowedForms: [...ALLOWED_FORMS],
     });
 
     const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {

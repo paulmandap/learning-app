@@ -36,9 +36,8 @@ export function buildGeneratePrompt(input: {
   sectionTitle: string;
   budget: TierBudget;
   pagesText: string;
-  allowedForms: string[];
 }): string {
-  const { sectionTitle, budget, pagesText, allowedForms } = input;
+  const { sectionTitle, budget, pagesText } = input;
   const total = budget.remember + budget.understand + budget.apply;
 
   return `You write study questions from a student's own notes.
@@ -49,8 +48,6 @@ Write at most ${total} items from the notes below:
 - ${budget.remember} at level "remember" — recall a fact, definition or name.
 - ${budget.understand} at level "understand" — explain, compare, or say why something follows.
 - ${budget.apply} at level "apply" — use the idea on a new case or scenario.
-
-Allowed forms: ${allowedForms.join(', ')}.
 
 Item kinds:
 - "flashcard": a prompt and a short answer.
@@ -107,15 +104,22 @@ NOTES:
 ${pagesText}`;
 }
 
-/** Forms allowed by §3.2.3. */
-export const ALLOWED_FORMS = [
-  'definition',
-  'question and answer',
-  'compare',
-  'process',
-  'cause and effect',
-  'application',
-] as const;
+// §3.2.3's ALLOWED_FORMS list used to live here and be sent with every
+// generation. It is gone, and this note is what you are looking for if you
+// came here to find it.
+//
+// It never had a field to answer it: GENERATE_RESPONSE_SCHEMA has no `form`
+// property, so structured output could not carry one and no card ever claimed
+// a form (NOTES §28.1). The instruction was dead text for its whole life.
+//
+// Removed after a controlled check rather than on the reasoning alone — six
+// runs on one pinned model, line present vs line removed, 2026-09-12: `kind`
+// total variation 0.015, `level` 0.020, and the across-condition label
+// distances sat inside the within-condition range. No measurable regression
+// (NOTES §28.9).
+//
+// The vocabulary now lives in src/core/form.ts as CANDIDATE_FORMS, where E1
+// measured it. It is a descriptive vocabulary and is on no code path.
 
 /**
  * Render a section's pages with [PAGE n] markers and NUMBERED SENTENCES.
