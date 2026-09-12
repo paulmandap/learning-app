@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, type Db } from './supabase';
 import type { Plan } from '../core/planner';
 import type { DropSummary } from '../core/validate';
 
@@ -50,8 +50,8 @@ async function currentUserId(): Promise<string> {
  * match what the study screens actually show — a reported card should not still
  * be counted on the home screen.
  */
-export async function listSets(): Promise<StudySet[]> {
-  const { data, error } = await supabase
+export async function listSets(db: Db = supabase): Promise<StudySet[]> {
+  const { data, error } = await db
     .from('study_sets')
     .select('id, title, status, plan, created_at, updated_at, study_items(count)')
     .eq('study_items.hidden', false)

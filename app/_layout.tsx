@@ -90,6 +90,12 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="sign-in" options={{ title: 'Sign in', headerShown: false }} />
         <Stack.Screen name="new" options={{ title: 'New set', ...backable }} />
+        {/* Nomi is reached from the heading of Study and Progress, not from the
+            tab bar. The four tabs are the learning loop, and a fifth for a
+            companion would make Nomi somewhere you go INSTEAD of studying
+            rather than something that sits beside it. Pushed above the tabs
+            with a back control, like every other task route. */}
+        <Stack.Screen name="nomi" options={{ title: 'Nomi', ...backable }} />
         {/* A note is a TASK with its own back control, so it is pushed above
             the tabs rather than being one — same rule as a flashcard session.
             Registered explicitly, or the header reads "note/[id]" to the user,

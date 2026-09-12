@@ -18,7 +18,25 @@ import { useAssistantContext } from '../data/assistant-context';
 import { describeRemaining, isAskable, MAX_QUESTION_CHARS } from '../core/chat';
 
 /**
- * The study assistant (Phase 9c, D14).
+ * The study assistant (Phase 9c, D14) — this is Nomi.
+ *
+ * ## The name
+ *
+ * Nomi is the product identity for this, not a second AI beside it. `Nomi` on a
+ * screen and `StudyAssistant` in the code are the same thing: the name changed,
+ * the architecture did not, and `askAssistant` remains the implementation.
+ *
+ * This floating button is Nomi in its IN-CONTEXT form — it sees the card in
+ * front of you. `app/nomi.tsx` is the dedicated place, reached from the heading
+ * of Study and Progress, for questions about the studying rather than about one
+ * card. Neither is finished; both are the same companion.
+ *
+ * **The D13 privacy copy in `app/(tabs)/settings.tsx` deliberately still says
+ * "the study assistant".** That paragraph is approved copy which D13 says must
+ * not be paraphrased smaller, and the owner's instruction is to leave it alone.
+ * So the app names Nomi everywhere except there — a chosen inconsistency, not a
+ * missed rename, and `tests/screens.test.ts` pins the sentence so an edit
+ * cannot drift into it.
  *
  * A small circle in the bottom corner that opens into a panel big enough to
  * read and type in — the owner's words. Closed it is one tappable circle;
@@ -134,7 +152,7 @@ export function StudyAssistant() {
     return (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Ask about your notes"
+        accessibilityLabel="Ask Nomi about your notes"
         onPress={() => setOpen(true)}
         style={{
           position: 'absolute',
@@ -195,7 +213,7 @@ export function StudyAssistant() {
           screen reader too. */}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Close the assistant"
+        accessibilityLabel="Close Nomi"
         onPress={() => setOpen(false)}
         style={{
           position: 'absolute',
@@ -234,7 +252,7 @@ export function StudyAssistant() {
       >
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Text style={{ flex: 1, fontSize: 16, fontWeight: '700', color: t.text }}>
-            Ask about your notes
+            Ask Nomi
           </Text>
           <Pressable
             accessibilityRole="button"

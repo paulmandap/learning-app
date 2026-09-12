@@ -1,7 +1,8 @@
 import { useRouter } from 'expo-router';
 import { Pressable } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { Body, Button, Card, ListRow, Notice, Screen, Title } from '../../src/ui/components';
+import { Body, Button, Card, ListRow, Notice, Screen, TitleRow } from '../../src/ui/components';
+import { NomiButton } from '../../src/ui/nomi';
 import { fetchProfile } from '../../src/data/profile';
 import { listSets, type StudySet } from '../../src/data/sets';
 import { continueTarget } from '../../src/data/attempts';
@@ -20,7 +21,11 @@ export default function Home() {
   });
   const { data: sets = [], isLoading: setsLoading } = useQuery({
     queryKey: ['sets'],
-    queryFn: listSets,
+    // Wrapped, not passed by reference. listSets now takes an optional client
+    // as its last argument (the Phase B seam, extended for Nomi), and TanStack
+    // Query calls a bare queryFn with its own context object — which would
+    // arrive as that argument and be used as a database client.
+    queryFn: () => listSets(),
     enabled: !!session,
   });
 
@@ -44,8 +49,13 @@ export default function Home() {
     <Screen>
       {/* The heading moved into the body when this became a tab. The stack
           header used to carry it, but a tab root has no back control and no
-          header of its own, so the screen has to name itself. */}
-      <Title>Study</Title>
+          header of its own, so the screen has to name itself.
+
+          Nomi rides on that same row: with no navigator header there is nowhere
+          else at the top of a tab for it to go, and the bottom corner is
+          already the floating ✦ — which is the same companion, asked about
+          whatever card is in front of you. */}
+      <TitleRow title="Study" action={<NomiButton />} />
 
       {!profileLoading && !hasKey ? (
         <Notice tone="warn">Add your Gemini key in Settings before making study sets.</Notice>

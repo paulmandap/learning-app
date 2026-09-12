@@ -46,6 +46,37 @@ export function Title({ children }: { children: ReactNode }) {
 }
 
 /**
+ * A screen heading with an optional control on the right.
+ *
+ * ## Why this is a primitive and not four hand-written rows
+ *
+ * A tab root has no navigator header to hang anything on — `headerShown` is
+ * false for the whole (tabs) group — so each one names itself with a `Title` as
+ * the first child of `Screen`. Anything that belongs "in the header area" of a
+ * tab therefore has to live in the body beside that title.
+ *
+ * Progress alone renders its title from three separate early returns (loading,
+ * nothing-answered-yet, and the real screen) and Study from one. Writing the
+ * row out four times is how three of them quietly drift apart.
+ *
+ * ## No gutter here, deliberately
+ *
+ * `menu.tsx` has `HeaderTitle` and `HeaderGlyphButton`, which look like exactly
+ * this and are not: they carry a `marginLeft`/`marginRight` that compensates for
+ * a stack header spanning the whole window. Inside `Screen` the column is
+ * already centred at CONTENT_MAX_WIDTH, so reusing them would inset the row a
+ * second time and push the control off the column's edge.
+ */
+export function TitleRow({ title, action }: { title: string; action?: ReactNode }) {
+  return (
+    <View style={styles.titleRow}>
+      <Title>{title}</Title>
+      {action ?? null}
+    </View>
+  );
+}
+
+/**
  * A large in-body screen heading, iOS "large title" style.
  *
  * Used where the name is long enough to fight the navigation bar — a set called
@@ -289,6 +320,16 @@ const styles = StyleSheet.create({
     minHeight: TOUCH_TARGET,
   },
   title: type.title,
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.md,
+    // The control is a full 44px target, so the row takes its height from that
+    // rather than from the 28px title — otherwise the heading would shift down
+    // only on the screens that carry one.
+    minHeight: TOUCH_TARGET,
+  },
   body: type.body,
   label: type.label,
   input: {
