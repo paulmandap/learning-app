@@ -19,7 +19,6 @@ export interface StudyItem {
   section_title: string | null;
   kind: 'flashcard' | 'mcq' | 'short_answer';
   level: Level;
-  form: string | null;
   prompt: string;
   answer: string;
   options: { text: string; correct: boolean }[] | null;
@@ -44,7 +43,11 @@ export interface StudyItem {
 }
 
 const COLUMNS =
-  'id, study_set_id, document_id, page_index, section_title, kind, level, form, prompt, answer, ' +
+  // `form` is gone from this list. It was written on every insert and read by
+  // nothing — measured 2026-09-12: null on every card in the database, because
+  // the generation schema stopped returning it. See migration 0015, which drops
+  // the column. Selecting fewer columns is safe whether or not that has run.
+  'id, study_set_id, document_id, page_index, section_title, kind, level, prompt, answer, ' +
   'options, rubric, source_excerpt, excerpt_verified, check_flag, topic, hidden, created_at, ' +
   'variant_prompt, rubric_verified';
 
@@ -91,7 +94,6 @@ export async function insertItems(
     section_title: sectionTitle,
     kind: item.kind,
     level: item.level,
-    form: item.form ?? null,
     prompt: item.prompt,
     answer: item.answer,
     options: item.options ?? null,

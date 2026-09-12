@@ -1,7 +1,8 @@
 import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { Body, Button, Card, Screen, Title } from '../../src/ui/components';
+import { Body, Button, Card, Screen, TitleRow } from '../../src/ui/components';
+import { NomiButton } from '../../src/ui/nomi';
 import { radius, space, useTheme } from '../../src/ui/theme';
 import { useSessionStore } from '../../src/data/session';
 import { fetchDashboard, EMPTY_DASHBOARD, type DashboardData } from '../../src/data/dashboard';
@@ -11,6 +12,8 @@ import {
   KNOWN_REPS,
   MIN_SECTION_ATTEMPTS,
   type SectionScore,
+  type SectionTrend,
+  type TrendDirection,
 } from '../../src/core/progress';
 import { formatBytes, MAX_USER_BYTES } from '../../src/core/storage';
 import { PetStreak } from '../../src/ui/pet';
@@ -72,7 +75,7 @@ export default function Progress() {
   if (isLoading) {
     return (
       <Screen>
-        <Title>Progress</Title>
+        <TitleRow title="Progress" action={<NomiButton />} />
         <Body muted>Loading…</Body>
       </Screen>
     );
@@ -83,7 +86,7 @@ export default function Progress() {
   if (data.totalAttempts === 0) {
     return (
       <Screen>
-        <Title>Progress</Title>
+        <TitleRow title="Progress" action={<NomiButton />} />
         <Card>
           <Body>Nothing to show yet — you haven't answered any cards.</Body>
           {/* Names the blocks it will fill in, in the words those blocks
@@ -105,7 +108,7 @@ export default function Progress() {
 
   return (
     <Screen>
-      <Title>Progress</Title>
+      <TitleRow title="Progress" action={<NomiButton />} />
       <Streak data={data} />
       <Mastery data={data} />
       <Forecast data={data} />
@@ -370,8 +373,8 @@ function Sections({ data }: { data: DashboardData }) {
   return (
     <Card>
       <Body>How each part is going</Body>
-      <SectionList heading="Going well" tone="ok" sections={strong} />
-      <SectionList heading="Worth another look" tone="warn" sections={weak} />
+      <SectionList heading="Going well" tone="ok" sections={strong} trends={data.trends} />
+      <SectionList heading="Worth another look" tone="warn" sections={weak} trends={data.trends} />
       {tooEarly > 0 ? (
         <Body muted>
           {tooEarly} more part{tooEarly === 1 ? '' : 's'} of your notes {tooEarly === 1 ? 'needs' : 'need'}{' '}
@@ -382,14 +385,43 @@ function Sections({ data }: { data: DashboardData }) {
   );
 }
 
+/**
+ * Which way a section is going, in one word.
+ *
+ * ## Why a word and not an arrow, and why nothing at all is the usual answer
+ *
+ * The dashboard's own rule is that colour is never the only signal, and a bare
+ * ↑ is colour's cousin: a shape carrying meaning nobody stated. "Climbing" and
+ * "slipping" need no key.
+ *
+ * **Steady renders as nothing.** A row that says "steady" on every section
+ * teaches the reader to stop looking at that column, and it would also be
+ * indistinguishable at a glance from the far more common case: a section with
+ * fewer than twenty recent answers, where the honest answer is that we do not
+ * know yet. Only movement is worth the ink.
+ */
+function TrendWord({ direction }: { direction?: TrendDirection }) {
+  const t = useTheme();
+  if (!direction || direction === 'steady') return null;
+
+  const climbing = direction === 'improving';
+  return (
+    <Text style={{ color: climbing ? t.ok : t.warnText, fontSize: 13 }}>
+      {climbing ? 'climbing' : 'slipping'}
+    </Text>
+  );
+}
+
 function SectionList({
   heading,
   tone,
   sections,
+  trends,
 }: {
   heading: string;
   tone: 'ok' | 'warn';
   sections: SectionScore[];
+  trends: SectionTrend[];
 }) {
   const t = useTheme();
   if (sections.length === 0) return null;
@@ -413,6 +445,22 @@ function SectionList({
                 general — but not here, because nothing is ranked until it has
                 MIN_SECTION_ATTEMPTS answers behind it, so the n=1 percentage
                 the count was guarding against cannot reach this row. */}
+            {/* Which way it is going, when there is enough history to say.
+                Beside the percentage rather than under it, because the two are
+                one thought: 43%, and climbing.
+
+                THE TWO ARE DIFFERENT WINDOWS, and that is deliberate. The
+                percentage is a lifetime rate over every answer ever given; the
+                word is the last 60 days. So a section can read "7% climbing"
+                — the 7% still carries a bad start the trend has left behind,
+                which is exactly the encouraging thing to say. Anything that
+                later prints the trend's own numbers must label the window.
+
+                Absent is the normal case and means "not enough answers yet",
+                NOT "holding level" — a section needs twenty before the rule
+                will speak, and claiming a direction on six is noise 38% of the
+                time (measured; see src/core/progress.ts). */}
+            <TrendWord direction={trends.find((x) => x.section === s.section)?.direction} />
             <Text style={{ color: t.textMuted, fontSize: 13 }}>
               {Math.round(s.accuracy * 100)}%
             </Text>

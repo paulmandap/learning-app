@@ -297,9 +297,14 @@ describe('sectionSplit', () => {
     expect(split.weak[0]!.accuracy).toBe(0.5);
   });
 
-  it('counts a partial as neither right nor wrong', () => {
-    // It already halves the review interval, so counting it as a miss here would
-    // penalise the same answer twice.
+  it('counts a partial as WRONG, whatever the old docstring claimed', () => {
+    // Named for what it asserts. It used to be called "counts a partial as
+    // neither right nor wrong" while pinning the opposite: a partial is
+    // excluded from the numerator and kept in the denominator, so it drags
+    // accuracy down exactly as a miss does.
+    //
+    // Whether that is the RIGHT rule is open — see sectionSplit's docstring.
+    // This test records the behaviour that ships today.
     // Four answers, none wrong, two only partly right: 2 of 4, not 4 of 4.
     const split = sectionSplit([row({ attempts: 4, misses: 0, partials: 2 })]);
     expect(split.strong).toHaveLength(0);

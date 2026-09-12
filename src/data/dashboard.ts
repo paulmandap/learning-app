@@ -2,6 +2,11 @@ import { supabase, type Db } from './supabase';
 import {
   busiestSet,
   dueForecast,
+  sectionTrends,
+  TREND_ATTEMPT_CAP,
+  TREND_WINDOW_DAYS,
+  type AttemptRecord,
+  type SectionTrend,
   masteryCounts,
   schedulesForVisibleCards,
   sectionSplit,
@@ -67,6 +72,17 @@ export interface DashboardData {
   retryTarget: string | null;
   /** Where "Study what's due" should go, chosen the same way. */
   dueTarget: string | null;
+  /**
+   * Which sections are moving, and which way.
+   *
+   * Separate from `sections` rather than folded into it, because the two answer
+   * different questions over different evidence: `sections` is a lifetime rate
+   * needing three answers, this is a recent before-and-after needing twenty. A
+   * section can easily appear in one and not the other, and merging them would
+   * hide that a direction is missing because there is not enough history rather
+   * than because nothing is moving.
+   */
+  trends: SectionTrend[];
 }
 
 export const EMPTY_DASHBOARD: DashboardData = {
@@ -80,6 +96,7 @@ export const EMPTY_DASHBOARD: DashboardData = {
   forecast: [],
   retryTarget: null,
   dueTarget: null,
+  trends: [],
 };
 
 /**
@@ -133,7 +150,7 @@ export async function fetchDashboard(
   now: number = Date.now(),
   db: Db = supabase,
 ): Promise<DashboardData> {
-  const [days, schedules, stats, items, usedBytes] = await Promise.all([
+  const [days, schedules, stats, items, recent, usedBytes] = await Promise.all([
     // The streak reads from study_days, NOT from attempts. attempts cascades
     // from study_sets, so deleting a set would erase the days its answers
     // happened on and reset a streak for having tidied up. study_days
@@ -152,6 +169,26 @@ export async function fetchDashboard(
       .from('item_stats')
       .select('study_item_id, study_set_id, attempts, misses, partials, last_result'),
     db.from('study_items').select('id, section_title').eq('hidden', false),
+    // The sixth query, and the only one on this screen that reads a table which
+    // grows without limit. `item_stats` sums a lifetime and keeps no order, so
+    // "is this getting better?" cannot be answered from it — that needs the
+    // answers themselves, in sequence.
+    //
+    // Bounded twice on purpose: a date floor because a turnaround in March is
+    // not news in September, and a row cap because a heavy user could hold
+    // thousands of answers inside that window and the screen should not
+    // download all of them to print three words. Newest first, so a cap that
+    // does bite keeps the most recent history rather than an arbitrary slice.
+    //
+    // This is the first `.limit()` in src/data. Every other read here is still
+    // unbounded (see the Phase G list); this one was written bounded because
+    // `attempts` is the fastest-growing table in the app.
+    db
+      .from('attempts')
+      .select('study_item_id, result, created_at')
+      .gte('created_at', new Date(now - TREND_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(TREND_ATTEMPT_CAP),
     storageUsedBytes(db),
   ]);
 
@@ -159,6 +196,7 @@ export async function fetchDashboard(
   warnIfFailed('review_state', schedules.error);
   warnIfFailed('item_stats', stats.error);
   warnIfFailed('study_items', items.error);
+  warnIfFailed('attempts (recent)', recent.error);
 
   // --- streak --------------------------------------------------------------
   // A date column comes back as "2026-09-05"; parsing it as UTC midnight is
@@ -250,6 +288,33 @@ export async function fetchDashboard(
 
   const sections = stats.error || items.error ? emptySections() : sectionSplit(history);
 
+  // --- which way each section is moving ------------------------------------
+  // Same `sectionById` map the lifetime rates use, so a section is named
+  // identically in both and the screen cannot show one label twice.
+  //
+  // A card that has since been reported keeps its answers in `attempts`, and
+  // `sectionById` no longer has it — so its history resolves to no section and
+  // sectionTrends drops it. That is the right outcome and the same rule the
+  // counts above follow: a card the app will not deal should not steer advice.
+  const recentRows = (recent.data ?? []) as {
+    study_item_id: string;
+    result: 'correct' | 'partial' | 'incorrect';
+    created_at: string;
+  }[];
+
+  const trends =
+    recent.error || items.error
+      ? []
+      : sectionTrends(
+          recentRows.map(
+            (r): AttemptRecord => ({
+              section: sectionById.get(r.study_item_id) ?? null,
+              result: r.result,
+              at: Date.parse(r.created_at),
+            }),
+          ),
+        );
+
   // Keyed on the LAST result rather than on ever having missed it, matching
   // missedItemIds — something you got wrong once and have since learned should
   // leave the pile.
@@ -282,5 +347,6 @@ export async function fetchDashboard(
     forecast,
     retryTarget,
     dueTarget,
+    trends,
   };
 }

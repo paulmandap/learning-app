@@ -241,21 +241,40 @@ describe('fetchDashboard', () => {
     documents: [rows({ byte_size: 1024 })],
   };
 
-  it('answers the whole screen in five queries and no more', async () => {
-    // The screen is one round of queries by design. A sixth would mean someone
-    // had added a per-set or per-card lookup, which is how a dashboard starts
+  it('answers the whole screen in one round of queries, and names them', async () => {
+    // The screen is one batch by design. The guard is not the NUMBER — it went
+    // from five to six in Phase C when section trends arrived, deliberately —
+    // it is that the set is fixed and flat. A per-set or per-card lookup would
+    // show up here as a table appearing twice, which is how a dashboard starts
     // costing a request per row.
     const { db, calls } = fakeDb(oneMissedCard);
     await fetchDashboard(NOON, db);
 
-    expect(calls).toHaveLength(5);
     expect(calls.map((c) => c.target).sort()).toEqual([
+      'attempts',
       'documents',
       'item_stats',
       'review_state',
       'study_days',
       'study_items',
     ]);
+  });
+
+  it('bounds the one query that reads a table growing without limit', async () => {
+    // attempts is the fastest-growing table in the app and the trend query is
+    // the only read on this screen that touches it. Unbounded, it would get
+    // slower every week a student used the app — and silently, because a
+    // dashboard that degrades to empty looks the same as one with no history.
+    const { db, calls } = fakeDb(oneMissedCard);
+    await fetchDashboard(NOON, db);
+
+    const trend = calls.find((c) => c.target === 'attempts');
+    expect(trend, 'the trend query is gone').toBeDefined();
+    expect(trend!.query).toContain('limit=');
+    expect(trend!.query).toContain('created_at=gte.');
+    // Newest first, so a cap that does bite keeps recent history rather than an
+    // arbitrary slice.
+    expect(trend!.query).toContain('order=created_at.desc');
   });
 
   it('points the retry button at the set the missed cards are in', async () => {
@@ -313,6 +332,67 @@ describe('fetchDashboard', () => {
     expect(calls.map((c) => c.target)).toContain('attempts');
     expect(data.totalAttempts).toBe(2);
     expect(data.streak).toBe(2);
+    warn.mockRestore();
+  });
+
+  it('turns a section that has turned around into a direction', async () => {
+    // End to end: rows out of `attempts`, joined to their section through the
+    // study_items query, ordered by their timestamps, gated, and labelled.
+    // sectionTrends is unit-tested on its own; this is the wiring.
+    const answers = Array.from({ length: 20 }, (_, i) => ({
+      study_item_id: 'i1',
+      // Oldest ten wrong, newest ten right. PostgREST returns newest first.
+      result: i < 10 ? 'correct' : 'incorrect',
+      created_at: iso(NOON - i * 60_000),
+    }));
+
+    const { db } = fakeDb({ ...oneMissedCard, attempts: [rows(...answers)] });
+    const data = await fetchDashboard(NOON, db);
+
+    expect(data.trends).toHaveLength(1);
+    expect(data.trends[0]).toMatchObject({
+      section: 'Renal physiology',
+      direction: 'improving',
+    });
+  });
+
+  it('says nothing about a section without enough recent history', async () => {
+    // Silence is the designed answer below twenty answers, not an empty list
+    // meaning "steady". A trend claimed on six answers is noise 38% of the time
+    // — see the measurement in tests/trend.test.ts.
+    const answers = Array.from({ length: 8 }, (_, i) => ({
+      study_item_id: 'i1',
+      result: i < 4 ? 'correct' : 'incorrect',
+      created_at: iso(NOON - i * 60_000),
+    }));
+
+    const { db } = fakeDb({ ...oneMissedCard, attempts: [rows(...answers)] });
+    expect((await fetchDashboard(NOON, db)).trends).toEqual([]);
+  });
+
+  it('does not let a reported card steer the direction', async () => {
+    // Its answers survive in `attempts` but the card is gone from study_items,
+    // so it resolves to no section and drops out — the same rule the counts
+    // above follow.
+    const answers = Array.from({ length: 20 }, (_, i) => ({
+      study_item_id: 'reported-card',
+      result: i < 10 ? 'correct' : 'incorrect',
+      created_at: iso(NOON - i * 60_000),
+    }));
+
+    const { db } = fakeDb({ ...oneMissedCard, attempts: [rows(...answers)] });
+    expect((await fetchDashboard(NOON, db)).trends).toEqual([]);
+  });
+
+  it('keeps the screen up when only the trend query fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { db } = fakeDb({ ...oneMissedCard, attempts: [fails('attempts exploded')] });
+
+    const data = await fetchDashboard(NOON, db);
+
+    expect(data.trends).toEqual([]);
+    expect(data.dueToday).toBe(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('attempts'));
     warn.mockRestore();
   });
 

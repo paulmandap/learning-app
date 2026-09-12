@@ -26,6 +26,7 @@
 
 import { startOfUtcDay } from './schedule';
 import type { ReviewState } from './schedule';
+import type { AttemptResult } from './grade';
 
 /** Milliseconds in a day. */
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -372,10 +373,25 @@ export interface SectionSplit {
  * document's own headings and groups several cards together — on a 10-page PDF
  * the planner produces about eight of them.
  *
- * A partial counts as neither right nor wrong. It already halves the review
- * interval (`src/core/schedule.ts`), so it is felt in the schedule; counting it
- * as a miss here would penalise the same answer twice, and counting it as
- * correct would flatter.
+ * ## A partial counts as WRONG here, and this docstring used to deny it
+ *
+ * The arithmetic is `correct = attempts - misses - partials` over `attempts`,
+ * so a partial is excluded from the numerator and kept in the denominator —
+ * arithmetically identical to a miss. Four answers with two partials and no
+ * misses score 50%, exactly as two outright misses would.
+ *
+ * This paragraph previously read *"A partial counts as neither right nor
+ * wrong… counting it as a miss here would penalise the same answer twice"*,
+ * which describes behaviour the code does not have, and `tests/progress.test.ts`
+ * pinned the real behaviour under that same false name. Corrected 2026-09-12
+ * rather than changed: the reasoning in the old wording is a good argument for
+ * excluding partials from both halves of the fraction, and acting on it would
+ * move every accuracy figure on the Progress screen — an owner's call, not a
+ * tidy-up. **Flagged, not fixed.**
+ *
+ * `sectionTrends` follows this same definition deliberately. If the two
+ * disagreed, one screen would report a section at 43% and describe it as
+ * climbing on a different definition of the number.
  *
  * @param limit How many to name under each heading. Two — a list of eight
  *              sections is a spreadsheet, and the brief was to keep this simple.
@@ -415,4 +431,268 @@ export function sectionSplit(history: ItemHistory[], limit = 2): SectionSplit {
     weak: scored.filter((s) => s.accuracy < STRONG_ACCURACY).sort(byAccuracy(-1)).slice(0, limit),
     tooEarly,
   };
+}
+
+// ------------------------------------------------------------------- trend --
+
+/**
+ * Is a section getting better, or worse?
+ *
+ * ## The question this answers, and why it was missing
+ *
+ * `sectionSplit` above says where a student stands: 43% on Renal Physiology.
+ * It cannot say whether that 43% is on its way up from 20% or down from 70%,
+ * and those are opposite situations wanting opposite advice. It is the one
+ * thing the brief asked for that nothing in this app could answer.
+ *
+ * Nothing new is stored for it. `attempts` has carried `created_at` since 0001;
+ * the information was always there and was only ever aggregated away by the
+ * `item_stats` view, which sums a lifetime and keeps no order.
+ *
+ * ## Why this is a word and not a chart
+ *
+ * `app/(tabs)/progress.tsx` records a decision against plotting accuracy over
+ * time: *"with a handful of answers a day it would be mostly noise, and a noisy
+ * chart of a real measure is worse than no chart."* That reasoning is still
+ * right, and it is the reason this returns one of three words rather than a
+ * line: a chart shows every wobble and invites the reader to find a trend in
+ * it, while a gated label refuses to say anything until the movement is bigger
+ * than the noise.
+ *
+ * The gate is what makes that true, so the gate is measured rather than
+ * guessed — see `tests/trend.test.ts`, which runs the rule against a simulated
+ * student whose real accuracy never changes and requires that it rarely claims
+ * a direction.
+ *
+ * ## What the measurement assumes, and where it is optimistic
+ *
+ * The simulation treats each answer as an independent coin flip at a fixed
+ * probability. **Real study data is neither independent nor stationary**, and
+ * the ways it differs are worth stating because they all push the same way:
+ *
+ *  - **The same card recurs.** A section's answers are not draws from a pool of
+ *    distinct questions; a handful of cards are asked repeatedly. Getting a
+ *    card right once makes getting it right again more likely, so answers
+ *    cluster and the true variance is higher than the binomial figure.
+ *  - **The scheduler chooses what you see.** `reviewOrder` deals overdue and
+ *    lapsed cards first, so a window is enriched with cards you recently got
+ *    wrong. That is the point of spaced repetition, and it means the two
+ *    windows are not samples from the same population even when nothing about
+ *    the student has changed.
+ *  - **A real change is gradual.** The power figure below assumes accuracy
+ *    steps cleanly at the midpoint; a drift spread across both windows shows up
+ *    smaller and is caught less often.
+ *
+ * So the false-alarm rates are a floor, not a guarantee. They are still worth
+ * having — they were enough to reject the first choice of constants outright —
+ * but the honest reading is "this rule is quiet enough to be worth shipping",
+ * not "this rule is wrong 6.9% of the time".
+ *
+ * ## Several sections are tested at once, and that multiplies
+ *
+ * The 6.9% is **per section**. The dashboard computes a direction for every
+ * section and shows up to four (two strong, two weak), so the chance that at
+ * least one of them is wrong for a student who has not changed is higher —
+ * measured 2026-09-12, 40,000 trials per cell:
+ *
+ * | sections | p=0.5 | p=0.7 | p=0.85 |
+ * |---|---|---|---|
+ * | 1  | 0.069 | 0.077 | 0.026 |
+ * | 4  | 0.249 | 0.278 | 0.102 |
+ * | 8  | 0.441 | 0.481 | 0.196 |
+ *
+ * **About one screen in four will carry a spurious word** once a student has
+ * four ranked sections. No correction is applied, deliberately: the alternative
+ * is a threshold so strict that nothing is ever said, and the cost of being
+ * wrong here is one soft word on a dashboard, not a grade or a schedule. But
+ * the number belongs in writing, because "6.9%" on its own reads as a promise
+ * about the screen and it is only a promise about one row.
+ */
+
+/** An answer, with enough of its context to place it in time and in a section. */
+export interface AttemptRecord {
+  section: string | null;
+  result: AttemptResult;
+  /** Epoch ms. Only the ORDER matters, never the gap. */
+  at: number;
+}
+
+export type TrendDirection = 'improving' | 'steady' | 'slipping';
+
+/**
+ * Answers a section needs in EACH half before a direction is worth claiming.
+ *
+ * ## Both numbers below are measured, and the first guess was badly wrong
+ *
+ * Six per window with a one-third threshold looked reasonable and is unusable.
+ * Simulating a student whose real accuracy NEVER changes — so every direction
+ * reported is a false alarm — gave these rates at p = 0.5, where variance is
+ * worst (20,000 trials each, 2026-09-12):
+ *
+ * | per window | ≥ 1/3 | ≥ 0.40 | ≥ 0.50 |
+ * |---|---|---|---|
+ * | 6  | **0.385** | 0.145 | 0.145 |
+ * | 8  | 0.215 | 0.077 | 0.077 |
+ * | 10 | 0.114 | **0.069** | 0.031 |
+ * | 12 | 0.154 | 0.065 | 0.021 |
+ * | 15 | 0.084 | 0.022 | 0.005 |
+ *
+ * So the obvious setting would have told **two students in five** that they
+ * were improving or slipping when nothing had happened. That is precisely the
+ * "mostly noise" the dashboard's own docstring warns about, and it would have
+ * shipped looking perfectly sensible.
+ *
+ * Ten per window at a 0.40 threshold costs 6.9% in the worst case and 2.8% for
+ * a consistently strong student, while still catching a genuine 0.4 → 0.8 shift
+ * 55% of the time. Twelve buys almost nothing (6.5%) for a fifth more data.
+ *
+ * The table is not monotonic along a row because the threshold interacts with
+ * the window's granularity: at ten, accuracy moves in tenths, so 0.40 means
+ * "four more right out of ten" exactly.
+ *
+ * **The cost is honest and worth stating: a section needs twenty answers before
+ * this says anything at all.** Staying silent until then is the point.
+ */
+export const MIN_TREND_WINDOW = 10;
+
+/**
+ * How far back "recently" reaches.
+ *
+ * Two months. A section someone turned around in March is not *improving* in
+ * September, and a window with no far edge would eventually compare a student
+ * against a beginner they no longer are — always flattering, never actionable.
+ *
+ * It is also the bound that keeps the query finite. `attempts` is the fastest
+ * growing table in the app and the only unbounded read left on this screen, so
+ * the date filter and the row cap beside it are not tidiness.
+ */
+export const TREND_WINDOW_DAYS = 60;
+
+/**
+ * Most answers the trend query will ever pull back.
+ *
+ * A safety rail rather than a product decision: at two months a heavy user
+ * could hold thousands of answers, and the dashboard should not download all of
+ * them to work out three words. Newest first, so a truncated window is still
+ * the most recent history rather than an arbitrary slice.
+ */
+export const TREND_ATTEMPT_CAP = 600;
+
+/**
+ * How far accuracy must move before it is a direction rather than a wobble.
+ *
+ * Four tenths — with `MIN_TREND_WINDOW` at ten, exactly "four more right out of
+ * ten, or four fewer". See the measured table above for what lower thresholds
+ * cost. This project would rather stay quiet than tell someone they are
+ * slipping because two cards went badly.
+ */
+export const TREND_THRESHOLD = 0.4;
+
+/**
+ * ## Units, stated once because they are easy to misread
+ *
+ * `earlier` and `recent` are **proportions in 0..1** — the share of answers in
+ * that window that were fully correct. `change` is their difference, so it is
+ * in **percentage POINTS, not a relative percentage**: a section going from 20%
+ * to 60% has `change = 0.4`, not 2.0. `TREND_THRESHOLD` is in the same units,
+ * which at ten answers per window makes it exactly "four more right out of ten".
+ *
+ * ## These numbers are not the percentage on the screen
+ *
+ * The Progress row shows `SectionScore.accuracy` from `sectionSplit`, which is a
+ * **lifetime** rate over every answer ever given, from the `item_stats` view.
+ * `earlier` and `recent` come from the **last 60 days, capped at 600 answers**.
+ * They are different populations and will disagree — a section can show 7% and
+ * still be climbing, because the 7% carries a bad start the trend window has
+ * left behind. That is the intended reading, and it is why the two are kept as
+ * separate fields rather than merged.
+ *
+ * Only `direction` currently reaches a user. `earlier`, `recent` and `change`
+ * are computed for callers that want to explain the word — nothing renders them
+ * today, and anything that starts to must say which window it is quoting.
+ */
+export interface SectionTrend {
+  section: string;
+  direction: TrendDirection;
+  /** Share correct in the older half, 0..1. NOT the lifetime rate on screen. */
+  earlier: number;
+  /** Share correct in the newer half, 0..1. */
+  recent: number;
+  /** `recent - earlier`, in percentage points. Signed. */
+  change: number;
+  /** Answers counted — both halves, so always even. */
+  attempts: number;
+}
+
+/**
+ * Accuracy over a run of answers.
+ *
+ * A partial scores zero, which is what `sectionSplit` already does: its
+ * `correct` excludes partials while its denominator keeps them. The two must
+ * agree or the same screen would report a section at 43% and call it improving
+ * on a different definition of the number.
+ *
+ * Worth flagging rather than burying: `sectionSplit`'s docstring says a partial
+ * "counts as neither right nor wrong", and the arithmetic there makes it count
+ * exactly as a miss. Whichever is intended, this follows the code so the screen
+ * stays coherent.
+ */
+function accuracyOf(rows: AttemptRecord[]): number {
+  if (rows.length === 0) return 0;
+  const correct = rows.filter((r) => r.result === 'correct').length;
+  return correct / rows.length;
+}
+
+/**
+ * Which way each section is going.
+ *
+ * Splits a section's answers down the middle in time and compares the two
+ * halves. **The halves are kept equal in size** — on an odd count the middle
+ * answer is dropped — because an eleven-answer section split 6/5 compares
+ * windows whose noise floors differ, and the larger one would look steadier for
+ * no reason a student could see.
+ *
+ * Sections without enough history are absent from the result rather than
+ * reported as `steady`: "we do not know yet" and "you are holding level" are
+ * different things, and only one of them is worth a line on a screen.
+ */
+export function sectionTrends(rows: AttemptRecord[]): SectionTrend[] {
+  const bySection = new Map<string, AttemptRecord[]>();
+  for (const row of rows) {
+    if (!row.section) continue;
+    const list = bySection.get(row.section);
+    if (list) list.push(row);
+    else bySection.set(row.section, [row]);
+  }
+
+  const out: SectionTrend[] = [];
+
+  for (const [section, all] of bySection) {
+    // Oldest first. Index breaks ties so two answers on the same millisecond
+    // keep the order they arrived in rather than depending on sort stability.
+    const ordered = all
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => a.r.at - b.r.at || a.i - b.i)
+      .map(({ r }) => r);
+
+    const half = Math.floor(ordered.length / 2);
+    if (half < MIN_TREND_WINDOW) continue;
+
+    const earlier = accuracyOf(ordered.slice(0, half));
+    // From the END, so the dropped middle answer on an odd count is the one
+    // furthest from both windows rather than the newest.
+    const recent = accuracyOf(ordered.slice(ordered.length - half));
+    const change = recent - earlier;
+
+    const direction: TrendDirection =
+      change >= TREND_THRESHOLD ? 'improving' : change <= -TREND_THRESHOLD ? 'slipping' : 'steady';
+
+    out.push({ section, direction, earlier, recent, change, attempts: half * 2 });
+  }
+
+  // Biggest movement first, then by name, so the same data always produces the
+  // same screen — the rule sectionSplit already follows.
+  return out.sort(
+    (a, b) => Math.abs(b.change) - Math.abs(a.change) || a.section.localeCompare(b.section),
+  );
 }
