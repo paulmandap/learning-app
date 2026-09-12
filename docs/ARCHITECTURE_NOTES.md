@@ -4303,6 +4303,114 @@ dashboard and against the measurement · plaintext deleted.
 2026-09-12 — upward or not at all.**
 
 
+## 33. Three of four tabs could not be scrolled on a phone (2026-09-12)
+
+Reported from daily use on an iPhone, in Safari and in the installed PWA: the
+tab screens could not be scrolled, and Progress and Settings opened at the
+bottom of their content with no way back up.
+
+One line fixed it. Everything interesting is in why nothing had caught it and
+in the two wrong answers the new instrument gave before it gave the right one.
+
+### 33.1 The cause
+
+`app/(tabs)/_layout.tsx` rendered `<TabSlot />` with no style inside a
+container that is `column-reverse` on a phone. `TabSlot` therefore took its
+height from its CONTENT rather than from the space the tab bar leaves, the
+`ScrollView` inside `Screen` inherited that unbounded height, and **a scroll
+view exactly as tall as its content has nothing left to scroll.**
+
+Measured at 393x420 before the fix:
+
+```
+BROKEN  /          box  457 in a 420 viewport
+  ok    /notes     (fits; nothing to scroll either way)
+BROKEN  /progress  box  505 in a 420 viewport
+BROKEN  /settings  box 1826 in a 420 viewport
+```
+
+Settings rendered an 1826-pixel scroll container inside a 420-pixel window.
+Because the container is `column-reverse`, the excess went off the **top**,
+where `body { overflow: hidden }` put it out of reach — which is precisely
+"opens at the bottom, cannot scroll up".
+
+**It only ever broke on phones.** At ≥800px the container is `row`, where the
+default `align-items: stretch` bounds the height for free.
+
+### 33.2 Why no existing check could have seen it
+
+- **`tests/boot.test.ts` runs on jsdom, which computes no layout at all.** It
+  can prove the bundle mounts. It cannot measure a single pixel, so no test in
+  the suite of 618 could have failed on this.
+- **Every screenshot ever taken at 393px in this project was of a deck**, and
+  decks live in the root stack, not in `(tabs)`. The one layout that was broken
+  is the one layout never photographed at the width that breaks it.
+
+`scripts/scroll-probe.ts` closes that gap: it drives the existing CDP harness,
+visits each tab, and measures rather than looks.
+
+### 33.3 The probe was wrong twice first, and both are worth keeping
+
+**First wrong answer: "all 4 tabs ok" at 852px.** True and useless — at that
+height the test account's screens all fit, so nothing scrolled and nothing
+could. A probe that reports success because the content happened to fit is the
+§19.7 failure again: *a wait that passes instantly is a test that stopped
+testing.* The height is now a flag, and the note beside it says why.
+
+**Second wrong answer: still "ok" at 420px**, where the screens genuinely did
+overflow. The detector looked for content taller than an ancestor that clips
+it — and found none, because **`scrollHeight` only counts overflow in the
+forward direction.** In a `column-reverse` container the content spills
+upward, and the clipping ancestor honestly reports 420px of content in a 420px
+box while 1400px of screen sits above it.
+
+So the question is not "does anything scroll" or "is anything clipped" but
+**"is the scroller BOUNDED"** — is its box taller than the window it lives in.
+That is the check now, and it caught all three broken tabs immediately.
+
+### 33.4 The fix, and one line NOT added
+
+```tsx
+<TabSlot style={{ flex: 1 }} />
+```
+
+`minHeight: 0` was in the first version of this fix, with a confident comment
+calling it load-bearing: a flex item defaults to `min-height: auto` and will
+not shrink below its content, which is the usual reason a nested scroll
+container refuses to scroll on the web.
+
+**That was wrong here, and testing it is what showed so.** A build with
+`flex: 1` alone scrolls all four tabs, because **react-native-web already sets
+`min-height: 0` on every View** to match Yoga's flex semantics — confirmed in
+the built app, where every element under `#root` computes `min-height: 0px`.
+The line was removed rather than left in as a charm, and `tests/screens.test.ts`
+now asserts its **absence**, so it does not come back as a superstition.
+
+**`column-reverse` was kept**, against the original plan to replace it. The
+reason to remove it was Safari scroll-anchoring quirks — but with the scroller
+now a bounded inner div, the reversed container does not scroll at all, so
+that risk is gone. Swapping it would have added route-discovery risk to a file
+that records wrapping `TabList` once shipping a blank page, for no remaining
+benefit.
+
+### 33.5 What is verified, and what is not
+
+Verified: all four tabs scroll, open at the top and clip nothing, at both
+393x420 (where content must overflow) and 393x852. Both halves of the source
+guard mutation-tested — a bare `<TabSlot />` fails it, and so does a
+`minHeight` added back.
+
+**Not verified: iOS Safari.** Everything here was measured in headless Chrome,
+and the report came from an iPhone. The mechanism is plain CSS flexbox and the
+fix is the standard one, so this is strong evidence — but the owner confirming
+on the phone is what closes it.
+
+**Verified:** typecheck clean · **619 tests** (617 before; +2) · `expo export` ·
+boot **6/6** · reproduced at 393x420 before the fix and clean after · both
+guards mutation-tested and the source restored by checksum · Progress
+screenshotted at 393px in dark mode for the first time.
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

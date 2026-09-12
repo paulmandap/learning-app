@@ -160,7 +160,35 @@ export default function TabsLayout() {
           </TabTrigger>
         ))}
       </TabList>
-      <TabSlot />
+      {/* flex:1 is load-bearing. Without it this shipped a phone layout where
+          three of the four tabs could not be scrolled at all, and Progress and
+          Settings opened at the bottom of their content with no way back up.
+          Reported from daily use on an iPhone, 2026-09-12; measured at 393x420
+          before the fix as Settings rendering an 1826px scroll container
+          inside a 420px window (NOTES §33).
+
+          What it does: bounds the content area to the space the tab bar
+          leaves. Without it TabSlot is sized by its CONTENT, the ScrollView
+          inside `Screen` inherits that unbounded height, and a scroll view
+          exactly as tall as its content has nothing left to scroll.
+
+          NO minHeight:0 HERE, and that is measured rather than assumed. On the
+          web a flex item defaults to `min-height: auto` and will not shrink
+          below its content, which is the usual reason a nested scroll
+          container refuses to scroll — but react-native-web already sets
+          `min-height: 0` on every View to match Yoga's flex semantics, so the
+          footgun does not apply in this codebase. Checked in the built app:
+          every element under #root computes `min-height: 0px`, and a build
+          with flex:1 alone scrolls all four tabs. Adding it back would be one
+          more line that does nothing.
+
+          Why it only ever broke on phones: at >=800px the container above is
+          `row`, where the default align-items:stretch bounds the height for
+          free. Every screenshot this project has taken at 393px was of a deck,
+          which lives in the root stack — so the one layout that was broken was
+          the one layout never photographed at the width that breaks it.
+          `scripts/scroll-probe.ts` is what closes that gap. */}
+      <TabSlot style={{ flex: 1 }} />
     </Tabs>
   );
 }

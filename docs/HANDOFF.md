@@ -159,6 +159,12 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   `INPUT_FONT_SIZE`; `tests/input-zoom.test.ts` fails the build otherwise.
 - **`tests/boot.test.ts` runs the built bundle and asserts `#root` fills.** Always
   run it after building.
+- **It runs on jsdom, which computes NO LAYOUT.** It can prove the app mounts
+  and nothing more. A scroll bug that made three of four tabs unusable on a
+  phone passed all 618 tests (NOTES §33) — use
+  `npx tsx --env-file=.env scripts/scroll-probe.ts --height 420` for anything
+  about layout, and pass a height small enough that the content must overflow,
+  or it reports "ok" without testing anything.
 - **Verify UI changes by looking at them** — `npm run screenshot`, and pass
   `--dark`, because the owner uses dark mode and every screenshot before
   2026-09-06 was light.

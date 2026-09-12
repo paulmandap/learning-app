@@ -374,3 +374,41 @@ describe('adaptive order reaches the two modes that ask for it, and no others', 
     expect(fn).not.toMatch(/\.filter\([^)]*isDue/);
   });
 });
+
+describe('the tab layout bounds its content area', () => {
+  /**
+   * A phone-only scroll bug that nothing in this suite could have caught.
+   *
+   * `TabSlot` shipped with no style, so the content area was sized by its
+   * content rather than by the space the tab bar left. The `ScrollView` inside
+   * `Screen` inherited that unbounded height, and a scroll view exactly as
+   * tall as its content scrolls nowhere. Because the phone container is
+   * `column-reverse`, the excess went off the TOP — unreachable, which is why
+   * Progress and Settings opened at the bottom with no way up.
+   *
+   * Measured at 393x420 before the fix: Settings rendered a 1826px scroll
+   * container inside a 420px window, and 3 of 4 tabs were unscrollable.
+   *
+   * This is a source-text guard because the real check needs layout, and
+   * `tests/boot.test.ts` runs on jsdom, which computes none. The measuring
+   * instrument is `scripts/scroll-probe.ts`; this only stops the fix being
+   * deleted by someone tidying the file.
+   */
+  const layout = read('app', '(tabs)', '_layout.tsx');
+
+  it('gives TabSlot a flex so it fills the space the bar leaves', () => {
+    const slot = /<TabSlot([^/]*)\/>/.exec(layout)?.[1] ?? '';
+    expect(slot).toMatch(/flex:\s*1/);
+  });
+
+  it('does not carry a minHeight that does nothing', () => {
+    // Deliberately asserting its ABSENCE. min-height:auto is the usual reason
+    // a nested scroll container will not scroll on the web, so `minHeight: 0`
+    // looks obligatory here — and react-native-web already sets it on every
+    // View to match Yoga, measured in the built app. A build with flex:1
+    // alone scrolls all four tabs. This keeps the line from being added back
+    // as a superstition.
+    const slot = /<TabSlot([^/]*)\/>/.exec(layout)?.[1] ?? '';
+    expect(slot).not.toMatch(/minHeight/);
+  });
+});
