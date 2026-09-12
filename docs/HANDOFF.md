@@ -33,7 +33,8 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **447 tests pass**, 2 skipped (live Gemini, behind `LIVE_GEMINI=1`). Typecheck clean.
+- **608 tests pass**, 2 skipped (live Gemini, behind `LIVE_GEMINI=1`). Typecheck clean.
+  (447 when this was written on 2026-09-06; Phases A-G added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -53,14 +54,16 @@ under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 14, all applied and verified
+### Migrations — 15, all applied and verified
 
 `0001` schema · `0002` RLS · `0003` views (`security_invoker`) · `0004` storage +
 `touch_heartbeat` · `0005` `review_state` · `0006` `attempts.mode` gains
 `'blanks'` · `0007` `variant_prompt` + `rubric_verified` · `0008` salvage
 unmarkable short answers · `0009` `byte_size` + `study_days` · `0010`
 `chat_usage` + `claim_chat_message` · `0011` `profiles.pet` · `0012` `notes` ·
-`0013` backfill `byte_size` · `0014` allow `'dog'`.
+`0013` backfill `byte_size` · `0014` allow `'dog'` · `0015` retire `topic_stats`
+and `study_items.form` (applied 2026-09-12 — and it took production down for
+hours, see NOTES §31 before applying anything like it).
 
 ## Rules — these are not negotiable
 
@@ -136,6 +139,14 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 - **Migration order matters.** A build that SELECTs a column the database has
   not got breaks every query using it. Prefer a retry on the "no such column"
   error over making the deploy order load-bearing (NOTES §19.4).
+- **"Safe to run in either order" means DEPLOY order, not commit order.** This
+  took production down on 2026-09-12 (NOTES §31). 0015 dropped
+  `study_items.form`; the code that stopped selecting it was committed six days
+  before it was deployed, and in that gap every deck answered `42703`.
+  **Before applying any migration that DROPS or RENAMES anything, run
+  `npx tsx --env-file=.env scripts/deploy-status.ts`** and confirm production
+  is not behind it. The script says so in as many words, and refuses to compare
+  when it cannot find the live commit in git.
 
 **The browser, iOS and the harness**
 - **iOS force-zooms any focused input under 16px and does not zoom back.** Use
@@ -194,6 +205,7 @@ npm run export:web
 npm run screenshot -- /progress out.png --width 393 --dark
 npm run test:isolation      19/19 cross-user RLS assertions (needs TEST_USER_* env vars)
 npm run backup
+npx tsx --env-file=.env scripts/deploy-status.ts   what is live, and is it behind a migration
 npx tsx --env-file=.env scripts/notes-probe.ts [--generate]
 npx tsx --env-file=.env scripts/study-probe.ts <set-id>
 npx tsx --env-file=.env scripts/seed-progress.ts [--days 30] [--clear]

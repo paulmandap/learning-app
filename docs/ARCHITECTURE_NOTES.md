@@ -3162,6 +3162,15 @@ life.
 
 ### 26.5 Applied in an order that cannot break
 
+> **WRONG, and it took production down on 2026-09-12 (§31).** The reasoning
+> below is sound and rests on a precondition it never states: "stopped
+> selecting `form` **first**" means first in DEPLOY order. It was first in
+> COMMIT order. The code shipped to git on the 11th, was never deployed, the
+> migration was applied on the 12th, and every `listItems` on the live site
+> answered `42703: column study_items.form does not exist` until it was.
+> Left as written, because the gap between "correct" and "correct in
+> production" is the whole lesson.
+
 Migrations here are pasted by hand, so code and schema are out of step for
 however long that takes. Both changes are written to be correct in either state:
 
@@ -4013,6 +4022,127 @@ produce it.
 boot **6/6** against a fresh bundle · both guards mutation-tested and the
 sources confirmed restored by checksum · every affected read run against the
 live database and confirmed complete · no database writes. **Not deployed.**
+
+
+## 31. Production was down, and "safe in either order" is why (2026-09-12)
+
+Phase F was next. It was not started, because the live site could not deal a
+single deck and had not been able to since migration 0015 was applied earlier
+the same day.
+
+### 31.1 The evidence, before the fix
+
+Reproduced against the live database with the exact column list each build
+sends, rather than reasoned about:
+
+```
+DEPLOYED (Sep 6) code       -> 42703: column study_items.form does not exist
+CURRENT (undeployed) code   -> OK, 17 cards
+```
+
+`listItems` is the deck behind Flashcards, Quiz and Blanks, and the deployed
+`insertItems` also wrote `form`, so studying and card-making were both down for
+every user. `topic_stats` is referenced by no deployed code, so `form` was the
+only break.
+
+### 31.2 The reasoning that failed
+
+§26.5 declared 0015 **"SAFE TO RUN IN EITHER ORDER"**:
+
+> `src/data/items.ts` stopped selecting and writing `form` first. Selecting
+> fewer columns is valid whether or not the column is still there.
+
+Every word of that is true, and it silently assumes *first* means **deployed**.
+It meant committed. The code change went in with Phase C (`bb048db`) on the
+11th, was never deployed, and the migration was applied to production on the
+12th. The safety property was real and the precondition was not.
+
+HANDOFF had already written the warning: *"Migration order matters. A build
+that SELECTs a column the database has not got breaks every query using it.
+Prefer a retry on the 'no such column' error over making the deploy order
+load-bearing."* The deploy order was load-bearing. Nothing was watching it.
+
+**Down from when 0015 was applied — some hours earlier on 2026-09-12, the exact
+time not recorded — until 09:52 UTC.** Bounded only because the drill in §29
+happened to be looking at this database on the same day.
+
+### 31.3 Six days of work had never reached anyone
+
+Production was last deployed **2026-09-06** at `635921b`: **13 commits behind**,
+13 user-facing files. Phase A's four broken-flow fixes (the dashboard button
+that went nowhere, the quiz level counts, Blanks retry mode, the set screen
+rendering off a ref), all of Nomi, Phase C's section trends, Phase D's
+`studyOrder`, and `app/+not-found.tsx`. Every one of those phases ends with the
+line "Not deployed", and the accumulated meaning of that line went unnoticed
+because it was written five times in a row.
+
+### 31.4 The fix, and what proves it
+
+Rebuilt from HEAD and deployed. Verified:
+
+```
+live commit   56cb636   deployed 2026-09-12T09:52:05     (= HEAD)
+bundle        79224f33bd84 local == 79224f33bd84 live
+boot          6/6 against the fresh bundle
+```
+
+And looked at, which is what the project asks for: the Understand deck
+screenshotted at 393px in dark mode, signed in, against the live database —
+level counts 10/3/4, a real card and its answer, Nomi's ✦ in the corner. The
+screenshot harness serves `dist/`, and `dist/` is byte-identical to production
+by the hash above, so this is the shipped bundle against the real data.
+
+**One thing seen and deliberately not fixed:** a large empty box sits above the
+question on this `__diagram` set, where a figure would go. It may be an image
+that fails to load or an empty figure area. Recorded here rather than chased,
+because it is unrelated to the outage and predates it.
+
+### 31.5 The guard: `scripts/deploy-status.ts`
+
+The missing signal was never "is production behind". Six days of drift was
+survivable; one dropped column was not. The signal is **"is production behind a
+MIGRATION"**, and specifically one that removes something.
+
+The script reports the live commit and date from the Cloudflare Pages API, how
+far behind HEAD, the migrations added since that commit, and whether any of
+them **drops or renames** — the case where an old build starts answering 42703.
+It also compares the live bundle hash against `dist/`, so "not deployed" stops
+being a sentence in the notes and becomes a command's answer.
+
+**Verified in both states, which is stronger than a unit test with a made-up
+commit.** Before the deploy it produced exactly the outage:
+
+```
+production is 13 commit(s) behind HEAD.
+supabase/migrations/0015_retire_topic_stats_and_form.sql
+*** DANGER ***  These REMOVE or RENAME schema objects
+```
+
+After: *"production is exactly HEAD"*, *"none. The live code and the schema it
+was written against agree"*, and the bundle hashes match. That before/after
+pair is the guard's proof, and it is why the script gets no `src/core` module —
+the logic is a non-empty list check, and wrapping it to make it unit-testable
+would be ceremony around something already tested against reality.
+
+It also refuses to compare when Cloudflare names a commit git does not have
+(unpushed, rebased, another branch), because answering "0 behind" there would
+be the most dangerous output it could produce.
+
+### 31.6 The rule that replaces the assumption
+
+**"Safe to run in either order" means DEPLOY order, not commit order.** A
+migration that drops or renames anything is safe only once the code that stops
+using it is *live*. Committed is not deployed, and the gap between them was six
+days here.
+
+Recorded in HANDOFF as a check rather than a habit: before applying a migration
+that removes anything, run `deploy-status` and confirm production is not behind
+it. §26.5 is corrected in place, with its original reasoning left visible.
+
+**Verified:** typecheck clean · **608 tests** · `expo export` · boot **6/6** ·
+deployed and confirmed live by commit, bundle hash and a signed-in screenshot ·
+`deploy-status` run before and after · no secret printed or committed.
+**Production is current for the first time since 2026-09-06.**
 
 
 ## Sources
