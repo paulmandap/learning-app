@@ -113,14 +113,28 @@ jobs:
           # considered, which is what keeps Supabase's internal auth/storage
           # tables out of it.
           # ---------------------------------------------------------------
+          # `|| true` ON EVERY DERIVATION, and it is load-bearing.
+          #
+          # grep exits 1 when it matches nothing. Under `set -euo pipefail`
+          # that aborts the whole step, silently and with no ::error:: line —
+          # which is exactly what happened on run #3 (2026-09-12), the FIRST
+          # ever execution of this derived list. There is no `drop table` in
+          # any migration, so the `dropped=` assignment below exited 1 and
+          # killed the backup before a single check had run. The repository
+          # had no working backup from Phase A until this fix; run #2
+          # (2026-09-07) passed only because it predates the derivation.
+          #
+          # Without the guard, "no matches" and "the tool broke" are the same
+          # exit code, and the empty-list check twelve lines down — written
+          # precisely to catch a broken derivation — can never be reached.
           created=$(grep -hoiE 'create table( if not exists)? +public\.[a-z0-9_]+' \
-            supabase/migrations/*.sql | sed -E 's/.*public\.//' | sort -u)
+            supabase/migrations/*.sql | sed -E 's/.*public\.//' | sort -u || true)
 
           # A table a later migration dropped is not expected in the dump.
-          # Nothing drops one today; this is here so that doing so does not
-          # start failing the backup for the wrong reason.
+          # Nothing drops one today, which is what made this the line that
+          # failed rather than a harmless empty list.
           dropped=$(grep -hoiE 'drop table( if exists)? +public\.[a-z0-9_]+' \
-            supabase/migrations/*.sql | sed -E 's/.*public\.//' | sort -u)
+            supabase/migrations/*.sql | sed -E 's/.*public\.//' | sort -u || true)
           tables=$(comm -23 <(echo "$created") <(echo "$dropped"))
 
           # An empty list would pass every check below without testing anything —
@@ -144,8 +158,11 @@ jobs:
           # same way. A dump missing one would restore a database the current app
           # cannot query — which is how 0007's two columns came to be checked by
           # name here in the first place.
+          # Guarded for the same reason, and here an empty result is genuinely
+          # legitimate: a schema whose migrations never used `add column` has
+          # no added columns to check, and must not fail the backup for it.
           columns=$(grep -hoiE 'add column( if not exists)? +[a-z0-9_]+' \
-            supabase/migrations/*.sql | sed -E 's/.*[[:space:]]//' | sort -u)
+            supabase/migrations/*.sql | sed -E 's/.*[[:space:]]//' | sort -u || true)
 
           for c in $columns; do
             if ! grep -qi "$c" schema.sql; then

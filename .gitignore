@@ -28,4 +28,17 @@ yarn-error.log*
 Thumbs.db
 
 # Database dumps. Real user notes — never committed.
+#
+# `backups/` alone was not enough. A restore drill on 2026-09-12 downloaded the
+# backup artifact and unzipped it into the repository ROOT, where both the .zip
+# and backup.tar.gz.gpg sat untracked and unignored — one `git add -A` away
+# from publishing every student's notes to a public repository. Encrypted, but
+# an encrypted file in a public repo is a passphrase away from not being.
+#
+# So the patterns match wherever the file lands, not only in one folder.
 backups/
+*.gpg
+backup.tar.gz*
+schema.sql
+data.sql
+supabase-backup-*
