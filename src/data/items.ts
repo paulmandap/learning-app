@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { completeRows, supabase } from './supabase';
 import type { Level } from '../core/planner';
 import type { ValidatedItem } from '../core/validate';
 
@@ -115,7 +115,10 @@ export async function listItems(
 ): Promise<StudyItem[]> {
   let query = supabase
     .from('study_items')
-    .select(COLUMNS)
+    // count: the deck is the clearest case where a truncated read is a wrong
+    // answer rather than a slow one — it deals fewer cards than the student
+    // has and nothing can tell.
+    .select(COLUMNS, { count: 'exact' })
     .eq('study_set_id', studySetId)
     .eq('hidden', false)
     .order('created_at', { ascending: true });
@@ -137,9 +140,9 @@ export async function listItems(
   // empty deck.
   if (options.level) query = query.eq('level', options.level);
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return (data ?? []) as unknown as StudyItem[];
+  const result = await query;
+  if (result.error) throw new Error(result.error.message);
+  return completeRows('listItems', result) as unknown as StudyItem[];
 }
 
 export async function countItems(studySetId: string): Promise<number> {
@@ -155,13 +158,18 @@ export async function countItems(studySetId: string): Promise<number> {
 
 /** Existing prompts, so dedup survives a resumed run across sections. */
 export async function existingPrompts(studySetId: string): Promise<string[]> {
-  const { data, error } = await supabase
+  const { data, error, count } = await supabase
     .from('study_items')
-    .select('prompt')
+    // count: a short read here does not look broken, it silently WEAKENS
+    // dedup — prompts it never saw cannot be compared against, so generation
+    // writes duplicates of cards that already exist.
+    .select('prompt', { count: 'exact' })
     .eq('study_set_id', studySetId);
 
   if (error) throw new Error(error.message);
-  return (data ?? []).map((r: { prompt: string }) => r.prompt);
+  return completeRows('existingPrompts', { data, count }).map(
+    (r: { prompt: string }) => r.prompt,
+  );
 }
 
 /**

@@ -73,3 +73,48 @@ export const supabase = createClient(url, publishableKey, {
     flowType: 'implicit',
   },
 });
+
+/**
+ * Did the server actually give us every row that matched?
+ *
+ * ## The failure this exists for
+ *
+ * PostgREST applies a server-side `max-rows` cap and returns the truncated
+ * page **with a 200 and no error**. A read past that cap comes back short and
+ * nothing in the client can tell: the deck deals fewer cards than the student
+ * has, a due count is quietly low, dedup misses prompts it never saw. That is
+ * the same shape as §21 and §23.1 — a count and the thing it counted drifting
+ * apart — and this project's standing rule is that anything failing silently
+ * has already cost it a wrong conclusion four times.
+ *
+ * ## Why a count comparison rather than our own `.limit()`
+ *
+ * A limit we choose only detects truncation if it is BELOW the server's cap,
+ * and the server's cap is not visible from here. Asking for `count: 'exact'`
+ * and comparing lengths detects it whoever did the truncating, and keeps
+ * working if that setting is ever changed. The cost is one count per read,
+ * over an already user-filtered query.
+ *
+ * ## Why it warns instead of throwing
+ *
+ * A student with more cards than the cap should get a short deck and a loud
+ * log, not a blank screen. Same choice `fetchDashboard` makes for a failed
+ * query: degrade, and say so. The point is that it stops being silent.
+ *
+ * `count` is null when the caller did not ask for one, and then this can only
+ * pass the rows through — so it is not a substitute for asking.
+ */
+export function completeRows<T>(
+  what: string,
+  result: { data: T[] | null; count: number | null },
+): T[] {
+  const rows = result.data ?? [];
+  const total = result.count;
+  if (total !== null && rows.length < total) {
+    console.warn(
+      `[data] ${what}: received ${rows.length} of ${total} matching rows. ` +
+        'The read was truncated server-side, so anything computed from it is incomplete.',
+    );
+  }
+  return rows;
+}

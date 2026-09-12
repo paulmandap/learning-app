@@ -1,4 +1,4 @@
-import { supabase, type Db } from './supabase';
+import { completeRows, supabase, type Db } from './supabase';
 import type { ReadResult } from '../ai/provider';
 
 /**
@@ -253,12 +253,15 @@ export async function pagesForSet(studySetId: string): Promise<StoredPage[]> {
   const ids = docs.map((d) => d.id);
   if (ids.length === 0) return [];
 
-  const { data, error } = await supabase
+  const result = await supabase
     .from('document_pages')
-    .select('id, document_id, page_index, text, readability, headings')
+    // count: these pages ARE the source text generation reads. A short read
+    // means whole pages are never turned into cards, and the set simply looks
+    // thinner than the notes deserved.
+    .select('id, document_id, page_index, text, readability, headings', { count: 'exact' })
     .in('document_id', ids)
     .order('page_index', { ascending: true });
 
-  if (error) throw new Error(error.message);
-  return (data ?? []) as StoredPage[];
+  if (result.error) throw new Error(result.error.message);
+  return completeRows('pagesForSet', result) as StoredPage[];
 }

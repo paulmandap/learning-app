@@ -1,4 +1,4 @@
-import { supabase, type Db } from './supabase';
+import { completeRows, supabase, type Db } from './supabase';
 import {
   busiestSet,
   dueForecast,
@@ -156,19 +156,23 @@ export async function fetchDashboard(
     // happened on and reset a streak for having tidied up. study_days
     // references only auth.users. It is also far cheaper: one small row per day
     // studied, instead of every answer ever recorded.
-    db.from('study_days').select('day, answers'),
+    db.from('study_days').select('day, answers', { count: 'exact' }),
     // study_set_id rides along on both of these so the "what next" button has
     // somewhere to go. Both already carry the column, so this is two more
     // fields on queries that were being made anyway, not a sixth round trip.
     db
       .from('review_state')
-      .select('study_item_id, study_set_id, reps, interval_days, lapses, due_at'),
+      .select('study_item_id, study_set_id, reps, interval_days, lapses, due_at', {
+        count: 'exact',
+      }),
     // Runs with security_invoker, so RLS applies and this is only ever the
     // caller's own history (the isolation test asserts that explicitly).
     db
       .from('item_stats')
-      .select('study_item_id, study_set_id, attempts, misses, partials, last_result'),
-    db.from('study_items').select('id, section_title').eq('hidden', false),
+      .select('study_item_id, study_set_id, attempts, misses, partials, last_result', {
+        count: 'exact',
+      }),
+    db.from('study_items').select('id, section_title', { count: 'exact' }).eq('hidden', false),
     // The sixth query, and the only one on this screen that reads a table which
     // grows without limit. `item_stats` sums a lifetime and keeps no order, so
     // "is this getting better?" cannot be answered from it — that needs the
@@ -201,7 +205,7 @@ export async function fetchDashboard(
   // --- streak --------------------------------------------------------------
   // A date column comes back as "2026-09-05"; parsing it as UTC midnight is
   // what makes it line up with startOfUtcDay rather than drifting by a timezone.
-  const dayRows = (days.data ?? []) as { day: string; answers: number }[];
+  const dayRows = completeRows('dashboard/study_days', days) as { day: string; answers: number }[];
   let times = dayRows.map((r) => Date.parse(`${r.day}T00:00:00Z`));
   let totalAttempts = dayRows.reduce((n, r) => n + r.answers, 0);
 
@@ -221,7 +225,7 @@ export async function fetchDashboard(
   const streak = studyStreak(times, now);
 
   // --- mastery, and what is due -------------------------------------------
-  const scheduleRows = (schedules.data ?? []) as {
+  const scheduleRows = completeRows('dashboard/review_state', schedules) as {
     study_item_id: string;
     study_set_id: string;
     reps: number;
@@ -238,7 +242,10 @@ export async function fetchDashboard(
   );
 
   const today = startOfUtcDay(now);
-  const itemRows = (items.data ?? []) as { id: string; section_title: string | null }[];
+  const itemRows = completeRows('dashboard/study_items', items) as {
+    id: string;
+    section_title: string | null;
+  }[];
 
   // Only cards the student could actually be dealt. `itemRows` is already
   // filtered to hidden = false, so this is free — and without it a reported
@@ -274,7 +281,7 @@ export async function fetchDashboard(
 
   // --- per-section history -------------------------------------------------
   const sectionById = new Map(itemRows.map((i) => [i.id, i.section_title]));
-  const statRows = (stats.data ?? []) as StatsRow[];
+  const statRows = completeRows('dashboard/item_stats', stats) as StatsRow[];
 
   const history: ItemHistory[] = statRows.map((s) => ({
     // A stat row for a hidden or deleted card has no section and is ignored by

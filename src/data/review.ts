@@ -1,4 +1,4 @@
-import { supabase, type Db } from './supabase';
+import { completeRows, supabase, type Db } from './supabase';
 import { NEW_CARD, startOfUtcDay, type Scheduled } from '../core/schedule';
 import type { AttemptResult } from '../core/grade';
 
@@ -54,14 +54,19 @@ function toScheduled(row: ReviewRow): Scheduled {
  * due — so callers do not need to special-case new cards.
  */
 export async function reviewStatesForSet(studySetId: string): Promise<Map<string, Scheduled>> {
-  const { data, error } = await supabase
+  const result = await supabase
     .from('review_state')
-    .select(COLUMNS)
+    // count: a card whose schedule row is missing from a truncated read is
+    // treated as never seen, so it loses its interval and its lapse history.
+    .select(COLUMNS, { count: 'exact' })
     .eq('study_set_id', studySetId);
 
-  if (error) return new Map();
+  if (result.error) return new Map();
   return new Map(
-    ((data ?? []) as unknown as ReviewRow[]).map((r) => [r.study_item_id, toScheduled(r)]),
+    (completeRows('reviewStatesForSet', result) as unknown as ReviewRow[]).map((r) => [
+      r.study_item_id,
+      toScheduled(r),
+    ]),
   );
 }
 
@@ -81,7 +86,7 @@ export async function dueCountsBySet(
   now: number = Date.now(),
   db: Db = supabase,
 ): Promise<Map<string, number>> {
-  const { data, error } = await db
+  const { data, error, count } = await db
     .from('review_state')
     // The inner join is the fix for a real defect, not tidiness. A reported
     // card is hidden from every deck by `listItems`, but nothing deletes its
@@ -89,7 +94,9 @@ export async function dueCountsBySet(
     // would then refuse to deal, and the badge drifted further from the deck
     // with every card reported. `!inner` drops the row when the card is gone
     // or hidden, in the same round trip.
-    .select('study_set_id, study_items!inner(hidden)')
+    // count: §21 was a due badge that disagreed with the deck. A truncated
+    // read reintroduces exactly that, from the other direction.
+    .select('study_set_id, study_items!inner(hidden)', { count: 'exact' })
     .eq('study_items.hidden', false)
     .lte('due_at', new Date(startOfUtcDay(now)).toISOString());
 
@@ -99,7 +106,9 @@ export async function dueCountsBySet(
   }
 
   const counts = new Map<string, number>();
-  for (const row of (data ?? []) as { study_set_id: string }[]) {
+  for (const row of completeRows('dueCountsBySet', { data, count }) as {
+    study_set_id: string;
+  }[]) {
     counts.set(row.study_set_id, (counts.get(row.study_set_id) ?? 0) + 1);
   }
   return counts;

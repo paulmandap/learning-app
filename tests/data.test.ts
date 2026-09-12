@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fetchDashboard } from '../src/data/dashboard';
 import { recordAttempt } from '../src/data/attempts';
 import { dueCountsBySet } from '../src/data/review';
-import type { Db } from '../src/data/supabase';
+import { completeRows, type Db } from '../src/data/supabase';
 import { startOfUtcDay } from '../src/core/schedule';
 
 /**
@@ -43,10 +43,21 @@ interface Call {
 }
 
 /** A canned reply: rows, or the error PostgREST would return. */
-type Reply = { rows: unknown[] } | { error: { message: string; code?: string; status?: number } };
+type Reply =
+  | { rows: unknown[]; total?: number }
+  | { error: { message: string; code?: string; status?: number } };
 
 /** Rows coming back from a query. */
 const rows = (...r: unknown[]): Reply => ({ rows: r });
+
+/**
+ * A read PostgREST truncated: `total` rows matched, only these came back.
+ *
+ * This is what a server-side max-rows cap looks like on the wire — a 200, the
+ * short page, and the real total in Content-Range. No error anywhere, which is
+ * the entire reason `completeRows` exists.
+ */
+const truncated = (total: number, ...r: unknown[]): Reply => ({ rows: r, total });
 
 /** A query that fails. `code` is what `error.code` becomes on the client. */
 const fails = (message: string, code?: string): Reply => ({ error: { message, code } });
@@ -110,9 +121,17 @@ function fakeDb(
         headers: { 'content-type': 'application/json' },
       });
     }
+    // PostgREST reports the matching total in Content-Range whenever a count
+    // was requested, and that header is the only place a truncated read
+    // differs from a complete one.
+    const n = reply.rows.length;
+    const total = reply.total ?? n;
     return new Response(JSON.stringify(reply.rows), {
       status: 200,
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'content-range': n === 0 ? `*/${total}` : `0-${n - 1}/${total}`,
+      },
     });
   }) as unknown as typeof fetch;
 
@@ -517,5 +536,76 @@ describe('recordAttempt', () => {
     await recordAttempt({ ...answer, result: 'incorrect' }, db);
 
     expect(calls.every((c) => c.target !== 'study_items')).toBe(true);
+  });
+});
+
+describe('completeRows — the silent-truncation detector (Phase G2)', () => {
+  it('passes rows through and says nothing when the read is complete', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const out = completeRows('x', { data: [1, 2, 3], count: 3 });
+    expect(out).toEqual([1, 2, 3]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('warns, naming both numbers, when fewer rows came back than matched', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    completeRows('listItems', { data: [1, 2], count: 900 });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(String(warn.mock.calls[0]![0])).toContain('received 2 of 900');
+    warn.mockRestore();
+  });
+
+  it('cannot detect anything when no count was asked for, and does not pretend to', () => {
+    // The honest failure mode: a caller that forgets `{ count: 'exact' }` gets
+    // the old silent behaviour back. That is why the option is on the query
+    // rather than inferred here.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(completeRows('x', { data: [1], count: null })).toEqual([1]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('treats a null data with a positive count as truncated to nothing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(completeRows('x', { data: null, count: 5 })).toEqual([]);
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+});
+
+describe('a truncated read, end to end through the real client', () => {
+  it('dueCountsBySet asks for an exact count', async () => {
+    // Without this the detector below can never fire, because PostgREST only
+    // sends Content-Range when a count was requested.
+    const { db, calls } = fakeDb({ review_state: [rows()] });
+    await dueCountsBySet(Date.UTC(2026, 8, 11), db);
+    const call = calls.find((c) => c.target === 'review_state')!;
+    expect(call).toBeDefined();
+  });
+
+  it('warns when PostgREST returns a short page with no error', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // 2 rows returned, 1200 matched — a max-rows cap, delivered as a 200.
+    const { db } = fakeDb({
+      review_state: [truncated(1200, { study_set_id: 'set-a' }, { study_set_id: 'set-b' })],
+    });
+
+    const counts = await dueCountsBySet(Date.UTC(2026, 8, 11), db);
+
+    // The screen still renders from what arrived — degrade, do not blank.
+    expect(counts.get('set-a')).toBe(1);
+    const said = warn.mock.calls.map((c) => String(c[0])).join(' ');
+    expect(said).toContain('dueCountsBySet');
+    expect(said).toContain('received 2 of 1200');
+    warn.mockRestore();
+  });
+
+  it('says nothing on an ordinary complete read', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { db } = fakeDb({ review_state: [rows({ study_set_id: 'set-a' })] });
+    await dueCountsBySet(Date.UTC(2026, 8, 11), db);
+    expect(warn.mock.calls.map((c) => String(c[0])).join(' ')).not.toContain('truncated');
+    warn.mockRestore();
   });
 });

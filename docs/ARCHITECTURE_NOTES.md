@@ -3117,6 +3117,12 @@ Every other read in `src/data` is still unbounded — that stays on the Phase G
 list. This one was written bounded because `attempts` is the fastest-growing
 table in the app.
 
+> **Closed by §30 (2026-09-12), and not by adding limits.** A limit cannot
+> detect PostgREST's own `max-rows` cap, which returns a short page with a 200
+> and no error. The ten correctness-critical reads now ask for an exact count
+> and compare it against what arrived; the rest were measured and deliberately
+> left alone.
+
 The Phase B test asserting *"five queries and no more"* now asserts the **set of
 tables** rather than the count. The count was never the invariant; a table
 appearing twice is.
@@ -3872,6 +3878,141 @@ drill rehearsed on a synthetic artifact before touching real data · run #4
 green · scratch database dropped, decrypted plaintext deleted and verified
 gone, `git status` clean. **Backup fixed and passphrase rotated. R7 deferred.
 Not deployed.**
+
+
+## 30. Phase G2 — the unbounded reads, and the cap nobody can see (2026-09-12)
+
+§26.3 recorded that the Phase C trend query was "the first `.limit()` in
+`src/data`" and that "every other read is still unbounded — that stays on the
+Phase G list". This closes it. The obvious response was to add limits to the
+other twenty-eight reads, and that would have been the wrong fix.
+
+### 30.1 An unbounded read is not a bug. A truncated one is.
+
+The reads divide into two kinds that want opposite treatment:
+
+- **Analytics** — history, aggregates, "how am I doing". Dropping the oldest
+  rows costs a little accuracy in a figure nobody checks to the row. Bounding
+  is free, and §26.3 already did it for the trend.
+- **Correctness** — the deck, the due counts, the pages a section is generated
+  from, the prompts dedup compares against. A limit here does not make
+  anything faster. It **silently deals fewer cards than the student has**, and
+  nothing in the app can tell. §21 (a due badge that disagreed with the deck)
+  and §23.1 (a count and its destination drifting apart) are both this bug.
+
+So the fix is chosen per read, and for the second kind the fix is not a limit.
+
+### 30.2 The hazard is a cap this codebase cannot see
+
+PostgREST applies a server-side `max-rows` cap and returns the short page
+**with a 200 and no error**. That is the whole problem: a truncated read is
+indistinguishable from a complete one at the call site.
+
+**A limit we choose does not help.** It only detects truncation if it sits
+below the server's cap, and the server's cap is not visible from the client.
+Setting `.limit(5000)` against an unknown cap of 1000 returns 1000 rows and
+looks perfectly healthy.
+
+So the check is a **count comparison**: ask for `{ count: 'exact' }` and
+compare `data.length` against the total. That detects truncation whoever did
+it, keeps working if the setting is ever changed, and costs one count over an
+already user-filtered query.
+
+`completeRows` in `src/data/supabase.ts` does the comparison and **warns rather
+than throwing**. A student with more cards than the cap should get a short deck
+and a loud log, not a blank screen — the same degrade-and-say-so choice
+`fetchDashboard` already makes for a failed query. The point is not to prevent
+it; the point is that it stops being silent.
+
+Applied to the ten correctness-critical reads: `listItems` (the deck),
+`existingPrompts` (dedup), `pagesForSet` (the source text generation reads),
+`reviewStatesForSet`, `dueCountsBySet`, `itemStatsForSet`, `continueTarget`,
+and the dashboard's `study_days`, `review_state`, `item_stats` and
+`study_items`. Single-row reads, `head: true` counts and writes are untouched.
+
+### 30.3 Measured, and the numbers say there is no rush
+
+`scripts/read-bounds-probe.ts`, live, 2026-09-12. Whole-database totals come
+from the §29 dump; per-user figures from the test account under RLS.
+
+```
+attempts        312 rows (all users)      the fastest-growing table
+study_items     167
+review_state     64
+document_pages   42
+documents         9    study_sets  9    heartbeat 12
+study_days        6    chat_usage  3    notes      1    profiles 7
+
+worst single set: 17 cards
+```
+
+**Nothing is close to any plausible cap.** The largest table in the whole
+database is 312 rows across seven users. This work buys nothing today, and
+that is stated plainly rather than dressed up: what it buys is that the day a
+student crosses the cap, the app says so instead of quietly dealing a short
+deck for months.
+
+The growth projection from the test account (16.5 answers per active day) is
+**not usable** — that account holds synthetic probe activity, not study. A real
+rate needs the owner's own history, which RLS correctly prevents this probe
+from reading. Recorded as unmeasured rather than estimated.
+
+### 30.4 The reads run for real, and none was truncated
+
+The shipped functions handed a signed-in client, §24.6's trick, with
+`console.warn` captured:
+
+```
+fetchDashboard      dueToday=12  toRetry=8
+dueCountsBySet      2 sets
+listItems           17 cards
+pagesForSet         1 page
+itemStatsForSet     7 rows
+reviewStatesForSet  7 rows
+continueTarget      a target
+
+NO read was truncated. Every query returned every matching row.
+```
+
+`dueToday=12 toRetry=8` are the same figures §24.6 recorded, which is the
+cross-check that adding a count to nine queries changed no answer.
+
+### 30.5 Both guards were run against a broken version
+
+| Mutation | Result |
+|---|---|
+| `completeRows` never warns | 3 tests fail, incl. *"warns when PostgREST returns a short page with no error"* |
+| Drop `{ count: 'exact' }` from `dueCountsBySet` | 1 test fails — the end-to-end truncation test |
+
+The second is the one worth having. Without a count PostgREST sends no
+Content-Range, the detector goes blind, and the read is silently unprotected
+again — so a future edit that drops the option cannot pass. Sources confirmed
+restored by checksum.
+
+The test harness gained a `truncated(total, …rows)` reply that returns a 200
+with `Content-Range: 0-1/1200` — a max-rows cap exactly as it arrives on the
+wire. That is the shape the whole phase is about, and until now no test could
+produce it.
+
+### 30.6 What is still open
+
+- **The actual `max-rows` value is unknown.** It is in the Supabase dashboard
+  under Settings → API → Max rows and has not been read. It cannot be probed
+  from the client while every table sits far below it. Knowing it would turn
+  "one day this warns" into a date.
+- **Eighteen reads were deliberately left unbounded**: single-row lookups,
+  `head: true` counts, writes, and per-set reads whose ceiling is a card count
+  the deck already loads anyway. Bounding them would add cost and remove
+  nothing.
+- **The `attempts` fallback in `fetchDashboard`** (the `study_days` error path)
+  is still unbounded and uncounted. It runs only when migration 0009 is
+  missing, which it is not, so it is dead on this database — bounding a path
+  that cannot execute would be untestable ceremony.
+
+**Verified:** typecheck clean · **608 tests** (601 before; +7) · `expo export` ·
+boot **6/6** against a fresh bundle · both guards mutation-tested and the
+sources confirmed restored by checksum · every affected read run against the
+live database and confirmed complete · no database writes. **Not deployed.**
 
 
 ## Sources

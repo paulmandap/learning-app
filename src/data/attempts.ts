@@ -1,4 +1,4 @@
-import { supabase, type Db } from './supabase';
+import { completeRows, supabase, type Db } from './supabase';
 import { currentState, saveSchedule } from './review';
 import { maybeRephrase } from './variants';
 import { nextState } from '../core/schedule';
@@ -185,13 +185,15 @@ export interface ItemStat {
  * only this user's rows — the isolation test asserts that explicitly.
  */
 export async function itemStatsForSet(studySetId: string): Promise<ItemStat[]> {
-  const { data, error } = await supabase
+  const result = await supabase
     .from('item_stats')
-    .select('study_item_id, attempts, misses, last_result, last_attempt_at')
+    // count: this feeds the missed pile and the retry deck. A short read
+    // means cards the student got wrong quietly stop coming back.
+    .select('study_item_id, attempts, misses, last_result, last_attempt_at', { count: 'exact' })
     .eq('study_set_id', studySetId);
 
-  if (error) throw new Error(error.message);
-  return (data ?? []) as unknown as ItemStat[];
+  if (result.error) throw new Error(result.error.message);
+  return completeRows('itemStatsForSet', result) as unknown as ItemStat[];
 }
 
 /**
@@ -229,14 +231,17 @@ export interface ContinueTarget {
  * security — only for presentation.
  */
 export async function continueTarget(): Promise<ContinueTarget | null> {
-  const { data, error } = await supabase
+  const result = await supabase
     .from('item_stats')
-    .select('study_set_id, study_item_id, last_result, last_attempt_at')
+    // count: ordered newest-first, so a truncated read still finds the right
+    // "continue" target — but it would silently narrow what the fallback
+    // below can search, so it is still worth knowing about.
+    .select('study_set_id, study_item_id, last_result, last_attempt_at', { count: 'exact' })
     .order('last_attempt_at', { ascending: false });
 
-  if (error) throw new Error(error.message);
+  if (result.error) throw new Error(result.error.message);
 
-  const rows = (data ?? []) as unknown as {
+  const rows = completeRows('continueTarget', result) as unknown as {
     study_set_id: string;
     study_item_id: string;
     last_result: AttemptResult | null;
