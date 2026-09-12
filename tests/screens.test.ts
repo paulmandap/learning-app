@@ -36,6 +36,22 @@ function levelSegment(source: string): string {
   return source.slice(start, start + 600);
 }
 
+/**
+ * Source with its comments removed.
+ *
+ * Needed because a docstring that EXPLAINS why something is absent contains the
+ * very word an "is it absent?" check looks for. `app/nomi.tsx` documents that
+ * it deliberately does not call `getNomiContext`, and a naive substring search
+ * read that sentence as the call itself.
+ *
+ * Crude — a `//` inside a string literal would be eaten too — and adequate,
+ * because it is only ever pointed at screens in this repo, none of which put a
+ * URL in one.
+ */
+function code(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
+
 describe('the dashboard button goes where it says', () => {
   const progress = read('app', '(tabs)', 'progress.tsx');
 
@@ -177,5 +193,184 @@ describe('an unknown URL has a screen', () => {
     const source = read('app', '+not-found.tsx');
     const shown = source.match(/<(Title|Body)>([\s\S]*?)<\/\1>/g)?.join(' ') ?? '';
     expect(shown).not.toMatch(/\b404\b|route|URL|path/i);
+  });
+});
+
+describe('Nomi has a way in and a place to go', () => {
+  const home = read('app', '(tabs)', 'index.tsx');
+  const progress = read('app', '(tabs)', 'progress.tsx');
+  const layout = read('app', '_layout.tsx');
+
+  it('has a route file', () => {
+    expect(existsSync(join('app', 'nomi.tsx'))).toBe(true);
+  });
+
+  it('is registered on the stack, so the header is not "nomi"', () => {
+    // Same reason as +not-found and set/[id]/blanks: an unregistered route
+    // shows its own pattern to the user as the header title.
+    expect(layout).toContain('name="nomi"');
+    expect(layout).toMatch(/name="nomi"[\s\S]{0,80}Nomi/);
+  });
+
+  it('is pushed above the tabs with a back control', () => {
+    // Nomi is a task you open, not a place in the bar, so it needs its own way
+    // out — an installed PWA has no edge-swipe-back.
+    expect(layout).toMatch(/name="nomi"[\s\S]{0,120}backable/);
+  });
+
+  it('opens from the heading of Study and Progress', () => {
+    for (const source of [home, progress]) {
+      expect(source).toContain('NomiButton');
+      expect(source).toContain('TitleRow');
+    }
+  });
+
+  it('appears on every one of Progress\'s three render branches', () => {
+    // Progress returns early for loading and for nothing-answered-yet. Hand
+    // editing three branches is how two of them quietly lose the control.
+    const rows = progress.match(/<TitleRow title="Progress" action=\{<NomiButton \/>\} \/>/g) ?? [];
+    expect(rows).toHaveLength(3);
+  });
+
+  it('navigates to the route the stack registered', () => {
+    const button = read('src', 'ui', 'nomi.tsx');
+    expect(button).toContain("router.push('/nomi')");
+  });
+
+  it('is NOT in the bottom navigation', () => {
+    // The four tabs are the learning loop. A fifth for a companion would make
+    // Nomi somewhere you go instead of studying.
+    const tabs = read('app', '(tabs)', '_layout.tsx');
+    expect(tabs).not.toMatch(/nomi/i);
+  });
+
+  it('leaves the four existing tabs exactly as they were', () => {
+    const tabs = read('app', '(tabs)', '_layout.tsx');
+    for (const href of ["href: '/'", "href: '/notes'", "href: '/progress'", "href: '/settings'"]) {
+      expect(tabs).toContain(href);
+    }
+  });
+
+  it('asks the database for nothing when opened', () => {
+    // The screen holds space; it does not report progress it cannot know.
+    // getNomiContext is the boundary Phase C wires up — until then, opening
+    // Nomi must not cost a round trip.
+    const screen = code(read('app', 'nomi.tsx'));
+    expect(screen).not.toContain('useQuery');
+    expect(screen).not.toContain('getNomiContext');
+    expect(screen).not.toContain('supabase');
+  });
+
+  it('does not pretend to know how the student is doing', () => {
+    // No invented figures. A companion that states a confident number it made
+    // up is worse than one that says nothing, because it gets believed.
+    const screen = read('app', 'nomi.tsx');
+    const shown = screen.match(/<Body[^>]*>([\s\S]*?)<\/Body>/g)?.join(' ') ?? '';
+    expect(shown).not.toMatch(/\d+%|\d+ cards? (due|wrong|missed)|you are \d+/i);
+  });
+
+  it('says nothing technical', () => {
+    const screen = read('app', 'nomi.tsx');
+    const shown = screen.match(/<(Title|Body|NomiSlot)[^>]*>([\s\S]*?)<\/\1>/g)?.join(' ') ?? '';
+    expect(shown).not.toMatch(/\bmodel\b|\btoken\b|\bAPI\b|\bprompt\b|\bquery\b|\bendpoint\b/i);
+  });
+});
+
+describe('the existing assistant still works, and is now called Nomi', () => {
+  it('is still mounted once above the navigator', () => {
+    // It survives navigation and keeps its panel open across screens. Moving it
+    // inside the Stack would remount it on every route change.
+    const layout = read('app', '_layout.tsx');
+    expect(layout).toContain('<StudyAssistant />');
+    expect(layout).toContain("segments[0] !== 'sign-in'");
+  });
+
+  it('still asks through askAssistant — one AI, not two', () => {
+    const ui = read('src', 'ui', 'assistant.tsx');
+    expect(ui).toContain('askAssistant');
+  });
+
+  it('wears the same ✦ as the header entry point', () => {
+    // Two different marks would make one companion look like two features.
+    expect(read('src', 'ui', 'assistant.tsx')).toContain('✦');
+    expect(read('src', 'ui', 'nomi.tsx')).toContain('✦');
+  });
+
+  it('names Nomi in the copy the student reads', () => {
+    expect(read('src', 'ui', 'assistant.tsx')).toContain('Ask Nomi');
+  });
+
+  it('leaves the D13 privacy copy exactly as approved', () => {
+    // The owner's instruction, pinned rather than remembered: this paragraph is
+    // approved copy that D13 says must not be paraphrased smaller, and the word
+    // Nomi does not enter it. The app names Nomi everywhere except here.
+    const settings = read('app', '(tabs)', 'settings.tsx');
+    expect(settings).toContain(
+      'The study assistant works the same way — what you ask it, and the notes it looks at to',
+    );
+    const notice = settings.slice(settings.indexOf('Where your notes go'), settings.indexOf('key + test'));
+    expect(notice).not.toMatch(/nomi/i);
+  });
+});
+
+describe('adaptive order reaches the two modes that ask for it, and no others', () => {
+  const flashcards = read('app', 'set', '[id]', 'flashcards.tsx');
+  const blanks = read('app', 'set', '[id]', 'blanks.tsx');
+  const quiz = read('app', 'set', '[id]', 'quiz.tsx');
+
+  for (const [name, source] of [['flashcards', flashcards], ['blanks', blanks]] as const) {
+    it(`${name} deals with studyOrder`, () => {
+      expect(code(source)).toContain('studyOrder(');
+    });
+
+    it(`${name} tells it which section each card is from`, () => {
+      // Without the section accessor the queue still orders by struggle but
+      // stops grouping, and a miss is followed by whatever happened to be next.
+      expect(code(source)).toContain('section_title');
+    });
+  }
+
+  it('quiz still shuffles, and does NOT deal adaptively', () => {
+    // The per-round shuffle is the owner's: "make it randomized everytime i
+    // opened the quiz." Answering in a memorised order tests the order as much
+    // as the material, which is the thing the round seed exists to stop.
+    expect(code(quiz)).toContain('shuffleSeeded(');
+    expect(code(quiz)).not.toContain('studyOrder(');
+  });
+
+  it('no EFFECT changes the level — only the student does', () => {
+    // Levels are exclusive at the owner's request, and the buttons carry counts
+    // so the challenge is chosen knowingly. `setLevel` in an onPress is the
+    // student tapping; `setLevel` inside a useEffect is the app deciding for
+    // them, which is what Phase D was explicitly told not to build.
+    //
+    // Blanks is the single documented exception: it opens on a level that has
+    // any blanks at all, because they land almost entirely in Remember, and it
+    // stops the moment the student picks one themselves.
+    const effectsIn = (source: string): string[] => {
+      const out: string[] = [];
+      let from = 0;
+      for (;;) {
+        const start = code(source).indexOf('useEffect(', from);
+        if (start === -1) return out;
+        out.push(code(source).slice(start, start + 400));
+        from = start + 1;
+      }
+    };
+
+    for (const source of [flashcards, quiz]) {
+      expect(effectsIn(source).filter((e) => e.includes('setLevel('))).toEqual([]);
+    }
+    // Blanks does, and guards it.
+    expect(effectsIn(blanks).some((e) => e.includes('setLevel('))).toBe(true);
+    expect(code(blanks)).toContain('levelChosen');
+  });
+
+  it('the selector never filters — it only reorders', () => {
+    // A deck that hid what was not due would tell someone who sat down to study
+    // that there is nothing to study.
+    const core = read('src', 'core', 'schedule.ts');
+    const fn = core.slice(core.indexOf('export function studyOrder'));
+    expect(fn).not.toMatch(/\.filter\([^)]*isDue/);
   });
 });

@@ -163,25 +163,36 @@ export function isDue(state: Scheduled | null | undefined, now: number): boolean
 }
 
 /**
+ * Which of the three queue bands a card belongs to.
+ *
+ * 0 due · 1 never reviewed · 2 not yet due. Shared by `reviewOrder` and
+ * `studyOrder` so the backlog-first principle has exactly one definition:
+ * a card you were meant to see a week ago leads, and new material is only
+ * added once the backlog is clear.
+ */
+export function dueBucket(state: Scheduled | null | undefined, now: number): 0 | 1 | 2 {
+  if (!state) return 1; // never reviewed
+  return state.dueAt <= startOfUtcDay(now) ? 0 : 2;
+}
+
+/**
  * Order a study queue: due cards first (longest overdue first), then cards
  * never reviewed, then everything else by how soon it comes up.
  *
  * Overdue-first rather than newest-first because a card you were meant to see a
  * week ago is the one closest to being forgotten. New cards come after due ones
  * so a backlog is cleared before more material is added to it.
+ *
+ * Reads only `dueAt`. `studyOrder` below is what the study screens deal — this
+ * stays as the plain "what does the schedule say" ordering it has always been,
+ * and is the base `studyOrder` refines.
  */
 export function reviewOrder<T>(
   items: T[],
   stateOf: (item: T) => Scheduled | null | undefined,
   now: number,
 ): T[] {
-  const today = startOfUtcDay(now);
-
-  const rank = (item: T): number => {
-    const state = stateOf(item);
-    if (!state) return 1; // never reviewed
-    return state.dueAt <= today ? 0 : 2; // due, or not yet due
-  };
+  const rank = (item: T): number => dueBucket(stateOf(item), now);
 
   return items
     .map((item, i) => ({ item, i })) // index keeps the sort stable
@@ -198,4 +209,116 @@ export function reviewOrder<T>(
       return a.i - b.i;
     })
     .map(({ item }) => item);
+}
+
+// ----------------------------------------------------------------- selection --
+
+/**
+ * The order the study screens actually deal (Phase D).
+ *
+ * `reviewOrder` answers "what does the schedule say". This answers "what should
+ * this student see next", which is a different question once you know that some
+ * cards have beaten them repeatedly and others never have.
+ *
+ * ## It refines the schedule, it does not overrule it
+ *
+ * The three bands are untouched: due, then never-seen, then future. That is the
+ * backlog principle and it still holds — clearing what is overdue before adding
+ * new material is the whole point of having a schedule. Everything below only
+ * decides the order WITHIN a band.
+ *
+ * ## Two things it adds
+ *
+ * **Struggle first.** A card failed four times comes before one failed once,
+ * and a card whose last answer was wrong (`reps === 0`) comes before one on a
+ * streak. Both numbers have been arriving in every study screen since Phase 6 —
+ * `reviewStatesForSet` returns `lapses`, `reps` and `ease` per card — and
+ * `reviewOrder` reads none of them. Nothing new is fetched or stored for this.
+ *
+ * **A section's cards stay together.** The brief asks that a miss be followed by
+ * another card from the same part of the notes rather than a jump elsewhere.
+ * Grouping the queue does that without any mid-session reordering: the sibling
+ * is already the next card. The alternative — recomputing after every answer —
+ * would mean reordering underneath a moving cursor, which repeats or skips
+ * cards and would undo the per-level position fix (§17.1).
+ *
+ * A section's place in the queue is set by its most-struggled card, so the part
+ * of the notes going worst leads, and its cards are dealt together.
+ *
+ * ## What it deliberately does not do
+ *
+ *  - **It never changes the level.** Levels are exclusive at the owner's request
+ *    and the student picks one from buttons carrying counts. Filtering happens
+ *    in the screen, before this is called; this only ever reorders what it is
+ *    handed.
+ *  - **It ignores section accuracy and the Phase C trend.** Both are calibrated
+ *    for a display label, not for choosing what someone studies: the trend is
+ *    wrong on about one screen in four across the sections it shows, and
+ *    `sectionSplit`'s accuracy carries an unresolved question about how partials
+ *    score. Per-card `lapses`/`reps` are stronger evidence and depend on neither.
+ *  - **It does not filter.** Like `reviewOrder`, every card handed in comes back.
+ *    A deck that hid what was not due would tell someone who sat down to study
+ *    that there is nothing to study.
+ *
+ * Fully deterministic: same cards, same schedules, same clock, same order.
+ */
+export function studyOrder<T>(
+  items: T[],
+  stateOf: (item: T) => Scheduled | null | undefined,
+  sectionOf: (item: T) => string | null,
+  now: number,
+): T[] {
+  // Start from the schedule's own answer. It settles the bands and, within
+  // them, overdue-first and stability — so anything this function does not have
+  // an opinion about keeps the behaviour Phase 6 established and tested.
+  const scheduled = reviewOrder(items, stateOf, now);
+
+  /** How badly this card is going. Lower sorts earlier. */
+  const struggle = (item: T): [number, number] => {
+    const state = stateOf(item);
+    // A card never reviewed has no struggle history. It sits at the calm end of
+    // its own band, which only matters inside band 1 where every card is new.
+    if (!state) return [0, 0];
+    return [-state.lapses, state.reps];
+  };
+
+  const byStruggle = (a: { item: T; i: number }, b: { item: T; i: number }): number => {
+    const [al, ar] = struggle(a.item);
+    const [bl, br] = struggle(b.item);
+    // Most lapses first, then whoever is not on a streak, then the schedule's
+    // own order via the index — which already encodes longest-overdue-first.
+    return al - bl || ar - br || a.i - b.i;
+  };
+
+  const out: T[] = [];
+
+  // Band by band, so the backlog cannot be reordered behind new material.
+  for (const band of [0, 1, 2] as const) {
+    const inBand = scheduled
+      .map((item, i) => ({ item, i }))
+      .filter(({ item }) => dueBucket(stateOf(item), now) === band);
+    if (inBand.length === 0) continue;
+
+    const ranked = [...inBand].sort(byStruggle);
+
+    // A section's place is its most-struggled card's place. `ranked` is already
+    // in that order, so first appearance is the answer — and a Map preserves
+    // insertion order, which is what makes this deterministic without a second
+    // sort over section names.
+    const bySection = new Map<string, { item: T; i: number }[]>();
+    for (const entry of ranked) {
+      // Cards with no section share one group rather than each becoming their
+      // own. They are the leftovers, not a part of the notes.
+      const key = sectionOf(entry.item) ?? '';
+      const group = bySection.get(key);
+      if (group) group.push(entry);
+      else bySection.set(key, [entry]);
+    }
+
+    for (const group of bySection.values()) {
+      for (const { item } of group) out.push(item);
+    }
+  }
+
+  return out;
 }

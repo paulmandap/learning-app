@@ -18,7 +18,7 @@ import { listItems, type StudyItem } from '../../../src/data/items';
 import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
 import { fetchProfile } from '../../../src/data/profile';
 import { reviewStatesForSet } from '../../../src/data/review';
-import { reviewOrder } from '../../../src/core/schedule';
+import { studyOrder } from '../../../src/core/schedule';
 import { gradeTypedAnswer, makeCloze, type Cloze } from '../../../src/core/cloze';
 import type { Level } from '../../../src/core/planner';
 
@@ -156,7 +156,14 @@ export default function Blanks() {
   const queue = useMemo(() => {
     const atLevel = dealable.filter((b) => b.item.level === level);
     if (retryOnly) return atLevel;
-    return reviewOrder(atLevel, (b) => schedules?.get(b.item.id), Date.now());
+    // The same order Flashcards deals — one function, so a card's turn does not
+    // depend on which mode you opened.
+    return studyOrder(
+      atLevel,
+      (b) => schedules?.get(b.item.id),
+      (b) => b.item.section_title,
+      Date.now(),
+    );
   }, [dealable, level, schedules, retryOnly]);
 
   /**

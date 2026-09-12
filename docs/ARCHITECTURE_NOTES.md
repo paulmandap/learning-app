@@ -2828,6 +2828,13 @@ discarded and `getUser()` answers *"Auth session missing!"*. Measured directly
 against supabase-js 2.114. The same field is required by the test stub in
 `tests/data.test.ts` for the same reason, which is how it was found.
 
+> **CORRECTION, same day (see §25.4): the fix WAS sufficient. This section's
+> conclusion below is wrong.** The harness signs in and screenshots
+> authenticated routes again. What follows is left as written because the
+> reasoning was sound and the conclusion was not — the run it rests on failed
+> for some other, transient reason, and "not sufficient" was recorded after
+> about two attempts rather than after establishing it reproducibly.
+
 **The fix is in and it is not sufficient.** With `expires_at` written, the
 session is well-formed and auth-js **keeps** it — an invalid one is deleted, and
 this one survives the navigation with valid fields and ~3588s of life left — yet
@@ -2909,6 +2916,437 @@ boot **6/6** against a fresh bundle · both key assertions mutation-tested ·
 both queries run against the live database · `vitest.config.mts` gains `test.env`
 because `src/data/supabase.ts` throws at import without it, and that fail-fast
 stays. **Not deployed. No restore drill. Nothing checked by eye.**
+
+## 25. Nomi — naming the companion, and a place for it (2026-09-11)
+
+The app has had an AI assistant since Phase 9c (**D14**) and has never had a name
+for it. This gives it one — **Nomi** — adds a screen of its own, and puts in the
+boundary through which it will later reach the student's learning data. No
+learning intelligence is built; that is Phase C and D.
+
+### 25.1 One companion, not two
+
+Nomi is the existing assistant's identity, not a second AI. `askAssistant` is
+still the implementation, the ✦ floating button is still mounted once above the
+navigator, and the quota, the grounding store and the prompt builder are
+untouched. The only changes there are the words a student reads.
+
+The floating ✦ is **Nomi in its in-context form** — it sees the card in front of
+you. `app/nomi.tsx` is the dedicated place, for questions about the studying
+rather than about one card. Both carry the same ✦ deliberately: two marks would
+make one companion look like two features.
+
+**The D13 privacy copy in Settings is deliberately NOT renamed.** It still reads
+*"The study assistant works the same way…"*. That paragraph is owner-approved
+copy which D13 says must not be paraphrased smaller, and the instruction was to
+leave it alone. So the app names Nomi everywhere except there — a chosen
+inconsistency, and `tests/screens.test.ts` now pins the sentence verbatim and
+asserts the word Nomi never appears in that block, so a later edit cannot drift
+into it. Mutation-tested: renaming it there fails the suite.
+
+### 25.2 There was nowhere to put it
+
+A tab root has **no navigator header** — `headerShown: false` for the whole
+`(tabs)` group, and the tabs layout renders none of its own — so each screen
+names itself with a `Title` as the first child of `Screen`. "The header area" of
+a tab is therefore the top of the body, and the bottom-right corner was already
+the floating ✦.
+
+`menu.tsx` has `HeaderTitle` and `HeaderGlyphButton`, dead since the Home gear
+was superseded by the Settings tab, and they look like exactly what was needed.
+They are not: their `marginLeft`/`marginRight` compensates for a stack header
+spanning the whole window, and inside `Screen`'s already-centred column they
+would inset a second time. Hence a new `TitleRow` in `components.tsx` instead —
+recorded because reusing them is the obvious move and it is wrong.
+
+`TitleRow` is a primitive rather than four hand-edits because **Progress renders
+its title from three early returns** (loading, nothing-answered-yet, the real
+screen) and Study from one. A test asserts all three Progress branches carry it;
+dropping one fails.
+
+**Nomi is not a fifth tab.** The four tabs are the learning loop, and a bar entry
+would make Nomi somewhere you go *instead of* studying rather than something
+beside it. It is a pushed route with a back control, like every other task.
+
+### 25.3 The boundary, and what is deliberately not behind it
+
+```
+Nomi UI  →  src/data/nomi.ts  →  existing src/data functions  →  Supabase
+```
+
+`getNomiContext(db)` composes exactly one existing call, `listSets`, and imports
+no Supabase of its own — the rule `src/data/pipeline.ts` already keeps, because
+an orchestrator that runs its own queries is just a second data layer. It takes
+the **Phase B `Db` seam** as its optional trailing parameter, so it is testable
+and so live verification stays possible.
+
+`NomiContext` in `src/core/nomi.ts` holds only `sets`. Everything else Nomi will
+want — what is due, which sections are weak, whether accuracy is improving —
+names itself in a comment and is **not implemented**, because none of it can be
+answered truthfully before Phase C. A companion that states a confident figure
+it invented is worse than one that says nothing, since it gets believed.
+
+**Nothing in the UI calls it yet, and that is the design.** Opening Nomi's screen
+costs no round trip; a placeholder that quietly spends a query on every visit is
+one that ships and is forgotten. A test asserts the screen contains no
+`useQuery`, and another asserts `getNomiContext` issues exactly one request —
+adding a second fails it.
+
+Two smaller things fell out of this:
+
+- **The by-reference trap, caught before it landed.** `getNomiContext` first
+  returned a shared `EMPTY_NOMI_CONTEXT` constant on its degraded path — exactly
+  the §24.4 bug. It is now `emptyNomiContext()`, a function, and a test mutates a
+  returned context to prove the next one is clean.
+- **The Phase B call-site hazard, second sighting.** Adding the seam to
+  `listSets` broke `app/(tabs)/index.tsx`, which passed `queryFn: listSets` **by
+  reference** — TanStack Query would have handed its context object in as the
+  database client. Typecheck caught it, as it did for `storageUsedBytes` in §24.2.
+  That is twice now: the optional trailing parameter is safe only while nothing
+  passes the function by reference.
+
+### 25.4 The screenshot harness works again — §24.3 was wrong
+
+§24.3 recorded the missing `expires_at` as confirmed-but-insufficient, and that
+conclusion does not survive. With the fix in place the harness signs in, renders
+authenticated routes and saves images. Home, Progress and Nomi were all captured
+at 393px in dark mode.
+
+The earlier finding was reached after about two failed runs and written up as
+settled. The honest lesson is not about auth: **"I tried it twice and it still
+failed" is not a measurement**, and this project's own habit — reproduce, then
+conclude — is exactly what was skipped. The section is kept with a correction
+banner rather than rewritten, because the reasoning in it was sound and only the
+conclusion was wrong, and that is worth being able to see.
+
+### 25.5 Looking at it caught what the tests could not
+
+The first build rendered **"Nomi" twice** — once in the stack header, once as the
+body title directly beneath it. Every test passed: they assert the route exists,
+that it is registered, that it makes no queries and that its copy is plain, and
+none of that can see two identical words down a screen.
+
+Removed the body heading; `note/[id]` already does it this way, letting the
+header name a pushed screen. (`new.tsx` keeps a body title because its wording
+changes with how you arrived — "Add notes" / "Make cards from your note" — so the
+duplication there is only apparent.)
+
+This is the first UI change since §18 to be checked by eye, and it found a defect
+on the first look.
+
+**Verified:** typecheck clean · **514 tests** (491 before; +23) · `expo export` ·
+boot **6/6** against a fresh bundle · every new guard mutation-tested, including
+the D13 copy, the tab exclusion, the three Progress branches, the no-query rule
+and the single-query rule · Nomi's copy confirmed present in the shipped bundle
+and the D13 sentence confirmed unchanged in it · **screenshots taken and looked
+at** for Home, Progress and Nomi. **Not deployed. No restore drill.**
+
+## 26. Phase C — which sections are moving, and a label retired (2026-09-12)
+
+The audit found one question in the brief that nothing in the app could answer:
+*which concepts are improving?* `sectionSplit` says where a student stands —
+43% on Renal Physiology — and cannot say whether that is on the way up from 20%
+or down from 70%. Those are opposite situations wanting opposite advice.
+
+Nothing new is stored for it. `attempts` has carried `created_at` since 0001;
+the information was always there and was only ever aggregated away by
+`item_stats`, which sums a lifetime and keeps no order.
+
+### 26.1 The first sensible-looking gate was unusable, and the simulation said so
+
+`app/(tabs)/progress.tsx` already carried a decision against this: *"no chart of
+accuracy over time: with a handful of answers a day it would be mostly noise,
+and a noisy chart of a real measure is worse than no chart."* A direction label
+is not a chart, but it answers to exactly that objection — so the gate was
+measured rather than argued.
+
+The measurement: simulate a student whose real accuracy **never changes**, and
+count how often the rule claims a direction. Every one is a false alarm, because
+there is nothing to detect. At p = 0.5, where variance is worst, 20,000 trials
+per cell:
+
+| answers per window | ≥ 1/3 | ≥ 0.40 | ≥ 0.50 |
+|---|---|---|---|
+| 6  | **0.385** | 0.145 | 0.145 |
+| 8  | 0.215 | 0.077 | 0.077 |
+| 10 | 0.114 | **0.069** | 0.031 |
+| 12 | 0.154 | 0.065 | 0.021 |
+| 15 | 0.084 | 0.022 | 0.005 |
+
+**Six per window at a one-third threshold was the obvious first choice and would
+have told two students in five that they were improving or slipping when nothing
+had happened.** It looked entirely reasonable in code review and would have
+shipped. That is the whole value of the measurement.
+
+Settled on **ten per window, 0.40** — 6.9% false alarms in the worst case, 2.8%
+for a consistently strong student, still catching a genuine 0.4 → 0.8 shift 55%
+of the time. Twelve buys almost nothing (6.5%) for a fifth more data. At ten,
+accuracy moves in tenths, so the threshold is exactly *"four more right out of
+ten"*.
+
+The rows are not monotonic because the threshold interacts with the window's
+granularity — a detail worth keeping, since it is why 12 looks worse than 10 at
+1/3.
+
+**The honest cost: a section needs twenty recent answers before this says
+anything at all.** Staying silent until then is the point, and `steady` renders
+as nothing so the usual state of the screen is unchanged.
+
+### 26.2 The live data agreed, by staying quiet
+
+Run against the test account:
+
+```
+FIGURE 2.1 — PLANT ORGANS…   n=26   0% -> 15%   steady   (0.15 < 0.40)
+Overview of the plant body   n=6                 (no trend — under the gate)
+```
+
+A 15-point move on 26 answers is not called a direction. That is the gate
+working on real data rather than on a simulation.
+
+### 26.3 The first `.limit()` in `src/data`
+
+The trend needs the answers themselves, in sequence, so it is a sixth query on
+the dashboard — and the only read on that screen touching a table that grows
+without limit. It is bounded twice: a 60-day floor because a turnaround in March
+is not news in September, and a 600-row cap because a heavy user could hold
+thousands inside that window. Newest first, so a cap that bites keeps recent
+history rather than an arbitrary slice.
+
+Every other read in `src/data` is still unbounded — that stays on the Phase G
+list. This one was written bounded because `attempts` is the fastest-growing
+table in the app.
+
+The Phase B test asserting *"five queries and no more"* now asserts the **set of
+tables** rather than the count. The count was never the invariant; a table
+appearing twice is.
+
+### 26.4 `topic` cannot group anything, measured properly this time
+
+The audit deferred a decision on `topic` and the `topic_stats` view. Measured
+against the live database on 2026-09-12, with normalisation actually attempted
+rather than assumed:
+
+```
+cards                     28
+distinct topic labels     26      1.08 cards per label
+after normalising         24      case, punctuation, articles, plurals,
+                                  word order all folded together
+labels reaching 3 cards    1 of 24
+distinct section_title     3      9.33 cards each
+```
+
+The model writes a fresh two-to-four word label per card — "Leaf anatomy", "Leaf
+Function", "Root Absorption" — so every per-topic rate would be computed over a
+single answer. **Normalisation moves it from 26 to 24.** This confirms the
+earlier "17 labels for 17 cards" with more data and a real attempt at fixing it.
+
+So `topic_stats` is retired in migration **0015**: a view with no consumer, which
+the isolation test and the backup check have both been maintaining as though it
+mattered.
+
+**The `topic` column stays.** It costs one text field and is the raw material if
+a later phase asks the model to choose from a fixed vocabulary instead of
+inventing a label. What goes is the view that pretends the labels group today.
+
+`study_items.form` goes with it, for a simpler reason: **null on every card in
+the database.** It was written on every insert, read by nothing, and the
+generation schema stopped returning it, so it has been writing null its whole
+life.
+
+### 26.5 Applied in an order that cannot break
+
+Migrations here are pasted by hand, so code and schema are out of step for
+however long that takes. Both changes are written to be correct in either state:
+
+- `src/data/items.ts` stopped selecting and writing `form` first. Selecting
+  fewer columns is valid whether or not the column is still there.
+- `scripts/isolation-test.ts` treats a missing `topic_stats` as **retired**
+  rather than failed, recognising `PGRST205`/`42P01`. Verified passing **20/20**
+  with the view still present; it will report it as retired once dropped.
+
+That is the same tolerance `recordAttempt` keeps for `23514` and `notes` keeps
+for `PGRST205`, and it is why **migration 0015 is safe to run whenever** — it is
+not applied yet.
+
+### 26.6 What was looked at, and what could not be
+
+`steady` renders nothing, and the test account produces only `steady`, so the
+new word could not be seen from real data. The seeder deliberately refuses to
+fabricate answers — *"on a real account that would corrupt the one thing the app
+is trusted to remember"* — and that refusal is right, so no answers were faked.
+
+Instead the word was forced on locally, built, screenshotted and reverted, to
+judge the one thing that actually needed eyes: **the row layout**. With the
+longest real section name wrapping to two lines, "slipping 7%" sits cleanly to
+the right of it and the accuracy bar below is unaffected. The forced build was
+never kept.
+
+One case the forced view could not show, and which the real code does handle: a
+section in *Worth another look* that is nonetheless **climbing** renders green
+inside an amber-headed list. That is deliberate — a weak section on the way up is
+the most encouraging thing this screen can say.
+
+### 26.7 Three things the first write-up left unstated (verified 2026-09-12)
+
+Reviewed after the fact, and all three were real gaps rather than wording.
+
+**The 6.9% is per SECTION, and the screen shows four.** The dashboard computes a
+direction for every section, so the chance at least one is spurious for a
+student who has not changed compounds (40,000 trials per cell):
+
+| sections | p=0.5 | p=0.7 | p=0.85 |
+|---|---|---|---|
+| 1 | 0.069 | 0.077 | 0.026 |
+| 4 | **0.249** | 0.278 | 0.102 |
+| 8 | 0.441 | 0.481 | 0.196 |
+
+**About one screen in four will carry a spurious word** once four sections are
+ranked. No correction is applied — the alternative is a threshold so strict
+nothing is ever said, and the cost of being wrong is one soft word, not a grade
+or a schedule. But "6.9%" alone reads as a promise about the screen when it is
+only a promise about one row.
+
+**The simulation's independence assumption is optimistic, in a known direction.**
+It treats answers as independent coin flips. Real data is neither independent
+nor stationary: the same cards recur so answers cluster; `reviewOrder` deals
+overdue and lapsed cards first, so a window is deliberately enriched with cards
+recently got wrong; and a real change is gradual rather than a clean step at the
+midpoint, which the power figure assumes. The rates are a **floor**. They were
+still enough to reject the first constants outright, which is what they were for.
+
+**The percentage on the row and the word beside it come from different windows.**
+`SectionScore.accuracy` is a lifetime rate from `item_stats`; `earlier`/`recent`
+are the last 60 days capped at 600 answers. A section can read *"7% climbing"* —
+the 7% still carries a bad start the trend has left behind. That is the intended
+reading and is now stated at the render site and on the type. `change` is in
+percentage **points**, not relative percent. Only `direction` reaches a user
+today; anything that later prints the trend's own numbers must name its window.
+
+**And one correction.** `sectionSplit`'s docstring claimed *"a partial counts as
+neither right nor wrong"* while the arithmetic counts it exactly as a miss —
+`correct = attempts - misses - partials` over `attempts`. `tests/progress.test.ts`
+pinned the real behaviour under that same false name. Both now describe what the
+code does. **The behaviour is unchanged and flagged, not fixed:** the old
+wording's reasoning is a fair argument for excluding partials from both halves
+of the fraction, but acting on it moves every accuracy figure on Progress, which
+is an owner's decision.
+
+**Verified:** typecheck clean · **534 tests** · `expo export` · boot **6/6**
+against a fresh bundle · the gate measured by simulation, the rejected setting
+recorded, and the family-wise rate measured after review · trend run against the
+live database · isolation **20/20** · seeded study days cleared afterwards.
+**Migration 0015 written and NOT applied. Not deployed. No restore drill.**
+
+## 27. Phase D — the deck deals what is going worst (2026-09-12)
+
+`reviewOrder` answers *what does the schedule say*. `studyOrder` answers *what
+should this student see next*, which is a different question once some cards
+have beaten them repeatedly and others never have.
+
+### 27.1 Three parts of the plan collided with approved decisions
+
+Each was put back to the owner rather than routed around, and each came back the
+conservative way:
+
+**It never changes the level.** The plan said a run of correct answers should
+escalate to the level above. Levels are exclusive at the owner's request — *"5
+cards in understand is basically remember, there's no challenge at all"* — and
+the buttons carry counts so the challenge is picked knowingly. Auto-escalation
+would make those counts lie about what is being dealt. The selector reorders
+**within** the chosen level and nothing else. A test asserts no `useEffect` in
+Flashcards or Quiz calls `setLevel`; Blanks keeps its single documented
+exception, which stops the moment the student picks a level.
+
+**Quiz keeps its shuffle.** Flashcards and Blanks both already ordered by
+`reviewOrder`, so upgrading that one function improves both. The quiz shuffles
+per round because the owner asked — *"make it randomized everytime i opened the
+quiz"* — and answering in a memorised order tests the order as much as the
+material. A test asserts `quiz.tsx` contains `shuffleSeeded` and **not**
+`studyOrder`.
+
+**The queue is built once.** The brief wants a miss followed by another card
+from the same part of the notes. The screens are `items[index]`, so reacting
+mid-answer means reordering under a moving cursor — which repeats or skips
+cards, and would undo the per-level position fix from §17.1. Grouping a
+section's cards adjacently gets the same effect with no mutation: the sibling is
+already the next card.
+
+### 27.2 The signal was already arriving and being thrown away
+
+`reviewStatesForSet` has returned `lapses`, `reps` and `ease` per card into
+every study screen since Phase 6, and `reviewOrder` reads only `dueAt`. **No new
+query, no new column, no new state** — the struggle data was in memory the whole
+time.
+
+### 27.3 It refines the schedule; it does not overrule it
+
+The three bands — due, never-seen, future — are untouched, and `dueBucket` is
+now shared so that principle has one definition rather than two. Everything
+`studyOrder` adds happens *within* a band:
+
+- most lapses first, then whoever is not on a streak (`reps === 0`), then the
+  schedule's own longest-overdue order;
+- a section's cards dealt as an unbroken run, the section's place set by its
+  **worst** card rather than its average — a section holding one card you keep
+  failing is worth opening even if the rest is fine.
+
+A test pins that a much-failed *future* card still waits behind a calm *new*
+one, and another pins that on a deck with no history `studyOrder` is
+byte-identical to `reviewOrder`, so Phase 6's behaviour did not silently change
+for every new set.
+
+**Deliberately not used: section accuracy and the Phase C trend.** Both are
+calibrated for a display label, not a selection decision — §26.7 measured the
+trend wrong on about one screen in four across the sections it shows, and
+`sectionSplit`'s accuracy still carries the open question about how partials
+score. Per-card `lapses`/`reps` are stronger evidence and depend on neither. This
+is why Phase C's two ⚠️ items were not blockers for Phase D: the study screens
+never read anything the dashboard computes.
+
+### 27.4 Verified on the live database, and looked at
+
+Run against the real test account, comparing both orderings on the same cards:
+
+```
+remember (10) — ORDER CHANGED: true
+   1. due  lapses=6 reps=0
+   2. due  lapses=5 reps=0
+   3. due  lapses=5 reps=0
+   4. due  lapses=5 reps=0
+   5. due  lapses=4 reps=0
+   6. due  lapses=0 reps=1
+   7. due  lapses=0 reps=1
+   8-10. new
+understand (3) — ORDER CHANGED: false      all new, nothing to refine
+apply (4)      — ORDER CHANGED: false      all new, nothing to refine
+```
+
+The cards that have beaten the student most now lead, the bands hold, and the
+refinement is correctly invisible where there is no history.
+
+Screenshotted at 393px in dark mode on the Remember deck: the most-lapsed card
+is dealt first and the existing *"7 due for review today — those come first"*
+line still reads true. **Section grouping could not be seen** — every card in
+this set belongs to one section, so there was nothing to group. It is covered by
+unit tests and mutation-tested, but not observed on real data.
+
+### 27.5 Both guards were run against a broken version
+
+| Mutation | Result |
+|---|---|
+| Sort struggle globally, ignoring the bands | 3 tests fail, incl. *"does not let struggle reach across bands"* |
+| Drop section grouping | 2 tests fail, incl. *"deals a section as a run"* |
+
+One of those mutation runs wrote a broken `schedule.ts` and its backup silently
+failed, so the restore had nothing to restore from. Caught because the next test
+run was checked rather than assumed. **A backup that is not verified before the
+mutation is not a backup** — later runs assert the file is non-empty first.
+
+**Verified:** typecheck clean · **556 tests** (534 before; +22) · `expo export` ·
+boot **6/6** against a fresh bundle · both guards mutation-tested and the source
+confirmed restored · both orderings compared on the live database · screenshotted
+and looked at. **Migration 0015 still not applied. Not deployed. No restore drill.**
 
 ## Sources
 

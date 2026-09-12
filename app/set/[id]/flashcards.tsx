@@ -20,7 +20,7 @@ import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
 import { fetchProfile } from '../../../src/data/profile';
 import { useAssistantContext } from '../../../src/data/assistant-context';
 import { reviewStatesForSet } from '../../../src/data/review';
-import { isDue, reviewOrder } from '../../../src/core/schedule';
+import { isDue, studyOrder } from '../../../src/core/schedule';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import type { Level } from '../../../src/core/planner';
 
@@ -106,7 +106,17 @@ export default function Flashcards() {
 
   const items = useMemo(() => {
     if (retryOnly) return atLevel.filter((i) => missedSet?.has(i.id));
-    return reviewOrder(atLevel, (i) => schedules?.get(i.id), Date.now());
+    // studyOrder, not reviewOrder: same three bands (due, never-seen, future),
+    // but within each one the cards that keep beating you come first and a
+    // section's cards are dealt together, so a miss is followed by a sibling
+    // rather than a jump elsewhere in the notes. The lapse and streak counts it
+    // reads have been arriving in `schedules` since Phase 6 and were unused.
+    return studyOrder(
+      atLevel,
+      (i) => schedules?.get(i.id),
+      (i) => i.section_title,
+      Date.now(),
+    );
   }, [atLevel, retryOnly, missedSet, schedules]);
 
   const dueNow = useMemo(

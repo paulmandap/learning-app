@@ -64,6 +64,27 @@ if (!creds.a.email || !creds.a.password || !creds.b.email || !creds.b.password) 
  */
 const STUDY_DAY_PROBE = '2000-01-01';
 
+/**
+ * The views this test covers, and the ones that may legitimately be gone.
+ *
+ * A view runs as its OWNER unless created with security_invoker, which would
+ * bypass RLS on the tables underneath — so testing the base tables alone would
+ * pass while these leaked everything. That is why they are here at all.
+ *
+ * `topic_stats` is on its way out: measured 2026-09-12, 26 distinct labels
+ * across 28 cards and still 24 after normalising, so it can never group
+ * anything. Migration 0015 drops it. Until an owner pastes that SQL the view is
+ * still live and still worth checking, so this script tolerates either state
+ * rather than depending on the order the two land in.
+ */
+const VIEWS = ['item_stats', 'topic_stats'] as const;
+const RETIRED_VIEWS: readonly string[] = ['topic_stats'];
+
+/** PostgREST answers PGRST205 for an unknown relation; Postgres says 42P01. */
+function isMissingRelation(error: { code?: string; message?: string }): boolean {
+  return error.code === 'PGRST205' || error.code === '42P01';
+}
+
 let failures = 0;
 let checks = 0;
 
@@ -280,9 +301,19 @@ async function main() {
   // simply empty — a passing test that asserts nothing is worse than no test.
   // A must see their own rows before B's zero means anything.
   console.log('\nA can see their own view rows (guards against a vacuous pass):');
-  for (const view of ['item_stats', 'topic_stats'] as const) {
+  for (const view of VIEWS) {
     const { data, error } = await A.client.from(view).select('*');
     if (error) {
+      // A view this test knows about may have been RETIRED rather than broken.
+      // `topic_stats` is dropped by migration 0015 — measured useless, roughly
+      // one card per label — and migrations here are applied by hand, so this
+      // script has to be correct both before and after that happens. Treating
+      // "gone" as a failure would make the test cry wolf for however long the
+      // two are out of step, which is how a suite stops being believed.
+      if (RETIRED_VIEWS.includes(view) && isMissingRelation(error)) {
+        console.log(`  ----  ${view} — retired (migration 0015), no longer checked`);
+        continue;
+      }
       fail(`${view} (as A)`, `A cannot read own rows: ${error.message}`);
     } else if ((data ?? []).length === 0) {
       fail(`${view} (as A)`, 'view is EMPTY for its owner — B seeing 0 rows proves nothing');
@@ -294,9 +325,10 @@ async function main() {
   // The reason security_invoker = true exists. Without it these two leak
   // everything while every check above still passes.
   console.log('\nB reading the VIEWS (security_invoker must make RLS apply):');
-  for (const view of ['item_stats', 'topic_stats'] as const) {
+  for (const view of VIEWS) {
     const { data, error } = await B.client.from(view).select('*');
     if (error) {
+      if (RETIRED_VIEWS.includes(view) && isMissingRelation(error)) continue;
       ok(view, `blocked (${error.code ?? 'error'})`);
       continue;
     }
