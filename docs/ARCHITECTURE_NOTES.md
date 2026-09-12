@@ -3870,8 +3870,32 @@ tool, never in a one-off shell line.
 
 ### 29.9 What is still open
 
-- **R7 — the app has never run against a restored database.** Needs Docker and
-  ~30 GB; the machine has 6.2 GB free.
+- **R7 — the app has never run against a restored database.** Deliberately left
+  open on 2026-09-12, and the reasoning is worth keeping so it is not
+  re-litigated.
+
+  The ~30 GB figure was a safe number, not a measured one: Docker Desktop is
+  2–3 GB, WSL2 and its VM another 1–2, and the Supabase local stack's dozen
+  images commonly land at 8–12 — so **15–20 GB realistically**. All of it is
+  removable (`docker system prune -a --volumes`, uninstall, `wsl
+  --unregister`), though WSL's virtual disk does not always shrink without a
+  deliberate compact.
+
+  The machine had **5.2 GB free of 476 GB**, and the owner was about to
+  uninstall a game to make room. **That is a bad trade and was argued against:
+  R7 is a verification step, not a fix**, and §29 has already established the
+  part that carries the risk — the backup decrypts, the schema applies, and
+  11/11 tables with 632 rows restore exactly with policies and RLS intact.
+  What R7 adds is narrower than it sounds: whether the app *boots* against
+  those rows, when the same code boots against the same schema in production
+  every day.
+
+  **Two cheaper routes if it is ever picked up**, neither needing Docker:
+  a second Supabase project on the free tier costs **no disk at all** and is
+  the only target where the `auth` rows can actually land (§29.5); or
+  PostgREST — a single small binary — pointed at the PostgreSQL 17 already
+  installed here, which would prove the whole data layer against restored rows
+  but not sign-in.
 - **A restore into a real Supabase project is untested**, and it is the only
   target where accounts can land.
 - **`on_auth_user_created` would have to be recreated by hand** after any
@@ -4409,6 +4433,96 @@ on the phone is what closes it.
 boot **6/6** · reproduced at 393x420 before the fix and clean after · both
 guards mutation-tested and the source restored by checksum · Progress
 screenshotted at 393px in dark mode for the first time.
+
+
+## 34. Phase F — a Home recommendation, declined on measurement (2026-09-12)
+
+The roadmap asked for a recommendation on Home. **It was not built**, and this
+is the evidence for that.
+
+### 34.1 The failure it would have fixed
+
+Home offers **"Continue: <set>"**, chosen by `continueTarget` as the set
+holding the most recently answered card — *"where you left off, not wherever
+the biggest backlog happens to be"*. Progress offers a different button from
+`busiestSet`: most work, not most recent. §23.1 split those deliberately —
+*"Home answers where was I, Progress answers where is the work."*
+
+So a recommendation on Home is only worth adding if Home currently points
+somewhere useless. The specific failure:
+
+> Home points at a set with nothing due and nothing missed, while another set
+> has work waiting.
+
+That is a student being told to carry on with the one thing that is finished.
+
+### 34.2 It does not happen
+
+`scripts/continue-probe.ts` reconstructs `continueTarget` from the backup —
+the only place all four accounts' history exists, since RLS hides everyone
+else's and the test account holds two sets of probe data.
+
+```
+accounts where Home points at a finished set   0 of 4
+account-days in history with that gap          0 of 8
+```
+
+The historical pass replays the **missed pile only**, because due dates cannot
+be reconstructed without replaying the scheduler. That makes it deliberately
+**over-permissive**: ignoring due counts can only invent gaps the real screen
+would have filled, never hide one. A zero there is therefore meaningful.
+
+**The sample is small and saying so is part of the result: 8 account-days,
+across about a week of real use.** This is consistent evidence, not
+overwhelming evidence.
+
+### 34.3 The information is already on the screen
+
+Home's set list renders `12 cards · 16 due today` for every set
+(`app/(tabs)/index.tsx`). Whatever a recommendation would surface is already
+visible one row down, with the count attached.
+
+The one case in the data worth showing:
+
+```
+account 4
+  Home would offer  : set 54c740cb — 8 due, 0 to retry
+  busiest other set : set ac4e7668 — 16 due, 0 to retry
+```
+
+Home sends them to the smaller pile. That is not useless — there is real work
+in it — and it is what §23.1 chose. Both sets appear below with their counts.
+
+### 34.4 The decision
+
+**Declined.** Adding a recommender to Home would put a second opinion on a
+screen that already shows the counts, to fix a situation that has not occurred,
+and would create the possibility of Home and Progress disagreeing — which is
+the exact thing §23.1 separated them to avoid.
+
+This is the fourth feature this project has turned down on measured grounds,
+after label questions, the Dice grader and pdf.js.
+
+### 34.5 What would reopen it
+
+Deliberately falsifiable, and re-checkable with one command:
+
+```
+npx tsx --env-file=.env scripts/continue-probe.ts --file <backup.tar.gz.gpg>
+```
+
+**If that ever reports a non-zero gap, this decision is wrong and should be
+revisited.** The likeliest way it becomes wrong is more sets per student: with
+one or two sets there is nowhere else for the work to be, and account 4 already
+has four. The probe is kept for exactly that re-check rather than deleted with
+the phase.
+
+A second trigger, which no probe can see: the owner finding Home annoying to
+open in the morning. That outranks the arithmetic, and was asked for directly
+before this was declined.
+
+**Verified:** typecheck clean · **619 tests** · `continue-probe` run against the
+backup, plaintext deleted · no production code changed.
 
 
 ## Sources

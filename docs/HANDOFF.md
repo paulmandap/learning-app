@@ -275,7 +275,9 @@ The habit that has served this project best, and which is worth keeping:
 - **Measure before building.** `scripts/*-probe.ts` exist because every feature
   that skipped this produced a wrong conclusion first.
 - **Say no with evidence.** This project has declined a feature on measured
-  grounds three times — label questions, the Dice grader, pdf.js — and all three
-  were right.
+  grounds four times — label questions, the Dice grader, pdf.js, and a Home
+  recommendation (NOTES §34) — and all four were right. Question-type
+  enforcement was deferred the same way (§28). Each decline names what would
+  reopen it; §34's is one command.
 - **Write down what was measured, with its date and conditions**, in
   `ARCHITECTURE_NOTES.md`. That file is why any of the above is knowable.
