@@ -230,3 +230,58 @@ export function tablesFromMigrations(migrationSql: string[]): string[] {
   const gone = new Set(dropped.map((d) => d.toLowerCase()));
   return unique(created.filter((c) => !gone.has(c.toLowerCase())));
 }
+
+/**
+ * The rows of one COPY block, as objects keyed by the dumped column names.
+ *
+ * `countCopyRows` above answers "how many"; this answers "which". Separate
+ * because counting must stay cheap enough to run over every table in a dump,
+ * while this materialises one table and is only ever asked for a few.
+ *
+ * COPY text format, and each escape here is load-bearing:
+ *  - columns are TAB separated, so a value can contain spaces freely;
+ *  - `\N` alone is NULL, distinct from an empty string;
+ *  - a literal tab, newline, carriage return or backslash inside a value is
+ *    escaped, which is what keeps "one line, one row" true and makes this
+ *    parseable at all.
+ *
+ * Returns [] for a table the dump does not contain — the caller decides
+ * whether that is fine or a disaster, because those differ per table.
+ */
+export function readCopyRows(sql: string, table: string): Record<string, string | null>[] {
+  const lines = sql.split(/\r?\n/);
+  const wanted = table.toLowerCase();
+
+  let columns: string[] | null = null;
+  const out: Record<string, string | null>[] = [];
+
+  for (const line of lines) {
+    if (columns === null) {
+      const start =
+        /^\s*COPY\s+((?:"[^"]+"|[A-Za-z0-9_$]+)(?:\s*\.\s*(?:"[^"]+"|[A-Za-z0-9_$]+))?)\s*\(([^)]*)\)[^;]*FROM\s+stdin\s*;/i.exec(
+          line,
+        );
+      if (!start) continue;
+      if (unquote(start[1] ?? '').toLowerCase() !== wanted) continue;
+      columns = (start[2] ?? '').split(',').map((c) => unquote(c));
+      continue;
+    }
+
+    if (/^\\\.\s*$/.test(line)) break;
+
+    const values = line.split('\t');
+    const row: Record<string, string | null> = {};
+    columns.forEach((name, i) => {
+      const raw = values[i];
+      row[name] =
+        raw === undefined || raw === '\\N'
+          ? null
+          : raw.replace(/\\(.)/g, (_, c: string) =>
+              c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c,
+            );
+    });
+    out.push(row);
+  }
+
+  return out;
+}

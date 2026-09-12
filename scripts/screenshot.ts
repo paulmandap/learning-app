@@ -296,7 +296,52 @@ export async function openPage(options: {
     })()`);
   }
 
+  /**
+   * Every picture on the page has finished loading (or has failed).
+   *
+   * Capturing before this is true produces a screenshot with an empty box
+   * where a diagram should be — which on 2026-09-12 was read as a rendering
+   * defect and reported as one, before the signed URL turned out to answer
+   * `200, 38,985 bytes, image/png`. The harness had drawn a wrong conclusion
+   * about the app, which is the one thing it exists not to do.
+   *
+   * `complete` covers both outcomes: a loaded image and a broken one both
+   * settle it, so a genuinely unreachable picture still gets photographed as
+   * the empty box it really is, rather than hanging here.
+   */
+  const IMAGES_SETTLED = `(() => {
+    if (![...document.images].every((i) => i.complete)) return '';
+    // react-native-web does NOT draw a picture into the <img> it creates. It
+    // uses that element only to detect the load, then paints the real thing as
+    // a CSS background-image on a div — so "every <img> is complete" is true a
+    // paint BEFORE the picture appears, and capturing there gives a blank box.
+    //
+    // Measured 2026-09-12: a flashcard diagram photographed empty in dark mode
+    // while the DOM held a complete 900x620 <img> AND a 313x216 div with the
+    // background-image already set. Both screenshots were wrong about the app.
+    //
+    // Re-requesting each background URL is how the paint becomes observable: a
+    // resource the browser already holds reports complete synchronously, and
+    // one still in flight does not.
+    const urls = [...document.querySelectorAll('*')]
+      .map((e) => getComputedStyle(e).backgroundImage)
+      .filter((b) => b && b !== 'none')
+      .flatMap((b) => [...b.matchAll(/url\\(\\"?(.*?)\\"?\\)/g)].map((m) => m[1]))
+      .filter((u) => u && !u.startsWith('data:'));
+    return urls.every((u) => { const i = new Image(); i.src = u; return i.complete; }) ? 'y' : '';
+  })()`;
+
   async function screenshot(file: string): Promise<void> {
+    // Bounded, and it reports rather than failing: a slow picture should cost
+    // a warning line, never the screenshot the caller asked for.
+    try {
+      await waitFor(IMAGES_SETTLED, 'every image to finish loading', 8_000);
+    } catch {
+      console.warn('[screenshot] images still loading after 8s — captured anyway');
+    }
+    // One more frame after the last resource settles, so the paint that uses
+    // it has actually happened before the shutter.
+    await pause(150);
     const { data } = (await on('Page.captureScreenshot', {
       format: 'png',
       captureBeyondViewport: true,

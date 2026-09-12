@@ -105,11 +105,17 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 7. **Levels are EXCLUSIVE**, reversing D2. This is also why each level keeps its
    own position in a deck (NOTES §17.1).
 8. **Dropped cards are replaced** by one bounded top-up pass.
-9. **Typed answers are never auto-marked wrong on a near miss** (NOTES §9.2). No
+9. **A partial counts as NEITHER right nor wrong** in `sectionSplit` and
+    `sectionTrends` (NOTES §32, 2026-09-12). Measured before it was changed:
+    2 partials in 312 answers, 2 of 17 sections moved, no section changed which
+    list it appears in. `MIN_SECTION_ATTEMPTS` gates on `scored`, not
+    `attempts`, and the two functions must keep one definition or the same row
+    would show a rate and a direction computed differently.
+10. **Typed answers are never auto-marked wrong on a near miss** (NOTES §9.2). No
    character-similarity threshold can separate a typo from a minimal pair.
-10. **Mastery bands key on consecutive correct answers, not on the schedule**
+11. **Mastery bands key on consecutive correct answers, not on the schedule**
     (NOTES §18.1). The 21-day interval version could not move for 23 days.
-11. **The upload cap is set by storage, not by the reader** (NOTES §15.2) —
+12. **The upload cap is set by storage, not by the reader** (NOTES §15.2) —
     the inverse of what §12.2 originally recorded. 25 MB per file, 45 MB reader
     ceiling, measured against Google's real 50 MB.
 

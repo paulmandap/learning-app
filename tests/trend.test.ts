@@ -116,17 +116,46 @@ describe('sectionTrends', () => {
     expect(sectionTrends(rows).map((t) => t.section)).toEqual(['Alpha', 'Zeta']);
   });
 
-  it('scores a partial the way sectionSplit already does', () => {
+  it('drops partials instead of scoring them wrong, as sectionSplit does', () => {
     // Not a free choice. If the two disagreed, one screen would call a section
     // 43% and describe it as improving on a different definition of the number.
-    const rows = run('Renal', right(W * 2)).map((r, i) =>
-      i < W ? { ...r, result: 'partial' as const } : r,
-    );
-    expect(sectionTrends(rows)[0]).toMatchObject({
-      earlier: 0,
-      recent: 1,
-      direction: 'improving',
+    //
+    // Changed 2026-09-12 (§32). This test previously pinned the opposite: a
+    // run of partials followed by correct answers read as 0 -> 1, improving.
+    //
+    // Dropping them is also what preserves the §26.1 calibration. The windows
+    // stay sequences of purely right-or-wrong answers, which is what the
+    // false-alarm rate was simulated over.
+    const clean = [...wrong(W), ...right(W)];
+    const peppered: AttemptRecord['result'][] = [
+      ...wrong(W),
+      'partial',
+      'partial',
+      'partial',
+      ...right(W),
+    ];
+
+    const before = sectionTrends(run('Renal', clean))[0];
+    const after = sectionTrends(run('Renal', peppered))[0];
+
+    // Three partials dropped into the middle change nothing at all: not the
+    // direction, not either window, not the size of the move.
+    expect(after).toMatchObject({
+      direction: before!.direction,
+      earlier: before!.earlier,
+      recent: before!.recent,
+      change: before!.change,
     });
+    expect(before!.direction).toBe('improving');
+  });
+
+  it('stays silent when partials leave too few real answers to judge', () => {
+    // Twenty answers, but half of them partial: only ten are evidence, which
+    // is five per window and under the gate. Reporting a direction off that
+    // would be exactly the noise MIN_TREND_WINDOW exists to refuse.
+    const half: AttemptRecord['result'][] = [];
+    for (let i = 0; i < W; i++) half.push('partial', i < W / 2 ? 'incorrect' : 'correct');
+    expect(sectionTrends(run('Renal', half))).toEqual([]);
   });
 
   it('will not call a move smaller than the threshold a direction', () => {

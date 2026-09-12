@@ -297,19 +297,38 @@ describe('sectionSplit', () => {
     expect(split.weak[0]!.accuracy).toBe(0.5);
   });
 
-  it('counts a partial as WRONG, whatever the old docstring claimed', () => {
-    // Named for what it asserts. It used to be called "counts a partial as
-    // neither right nor wrong" while pinning the opposite: a partial is
-    // excluded from the numerator and kept in the denominator, so it drags
-    // accuracy down exactly as a miss does.
+  it('counts a partial as NEITHER right nor wrong', () => {
+    // Changed 2026-09-12 after measuring it (§32): a partial leaves both
+    // halves of the fraction. Four answers, none wrong, two only partly
+    // right, is 2 of the 2 that were scored — not 2 of 4.
     //
-    // Whether that is the RIGHT rule is open — see sectionSplit's docstring.
-    // This test records the behaviour that ships today.
-    // Four answers, none wrong, two only partly right: 2 of 4, not 4 of 4.
-    const split = sectionSplit([row({ attempts: 4, misses: 0, partials: 2 })]);
+    // This test previously pinned the opposite, under the name "counts a
+    // partial as WRONG". It is the same assertion inverted, and it failing
+    // was the signal that the change had landed.
+    //
+    // Six answers rather than four, because the gate now counts SCORED ones:
+    // 4 minus 2 partials leaves 2, under MIN_SECTION_ATTEMPTS, and the section
+    // would be held back instead of scored. That is the next test.
+    const split = sectionSplit([row({ attempts: 6, misses: 0, partials: 2 })]);
+    expect(split.weak).toHaveLength(0);
+    expect(split.strong[0]).toMatchObject({ attempts: 6, scored: 4, correct: 4 });
+    expect(split.strong[0]!.accuracy).toBe(1);
+  });
+
+  it('reports attempts and scored separately, so a rate names its own sample', () => {
+    const split = sectionSplit([row({ attempts: 10, misses: 2, partials: 2 })]);
+    // 10 answers given, 8 of them scored, 6 fully correct.
+    expect(split.strong[0]).toMatchObject({ attempts: 10, scored: 8, correct: 6 });
+    expect(split.strong[0]!.accuracy).toBe(0.75);
+  });
+
+  it('holds back a section whose answers were ALL partial', () => {
+    // Three answers and nothing to conclude from any of them. Dividing by the
+    // zero that is left would report 0%, or NaN, as though it were a finding.
+    const split = sectionSplit([row({ attempts: 3, misses: 0, partials: 3 })]);
     expect(split.strong).toHaveLength(0);
-    expect(split.weak[0]).toMatchObject({ attempts: 4, correct: 2 });
-    expect(split.weak[0]!.accuracy).toBe(0.5);
+    expect(split.weak).toHaveLength(0);
+    expect(split.tooEarly).toBe(1);
   });
 
   it('never lists the same section as both strong and weak', () => {

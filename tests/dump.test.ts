@@ -3,6 +3,7 @@ import {
   carriesAuthUsers,
   countCopyRows,
   inspectSchema,
+  readCopyRows,
   splitQualified,
   tablesFromMigrations,
 } from '../src/core/dump';
@@ -161,6 +162,43 @@ ordinary\t2
 `;
     const out = countCopyRows(cut);
     expect([...out.keys()].some((k) => k.includes('UNTERMINATED'))).toBe(true);
+  });
+});
+
+describe('readCopyRows', () => {
+  it('returns rows keyed by the dumped column names', () => {
+    expect(readCopyRows(DATA, 'public.study_sets')).toEqual([
+      { id: '1', user_id: 'abc' },
+      { id: '2', user_id: 'def' },
+    ]);
+  });
+
+  it('finds the table whether or not the header quotes it', () => {
+    expect(readCopyRows(DATA, 'public.study_items')).toEqual([{ id: '9' }]);
+  });
+
+  it('distinguishes NULL from an empty string', () => {
+    // `\N` is NULL; an empty field is the empty string. Collapsing the two
+    // would silently turn "never answered" into "answered with nothing".
+    const sql = 'COPY public.t (a, b) FROM stdin;\n\\N\t\n\\.\n';
+    expect(readCopyRows(sql, 'public.t')).toEqual([{ a: null, b: '' }]);
+  });
+
+  it('unescapes tabs, newlines and backslashes inside a value', () => {
+    // Without this a value containing an escaped tab would split into two
+    // columns and shift every field after it by one.
+    const sql = 'COPY public.t (a, b) FROM stdin;\nx\\ty\\nz\\\\w\tsecond\n\\.\n';
+    expect(readCopyRows(sql, 'public.t')).toEqual([{ a: 'x\ty\nz\\w', b: 'second' }]);
+  });
+
+  it('returns nothing for a table the dump does not contain', () => {
+    expect(readCopyRows(DATA, 'public.nope')).toEqual([]);
+  });
+
+  it('stops at the block terminator and does not run into the next table', () => {
+    const rows = readCopyRows(DATA, 'public.study_sets');
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => 'user_id' in r)).toBe(true);
   });
 });
 

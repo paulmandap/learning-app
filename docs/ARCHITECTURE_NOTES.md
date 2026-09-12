@@ -4145,6 +4145,164 @@ deployed and confirmed live by commit, bundle hash and a signed-in screenshot ·
 **Production is current for the first time since 2026-09-06.**
 
 
+## 32. Partial scoring, measured — and a harness that lied twice (2026-09-12)
+
+§26.7 flagged that `sectionSplit` scores a partial exactly as a miss, corrected
+the docstring rather than the arithmetic, and left the change as the owner's
+call. It then sat open, because the decision was being asked blind: nobody knew
+how far it would move the screen.
+
+**Nothing was changed. This is the measurement, so the decision can be made
+with numbers.**
+
+### 32.1 Why this had to read the backup
+
+Partials come only from short-answer rubric grading (`grade.ts`), and the test
+account has **zero** in 33 attempts. RLS correctly hides the real history from
+any script, so the only place all the answers exist together is the backup
+dump — which §29 had just made readable again.
+
+`scripts/partial-impact.ts` decrypts it, reads three columns of `attempts`
+(`user_id`, `study_item_id`, `result`) and two of `study_items`, and deletes
+the plaintext in `finally`. It never touches `answer_text` or `feedback`, and
+section titles are withheld by default because they are fragments of seven
+people's notes.
+
+### 32.2 The answer: partials barely exist
+
+```
+312 answers, 167 cards, 4 accounts with answers
+
+correct     232   74.4%
+incorrect    78   25.0%
+partial       2    0.6%
+```
+
+Two. In three hundred and twelve.
+
+| | |
+|---|---|
+| sections compared | 17 |
+| that change which list they appear in | **0** |
+| that fall below the 3-answer gate | **0** |
+| largest single move | 20.0% |
+
+Only two sections move at all. The 20-point one is a section with **five**
+answers of which one was partial (80% → 100%) — a swing that large only because
+the sample is that small. The other moves 90.9% → 93.0%.
+
+**Every accuracy moves up or stays equal**, always: partials leave the
+denominator and never the numerator, so nothing can look worse than it does
+now. And no section crosses `STRONG_ACCURACY`, so *no advice on the screen
+changes* — which is the number that actually mattered, not the percentages.
+
+### 32.3 Two checks, because a reconstruction is easy to get wrong
+
+**Self-check.** On partial-free input the proposed arithmetic must equal the
+shipped `sectionSplit` exactly, and it is asserted at runtime over **16**
+sections. The first version of that check collapsed every row to one section
+name and compared a single aggregate — it passed, and would have missed any
+per-section grouping error, which is the one thing it was there to catch.
+
+**Cross-check against the live app.** Account 1 is the test account, and the
+shipped `fetchDashboard` run against the live database returns:
+
+```
+n=27   7.4%   FIGURE 2.1 — PLANT ORGANS AND THEIR FUNCTION
+n= 6  33.3%   Overview of the plant body
+```
+
+identical to what the reconstruction computes for it. So the "today" column is
+what the app really shows, not an approximation of it.
+
+Run twice, byte-identical.
+
+### 32.4 The decision, and what it changed
+
+The question was a judgement about learning, not arithmetic, which is why it
+was the owner's: **is a half-right answer nearer to a miss, or to neither?**
+
+**Decided 2026-09-12: neither.** A partial now leaves both halves of the
+fraction, which is what the docstring claimed all along before §26.7 corrected
+the words to match the code instead.
+
+Three things moved, not one:
+
+- **`sectionSplit` divides by `scored`, not `attempts`.** `SectionScore` gains
+  a `scored` field rather than redefining `attempts`, because a rate computed
+  over eight answers should not be reported beside "n=10".
+- **`MIN_SECTION_ATTEMPTS` gates on `scored`.** A section answered three times,
+  all partial, has no evidence either way and belongs in `tooEarly` — not at 0%
+  off an empty fraction. Nothing in the live data hits this, and a test does.
+- **`sectionTrends` drops partials from its windows.** Not optional: its own
+  docstring warns that if the two disagreed, one screen would report a section
+  at 43% and call it improving on a different definition. Dropping them rather
+  than scoring them zero is also what preserves §26.1's calibration — the
+  windows stay sequences of purely right-or-wrong answers, which is what the
+  false-alarm rate was simulated over.
+
+Ties now break on the larger **scored** sample, since the tie being broken is
+between two accuracies.
+
+**Both tests that pinned the old behaviour failed the moment the change
+landed**, which is how it was confirmed rather than hoped: `counts a partial as
+WRONG, whatever the old docstring claimed` and `scores a partial the way
+sectionSplit already does`. Both were rewritten to pin the new rule, and the
+first fixture had to grow from four answers to six — four minus two partials
+leaves two, under the gate, so the section was held back. The gate change
+biting its own test is the clearest evidence it works.
+
+**Verified against reality twice.** The test account has no partials and did
+not move at all: `n=27 scored=27 7.4%`, `n=6 scored=6 33.3%`, identical before
+and after. And re-running the measurement against the shipped code now reports
+**today == proposed** — section 2.3 reads 100.0% where it read 80.0%, 4.10
+reads 93.0% where it read 90.9%, and the largest remaining move is **0.0%**.
+The figures predicted before the change are the figures the code produces after
+it.
+
+### 32.5 The screenshot harness was wrong twice, and the second time was convincing
+
+While verifying the deploy in §31 a flashcard diagram photographed as an empty
+black box. What followed is worth recording in full, because every step looked
+reasonable:
+
+1. **Reported as a possible rendering defect.** Wrong: the signed URL answers
+   `200, 38,985 bytes, image/png`.
+2. **Retracted as a capture-timing artifact, and a wait added** for every
+   `<img>` to reach `complete`. The box stayed empty — *and no warning fired*,
+   which should have been the tell. `document.images` was effectively vacuous
+   here, and HANDOFF's own §19.7 says it: **a wait that passes instantly is a
+   test that stopped testing.**
+3. **Re-diagnosed as a real dark-mode defect**, on the strength of the same
+   card rendering perfectly in light mode. That was a coincidence — the light
+   run simply happened to be slow enough to paint.
+4. **Actual cause:** react-native-web does not draw the picture into the `<img>`
+   it creates. It uses that element only to detect the load and then paints the
+   real thing as a **CSS `background-image` on a div**. So "every `<img>` is
+   complete" becomes true one paint before the picture appears. Measured: the
+   DOM held a complete 900×620 `<img>` *and* a 313×216 div with the
+   background-image already set, while the capture showed nothing.
+
+The fix re-requests every `background-image` URL — a resource the browser
+already holds reports `complete` synchronously, one still in flight does not —
+and waits a further frame before the shutter. Verified on the exact card that
+started it: the diagram now renders in dark mode.
+
+**The app was never broken.** The tool used to check the app was, twice, and
+its second failure imitated a real bug closely enough to be believed. That is
+the whole argument for §14's rule about looking at things, and against trusting
+a single screenshot.
+
+**Verified:** typecheck clean · **617 tests** (608 before; +9) · `expo export` ·
+boot **6/6** · three `readCopyRows` guards mutation-tested and the source
+restored by checksum · the measurement run twice, identical, self-checked on 16
+sections and cross-checked against the live dashboard · both old pinning tests
+confirmed failing before being rewritten · the change verified against the live
+dashboard and against the measurement · plaintext deleted.
+**The partial-scoring question is closed. Progress accuracy figures moved on
+2026-09-12 — upward or not at all.**
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

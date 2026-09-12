@@ -350,10 +350,20 @@ export interface ItemHistory {
 
 export interface SectionScore {
   section: string;
+  /** Every answer given, partials included. Not the accuracy's denominator. */
   attempts: number;
+  /**
+   * Answers that counted either way — `attempts` minus partials.
+   *
+   * This IS the accuracy's denominator, and it is a separate field because the
+   * two diverge: a section with ten answers of which two were partial is
+   * scored out of eight, and reporting "n=10" beside a rate computed over
+   * eight is how a figure and its sample quietly stop matching.
+   */
+  scored: number;
   /** Answers that were fully correct — partials do not count towards this. */
   correct: number;
-  /** 0..1. Only meaningful because `attempts >= MIN_SECTION_ATTEMPTS`. */
+  /** 0..1. Only meaningful because `scored >= MIN_SECTION_ATTEMPTS`. */
   accuracy: number;
 }
 
@@ -373,39 +383,49 @@ export interface SectionSplit {
  * document's own headings and groups several cards together — on a 10-page PDF
  * the planner produces about eight of them.
  *
- * ## A partial counts as WRONG here, and this docstring used to deny it
+ * ## A partial counts as NEITHER right nor wrong
  *
- * The arithmetic is `correct = attempts - misses - partials` over `attempts`,
- * so a partial is excluded from the numerator and kept in the denominator —
- * arithmetically identical to a miss. Four answers with two partials and no
- * misses score 50%, exactly as two outright misses would.
+ * `correct / (attempts - partials)`: a partial leaves both halves of the
+ * fraction. Four answers with two partials and no misses score 100% of the two
+ * that were actually scored, where they used to score 50% — the same as two
+ * outright misses.
  *
- * This paragraph previously read *"A partial counts as neither right nor
- * wrong… counting it as a miss here would penalise the same answer twice"*,
- * which describes behaviour the code does not have, and `tests/progress.test.ts`
- * pinned the real behaviour under that same false name. Corrected 2026-09-12
- * rather than changed: the reasoning in the old wording is a good argument for
- * excluding partials from both halves of the fraction, and acting on it would
- * move every accuracy figure on the Progress screen — an owner's call, not a
- * tidy-up. **Flagged, not fixed.**
+ * **This changed on 2026-09-12, and was measured before it did (§32).** The
+ * arithmetic counted a partial exactly as a miss while this docstring claimed
+ * the opposite; §26.7 corrected the words rather than the code, because acting
+ * on it moves every accuracy figure on Progress and that was the owner's call.
+ * The measurement is what unblocked it: across 312 real answers there were
+ * **2 partials**, and the change moved 2 of 17 sections, moved none between
+ * *Doing well* and *Worth another look*, and dropped none below the gate. It
+ * was made at the cheapest moment it will ever be.
  *
- * `sectionTrends` follows this same definition deliberately. If the two
- * disagreed, one screen would report a section at 43% and describe it as
- * climbing on a different definition of the number.
+ * Every figure it touches moves UP or stays equal, always: partials leave the
+ * denominator and never the numerator, so no section can look worse than it
+ * did the day before.
+ *
+ * **`MIN_SECTION_ATTEMPTS` gates on `scored`, not on `attempts`.** A section
+ * answered three times, all partial, has no evidence either way — it belongs
+ * in `tooEarly`, not at 0% or 100% off an empty fraction.
+ *
+ * `sectionTrends` follows this same definition deliberately, and had to be
+ * changed with it. If the two disagreed, one screen would report a section at
+ * 43% and describe it as climbing on a different definition of the number.
  *
  * @param limit How many to name under each heading. Two — a list of eight
  *              sections is a spreadsheet, and the brief was to keep this simple.
  */
 export function sectionSplit(history: ItemHistory[], limit = 2): SectionSplit {
-  const totals = new Map<string, { attempts: number; correct: number }>();
+  const totals = new Map<string, { attempts: number; scored: number; correct: number }>();
 
   for (const row of history) {
     // A card with no section cannot be advice about where to look.
     if (!row.section) continue;
     if (row.attempts <= 0) continue;
 
-    const t = totals.get(row.section) ?? { attempts: 0, correct: 0 };
+    const t = totals.get(row.section) ?? { attempts: 0, scored: 0, correct: 0 };
     t.attempts += row.attempts;
+    // Partials leave the denominator here, which is the whole change.
+    t.scored += Math.max(0, row.attempts - row.partials);
     t.correct += Math.max(0, row.attempts - row.misses - row.partials);
     totals.set(row.section, t);
   }
@@ -414,17 +434,28 @@ export function sectionSplit(history: ItemHistory[], limit = 2): SectionSplit {
   let tooEarly = 0;
 
   for (const [section, t] of totals) {
-    if (t.attempts < MIN_SECTION_ATTEMPTS) {
+    // Gated on what was actually scored: a section answered only in partials
+    // has nothing to report, and dividing by its zero would say 0% or NaN.
+    if (t.scored < MIN_SECTION_ATTEMPTS) {
       tooEarly++;
       continue;
     }
-    scored.push({ section, attempts: t.attempts, correct: t.correct, accuracy: t.correct / t.attempts });
+    scored.push({
+      section,
+      attempts: t.attempts,
+      scored: t.scored,
+      correct: t.correct,
+      accuracy: t.correct / t.scored,
+    });
   }
 
   // Ties break on the larger sample, then by name, so the same data always
   // produces the same screen.
+  // Ties break on the larger SCORED sample, not the larger answer count: the
+  // tie is between two accuracies, so the evidence behind them is what should
+  // settle it.
   const byAccuracy = (dir: 1 | -1) => (a: SectionScore, b: SectionScore) =>
-    dir * (b.accuracy - a.accuracy) || b.attempts - a.attempts || a.section.localeCompare(b.section);
+    dir * (b.accuracy - a.accuracy) || b.scored - a.scored || a.section.localeCompare(b.section);
 
   return {
     strong: scored.filter((s) => s.accuracy >= STRONG_ACCURACY).sort(byAccuracy(1)).slice(0, limit),
@@ -627,15 +658,14 @@ export interface SectionTrend {
 /**
  * Accuracy over a run of answers.
  *
- * A partial scores zero, which is what `sectionSplit` already does: its
- * `correct` excludes partials while its denominator keeps them. The two must
- * agree or the same screen would report a section at 43% and call it improving
- * on a different definition of the number.
+ * **Every row reaching here is already right-or-wrong**: `sectionTrends` drops
+ * partials before building its windows, so this counts what is left. Both
+ * screens therefore use one definition of the number — otherwise the same row
+ * could read 43% and be called improving on a different arithmetic.
  *
- * Worth flagging rather than burying: `sectionSplit`'s docstring says a partial
- * "counts as neither right nor wrong", and the arithmetic there makes it count
- * exactly as a miss. Whichever is intended, this follows the code so the screen
- * stays coherent.
+ * That has been true since 2026-09-12 (§32). Before it, a partial scored zero
+ * here and counted as a miss in `sectionSplit`, and this comment carried the
+ * discrepancy as a flag rather than a fix.
  */
 function accuracyOf(rows: AttemptRecord[]): number {
   if (rows.length === 0) return 0;
@@ -660,6 +690,13 @@ export function sectionTrends(rows: AttemptRecord[]): SectionTrend[] {
   const bySection = new Map<string, AttemptRecord[]>();
   for (const row of rows) {
     if (!row.section) continue;
+    // Partials are dropped, not counted as wrong — the same definition
+    // `sectionSplit` uses since 2026-09-12 (§32). Dropping them here rather
+    // than scoring them zero is also what preserves §26.1's calibration: the
+    // windows stay sequences of purely right-or-wrong answers, which is what
+    // the false-alarm rate was simulated over. Scoring a partial as wrong
+    // would keep the window size and change the meaning of the number in it.
+    if (row.result === 'partial') continue;
     const list = bySection.get(row.section);
     if (list) list.push(row);
     else bySection.set(row.section, [row]);
