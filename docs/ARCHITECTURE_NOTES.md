@@ -3650,6 +3650,230 @@ corrected. **Phase E closed. Nothing shipped beyond the prompt cleanup. Not
 deployed. No restore drill.**
 
 
+## 29. Phase G1 — the first restore, and three ways the backup was broken (2026-09-12)
+
+The monthly backup shipped, was hardened twice, and had **never been restored**.
+This is that drill. It found the backup broken in three independent ways, two
+of which had nothing to do with restoring and would have been invisible until
+the day they mattered.
+
+Nothing here was predicted correctly in advance. The plan expected `auth.users`
+to be absent from the dump; it is present. The plan expected the drill's
+difficulty to be the restore; the restore of application data was flawless and
+everything around it failed.
+
+### 29.1 The backup had been failing silently since Phase A
+
+Run #3 (manually triggered, 2026-09-12) failed. The dump step succeeded and
+**"Check the dump is not empty" exited 1 with no `::error::` line at all** —
+which is what identified it, because every deliberate failure in that step
+prints one.
+
+`grep` exits 1 when it matches nothing. There is no `drop table` in any
+migration, so under `set -euo pipefail`:
+
+```
+dropped=$(grep -hoiE 'drop table...' supabase/migrations/*.sql | ... )   <- exit 1
+```
+
+killed the step before a single table was checked. Reproduced locally, exactly.
+
+Three things make this worse than a one-line bug:
+
+- **It shipped with §23.6's own fix.** That section replaced a hand-kept table
+  list — "a rule that depends on remembering has now failed on every occasion
+  it was tested" — with a derivation. The derivation is correct. It was never
+  executed: `backup.yml` runs on cron and dispatch only, **never in CI**, and
+  the monthly cron had not fired since Phase A landed on the 11th. Run #3 was
+  the first execution of that code, six commits later.
+- **The empty-list guard was unreachable.** §23.6 added `if [ -z "$tables" ]`
+  precisely to catch a broken derivation, with the comment "the same
+  silent-success failure in a new costume". `set -e` aborts twelve lines above
+  it, so it could never fire.
+- **Run #2 (2026-09-07) passing proved nothing about it**, because 7218329
+  predates the derivation and still used the hardcoded list.
+
+Fixed with `|| true` on all three derivations, so "matched nothing" and "the
+tool broke" stop being the same exit code. Verified by extracting the **real
+step out of the YAML** and running it over four fixtures:
+
+| fixture | expected | got |
+|---|---|---|
+| current repo, complete dump | pass | exit 0 |
+| dump missing `notes` | fail, naming it | exit 1, `::error::…no CREATE TABLE for notes` |
+| a migration that drops a table | excluded, pass | exit 0, 10 tables |
+| no DDL at all | the explicit broken-check error | exit 1, **now reachable** |
+
+Mutation-tested: with the `|| true` removed from the `dropped=` line alone, the
+passing fixture exits 1 — run #3 reproduced. Run #4 is green.
+
+### 29.2 The passphrase was gone
+
+`BACKUP_PASSPHRASE` could not be found anywhere: all 40 Claude Code transcripts
+(the variable name appears in prose, never a value), `.env`, 2,106 lines of
+PowerShell history, the whole of `c:\paul`, Desktop/Documents/Downloads/
+OneDrive, and Windows Credential Manager. GitHub Secrets is write-only by
+design and will not show it back.
+
+So on the day the backup was first needed, **every retained artifact was
+undecryptable**. `backup.yml:23` says the passphrase must be *"a long random
+string, stored somewhere you will still have it the day you need to restore"*.
+That instruction was the entire safeguard, and it depended on remembering —
+the exact failure mode §23.6 removed from the table list eighty lines below it
+in the same file.
+
+**Rotated 2026-09-12.** A new 44-character value generated, written to `.env`
+(gitignored) and to a password manager, and set in GitHub Secrets. The Sep 7
+artifact is permanently unreadable and was written off: that costs nothing
+while the live database is intact, which is exactly why rotating was cheap
+now and would not have been later.
+
+Worth stating as a design fact rather than an accident: **the encryption key
+has one copy, in a store that cannot be read back, and no technical check can
+verify that a human still holds it.** Only a periodic drill can.
+
+### 29.3 The artifacts were sitting in the public repository
+
+The downloaded `.zip` and `backup.tar.gz.gpg` had been unzipped into the
+repository root — untracked, unignored, one `git add -A` from publishing every
+student's notes to a public repo. Encrypted, but an encrypted file in a public
+repo is one passphrase away from not being.
+
+Moved out, and `.gitignore` now matches `*.gpg`, `backup.tar.gz*`,
+`schema.sql`, `data.sql` and `supabase-backup-*` **wherever they land** rather
+than only under `backups/`. Verified no tracked file matches the new patterns
+and that `supabase/migrations/0001_schema.sql` is still not ignored.
+
+### 29.4 The restore itself — R1 to R6 answered
+
+Against the run #4 artifact (151,188 bytes), into PostgreSQL 17.11 on a local
+scratch database. Every answer measured, none inferred.
+
+```
+R1  YES  decrypts and extracts to schema.sql + data.sql
+R2  NO   schema.sql applies with 12 errors into vanilla Postgres
+R3  YES  APPLICATION data: 11/11 public tables match the dump exactly
+R4  NO   auth.users has 7 rows in the dump and NO DDL anywhere
+R5  YES  40 policies, RLS enabled on all 11 tables
+R6  NO   storage.objects is metadata; the file bytes are not in a db dump
+R7  --   DEFERRED: needs Docker; C: has 6.2 GB free of 476 GB
+```
+
+**The application's own data restored perfectly.** 11 tables, the `item_stats`
+view, 5 functions, 40 policies, RLS on every table, 29 indexes, 9 foreign keys,
+and 632 rows — `attempts` 312, `study_items` 167, `review_state` 64,
+`document_pages` 42, `study_sets` 9, `documents` 9, `heartbeat` 12,
+`profiles` 7, `study_days` 6, `chat_usage` 3, `notes` 1 — every count matching
+the dump.
+
+### 29.5 The central finding: the dump is public-only, the data is not
+
+```
+schema.sql   1,150 lines   schemas present: public          ONLY
+data.sql     1,835 lines   COPY blocks for public, auth AND storage
+```
+
+`supabase db dump` emits **public-only DDL**, while `--data-only` emits data
+for `auth` and `storage` too. So the backup carries the accounts but not the
+tables to hold them:
+
+```
+auth.users            7 rows in the dump  ->  0 restored
+auth.identities       7                   ->  0
+auth.sessions       252                   ->  0
+auth.refresh_tokens 310                   ->  0
+auth.mfa_amr_claims 252                   ->  0
+storage.objects      10                   ->  0
+storage.buckets       1                   ->  0
+                                              839 rows lost
+```
+
+Zero `CREATE TABLE`/`CREATE SCHEMA` statements for `auth` or `storage` appear
+in the dump. This is more dangerous than a plain omission: a check asking "are
+the users in the backup?" answers **yes**, and a restore into anything that is
+not already a provisioned Supabase project silently drops all seven accounts
+and every session.
+
+**And one application object is lost even on a correct target.** Migration 0001
+creates `on_auth_user_created`, an `after insert on auth.users` trigger calling
+`public.handle_new_user()` — the thing that gives a new signup a `profiles`
+row. `handle_new_user` **is** in the dump; the trigger is **not**, because
+pg_dump emits a trigger with its table and `auth.users` is not dumped. So even
+restoring into a fresh Supabase project yields a database where **new sign-ups
+silently get no profile**. Nothing in the app would report this.
+
+### 29.6 What must exist before the dump will load at all
+
+Discovered, not assumed — the errors were the deliverable:
+
+```
+roles     anon, authenticated, postgres, service_role
+schemas   extensions, auth, storage, graphql_public
+function  auth.uid()          <- every one of the 40 policies calls it
+```
+
+Without `auth.uid()` the policies fail to create and the restore silently loses
+its entire security model. The 12 `schema.sql` errors are all of this kind —
+`extension "supabase_vault" is not available`, `publication "supabase_realtime"
+does not exist`, and relations in schemas the dump does not define. **None was
+a defect in the dump**; all are "the target is not Supabase". Every object the
+application owns was created.
+
+### 29.7 The corrected recovery procedure
+
+`backup.yml:46-49` said `psql "$SUPABASE_DB_URL" -f schema.sql && psql … -f
+data.sql`. That is wrong twice over: it points at **the live database**, and it
+omits every prerequisite in §29.6. Replaced.
+
+**Verified by this drill:** decrypt → extract → prerequisites → `schema.sql` →
+`data.sql` restores 100% of application data into a Postgres 17 database.
+
+**Not verified, and labelled as such:** restoring into a fresh Supabase project.
+That is the only target where the `auth` rows can land, and it needs R7.
+
+### 29.8 The instrument overclaimed twice, and the drill caught it
+
+Both inspect-stage verdicts were wrong until the restore stage contradicted
+them, which is the whole reason the plan ran both:
+
+- **R4 first read "accounts survive a restore"** because the rows were present.
+  They did not survive. Presence in `data.sql` is not recoverability.
+- **R6 first read "storage rows present"**, which reads as though the uploads
+  were safe. They are metadata rows; a database dump cannot contain the bytes.
+
+A third bug was found by rehearsing against a **synthetic** artifact before
+real data was touched: the drill counted psql errors from stdout, but **psql
+writes errors to stderr** and `ON_ERROR_STOP=0` leaves the exit code at 0. It
+reported `R2 YES — 0 errors` while twelve errors printed beside it. On the real
+backup that would have certified a broken restore as clean.
+
+And one process failure worth recording: a manual `trap … EXIT` cleanup did not
+fire, leaving **decrypted student notes in `%TEMP%`** until a later check found
+and deleted them. The drill script's own `finally` block worked correctly every
+time; the ad-hoc command beside it did not. Plaintext handling belongs in the
+tool, never in a one-off shell line.
+
+### 29.9 What is still open
+
+- **R7 — the app has never run against a restored database.** Needs Docker and
+  ~30 GB; the machine has 6.2 GB free.
+- **A restore into a real Supabase project is untested**, and it is the only
+  target where accounts can land.
+- **`on_auth_user_created` would have to be recreated by hand** after any
+  restore. Re-running the repo's migrations is the fix, and that is untested
+  against a database that already holds restored rows.
+- **Uploaded originals are not recoverable at all.** Only page text is, so
+  cards survive and their source images do not.
+
+**Verified:** typecheck clean · **601 tests** · `expo export` · boot **6/6** ·
+the backup fix mutation-tested against the real workflow file over four
+fixtures · 17 new parser tests, five mutations each confirmed to fail · the
+drill rehearsed on a synthetic artifact before touching real data · run #4
+green · scratch database dropped, decrypted plaintext deleted and verified
+gone, `git status` clean. **Backup fixed and passphrase rotated. R7 deferred.
+Not deployed.**
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

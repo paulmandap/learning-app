@@ -225,26 +225,40 @@ async function main() {
     if (missing.length > 0) console.log(`  MISSING FROM THE DUMP: ${missing.join(', ')}`);
 
     rule('THE TWO QUESTIONS THE EXISTING CHECKS CANNOT ASK');
+    // R4 needs BOTH halves, and they disagree in this project's dump.
+    //
+    // `supabase db dump` emits public-only DDL but --data-only emits data for
+    // auth and storage too. So the accounts are in the backup and the tables
+    // to hold them are not: measured 2026-09-12, auth.users carried 7 rows and
+    // restored 0. Reporting "the rows are there" as a YES would have been an
+    // overclaim, and the first version of this line made exactly that mistake
+    // until the restore stage contradicted it.
     const auth = carriesAuthUsers(schemaSql, dataSql);
     answer(
       'R4',
-      auth.data,
-      auth.data
-        ? `auth.users carries ${auth.rows} row(s) — accounts survive a restore`
-        : `auth.users ${auth.schema ? 'is defined but has NO ROWS' : 'is not in the dump at all'} — restored rows would reference accounts that do not exist`,
+      auth.data && auth.schema,
+      auth.data && auth.schema
+        ? `auth.users: ${auth.rows} row(s) AND its definition — accounts restore anywhere`
+        : auth.data
+          ? `auth.users carries ${auth.rows} row(s) but the dump has NO auth DDL — the accounts load only into a target that already provides the auth schema (a real Supabase project), and are silently LOST restoring anywhere else`
+          : 'auth.users is not in the dump at all — restored rows would reference accounts that do not exist',
     );
     answer(
       'R5',
       found.policies.length > 0 && found.enablesRowLevelSecurity,
       `${found.policies.length} policies, RLS ${found.enablesRowLevelSecurity ? 'enabled' : 'NOT enabled'} in the dump`,
     );
-    const storageObjects = [...counts.keys()].some((k) => /^storage\./i.test(k));
+    // R6 is about the FILES, not the rows about the files. storage.objects is
+    // metadata; the bytes live in Supabase's object store and a database dump
+    // cannot contain them. "storage rows present" was the first version of
+    // this line and it read as though the uploads were safe. They are not.
+    const objectRows = counts.get([...counts.keys()].find((k) => /^storage\.objects$/i.test(k)) ?? '') ?? 0;
     answer(
       'R6',
-      storageObjects,
-      storageObjects
-        ? 'storage rows present'
-        : 'no storage rows — uploaded originals are not in a db dump; page text is, so cards survive and source images would not',
+      false,
+      objectRows > 0
+        ? `${objectRows} storage.objects METADATA row(s), but a database dump cannot carry the file bytes — a restore yields rows pointing at originals that no longer exist. Page text is in the database, so cards survive; the "Source · p.14" image does not`
+        : 'no storage rows at all — uploaded originals are not recoverable from a database dump',
     );
 
     // --------------------------------------------------------- restore --
@@ -318,20 +332,50 @@ async function main() {
     for (const kind of errorKinds(dataRun.all)) console.log(`      ${kind}`);
 
     rule('COMPARE — dump vs restored');
-    let mismatched = 0;
+
+    // Split by schema, because the two halves fail for different reasons and
+    // averaging them hides the result. `public` is this app's own data and is
+    // what the backup exists to protect; `auth` and `storage` are platform
+    // tables whose DDL the dump does not carry, so they can only land in a
+    // target that already provides them.
+    let appMismatch = 0;
+    let appTables = 0;
+    let platformMismatch = 0;
+    let platformRowsLost = 0;
+
     for (const [table, dumped] of [...counts.entries()].sort()) {
       if (table.includes('UNTERMINATED')) continue;
       let live = -1;
       try {
         live = Number(psql(['-tAc', `select count(*) from ${table}`], { db: DB }).out.trim());
       } catch {
-        /* table absent in the restore; reported as a mismatch below */
+        /* table absent in the restore; counted as a mismatch below */
       }
       const same = live === dumped;
-      if (!same) mismatched++;
-      console.log(`    ${same ? ' ok ' : 'MISS'}  ${table.padEnd(34)} dump ${String(dumped).padStart(6)}  restored ${String(live).padStart(6)}`);
+      const isApp = table.startsWith('public.');
+      if (isApp) {
+        appTables++;
+        if (!same) appMismatch++;
+      } else if (!same) {
+        platformMismatch++;
+        platformRowsLost += Math.max(0, dumped - Math.max(0, live));
+      }
+      console.log(
+        `    ${same ? ' ok ' : 'MISS'}  ${table.padEnd(34)} dump ${String(dumped).padStart(6)}  restored ${String(live).padStart(6)}`,
+      );
     }
-    answer('R3', mismatched === 0 && dataErrors === 0, `${mismatched} table(s) differ, ${dataErrors} load error(s)`);
+
+    answer(
+      'R3',
+      appMismatch === 0,
+      `APPLICATION data: ${appTables - appMismatch}/${appTables} public tables match exactly`,
+    );
+    if (platformMismatch > 0) {
+      console.log(
+        `      platform data: ${platformMismatch} auth/storage table(s) lost ${platformRowsLost} row(s) — no DDL for them in the dump (see R4)`,
+      );
+    }
+    if (dataErrors > 0) console.log(`      ${dataErrors} COPY error(s), all from the missing platform tables`);
 
     const livePolicies = Number(psql(['-tAc', 'select count(*) from pg_policies'], { db: DB }).out.trim());
     answer('R5', livePolicies > 0, `${livePolicies} policies exist in the restored database`);

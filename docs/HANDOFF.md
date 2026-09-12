@@ -203,11 +203,29 @@ npx tsx --env-file=.env scripts/verify-phase2.ts --pdf <file>
 
 ## What is genuinely open
 
-1. **No backup has ever been restored.** The workflow dumps monthly and since
-   §11.2 verifies row counts for `study_items` and `attempts` — so it proves the
-   dump has rows, not that the app can be recovered from it. **This is the only
-   failure mode in the project where the loss is permanent and silent.** Restore
-   one into a scratch project and point a local build at it, once, deliberately.
+1. **The backup HAS now been restored, once — and the drill found three
+   faults** (2026-09-12, NOTES §29).
+   - **Application data restores perfectly.** 11/11 public tables, 40 policies,
+     632 rows, every count matching the dump, into PostgreSQL 17.
+   - **Accounts do not.** `schema.sql` is public-only while `data.sql` carries
+     `auth` and `storage` rows, so the backup holds 7 users, 252 sessions and
+     310 refresh tokens with no tables to put them in. They land only in a
+     target that already provides the `auth` schema — a real Supabase project,
+     which is **still untested**.
+   - **`on_auth_user_created` is not in the dump** (pg_dump emits a trigger
+     with its table, and `auth.users` is not dumped). After any restore it must
+     be recreated, or new sign-ups silently get no `profiles` row.
+   - **Uploaded originals are not recoverable.** `storage.objects` is metadata;
+     the bytes are not in a database dump. Cards survive, source images do not.
+   - Two faults had nothing to do with restoring: the backup had been **failing
+     on every run since Phase A** (a `grep` matching nothing exits 1 under
+     `set -e`), and the **passphrase had been lost**, making every retained
+     artifact undecryptable. Both fixed; the passphrase was rotated and the old
+     artifacts written off.
+
+   **Still open:** the app has never been run against a restored database
+   (needs Docker and ~30 GB; C: has 6.2 GB free), and no restore into a real
+   Supabase project has been attempted.
 2. **The generation prompt's "every card must stand on its own" rule has no
    validator**, while the rephrase path has one. Adding it would start dropping
    cards on the main path, so it needs measuring first (NOTES §10.1).

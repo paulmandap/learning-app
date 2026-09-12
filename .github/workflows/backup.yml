@@ -43,10 +43,53 @@ name: Database backup
 # Kept for 90 days, sent to no third-party storage. Do not add a step that
 # uploads, prints or copies the plaintext dump anywhere.
 #
-# To restore:
-#   gpg --decrypt --output backup.tar.gz backup.tar.gz.gpg
-#   tar -xzf backup.tar.gz          # -> schema.sql, data.sql
-#   psql "$SUPABASE_DB_URL" -f schema.sql && psql "$SUPABASE_DB_URL" -f data.sql
+# ---------------------------------------------------------------------------
+# TO RESTORE — rewritten 2026-09-12 after the first drill ever run (NOTES §29).
+#
+# The previous version of these four lines pointed psql at $SUPABASE_DB_URL,
+# i.e. at the LIVE database. That is not a restore procedure; it is a way to
+# lose the original while testing the copy. It also omitted every prerequisite
+# below, without which the dump does not load at all.
+#
+# WHAT THIS BACKUP DOES AND DOES NOT CONTAIN, measured:
+#   * schema.sql is PUBLIC-ONLY. It defines no auth or storage objects.
+#   * data.sql carries rows for public AND auth AND storage.
+#   -> the accounts are in the backup but the tables to hold them are not, so
+#      auth rows land ONLY in a target that already provides the auth schema
+#      (a real Supabase project). Restoring anywhere else silently drops every
+#      account: measured at 7 users, 252 sessions, 310 refresh tokens.
+#   * storage.objects rows are METADATA. The uploaded files themselves live in
+#      object storage and are NOT in this dump. Page text is in the database,
+#      so cards survive a restore and their source images do not.
+#   * `on_auth_user_created` (0001) is NOT in the dump — pg_dump emits a
+#      trigger with its table, and auth.users is not dumped. After ANY restore
+#      it must be recreated, or new sign-ups silently get no profiles row.
+#
+# 1. Decrypt and unpack, somewhere outside this repository:
+#      gpg --decrypt --output backup.tar.gz backup.tar.gz.gpg
+#      tar -xzf backup.tar.gz          # -> schema.sql, data.sql
+#
+# 2. Create a NEW, EMPTY target. Never the live database. A fresh Supabase
+#    project is the only target where the auth rows can land.
+#
+# 3. Create what the dump assumes but does not create (measured — without
+#    auth.uid() all 40 RLS policies fail to create and the restore loses its
+#    security model). A Supabase project already has all of these:
+#      roles     anon, authenticated, postgres, service_role
+#      schemas   extensions, auth, storage, graphql_public
+#      function  auth.uid()
+#
+# 4. psql "$TARGET_DB_URL" -f schema.sql
+#    psql "$TARGET_DB_URL" -f data.sql
+#
+# 5. Re-apply supabase/migrations/ to recover on_auth_user_created, then check
+#    a sign-up creates a profiles row.
+#
+# VERIFIED 2026-09-12: steps 1, 3 and 4 restore 100% of application data into
+# a PostgreSQL 17 database — 11/11 tables, 40 policies, 632 rows, all counts
+# matching the dump. NOT VERIFIED: restoring into a real Supabase project, and
+# step 5. See NOTES §29.9.
+# ---------------------------------------------------------------------------
 
 on:
   schedule:
