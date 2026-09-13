@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { emptyLevelCopy, LevelSegment, LEVELS } from '../../../src/ui/segment';
 import { useQuery } from '@tanstack/react-query';
 import {
   Body,
@@ -42,12 +43,6 @@ import type { Level } from '../../../src/core/planner';
  * qualified when measured, so the empty state has to explain itself rather than
  * look broken.
  */
-
-const LEVELS: { key: Level; label: string }[] = [
-  { key: 'remember', label: 'Remember' },
-  { key: 'understand', label: 'Understand' },
-  { key: 'apply', label: 'Apply' },
-];
 
 interface Blank {
   item: StudyItem;
@@ -264,27 +259,14 @@ export default function Blanks() {
     <Screen>
       <Title>{retryOnly ? 'Retry what you missed' : 'Fill in the blanks'}</Title>
 
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        {LEVELS.map((l) => (
-          <View key={l.key} style={{ flex: 1 }}>
-            <Button
-              label={`${l.label} ${countByLevel[l.key] ?? 0}`}
-              variant={level === l.key ? 'primary' : 'secondary'}
-              onPress={() => {
-                setLevelChosen(true);
-                setLevel(l.key);
-              }}
-            />
-          </View>
-        ))}
-      </View>
+      <LevelSegment value={level} counts={countByLevel} onChange={setLevel} />
 
       {queue.length === 0 ? (
         <Card>
           <Body muted>
             {retryOnly
-              ? 'Nothing to retry here — you have not missed any of these at this level yet.'
-              : 'No blanks at this level yet.'}
+              ? emptyLevelCopy('blanks', true)
+              : emptyLevelCopy('blanks', false)}
           </Body>
           {/* Explains itself rather than looking broken. Only cards whose answer
               is a short phrase written in the notes can have that phrase taken

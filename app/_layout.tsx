@@ -89,7 +89,14 @@ function RootNavigator() {
             out mid-deck is a distraction rather than an option. */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="sign-in" options={{ title: 'Sign in', headerShown: false }} />
-        <Stack.Screen name="new" options={{ title: 'New set', ...backable }} />
+        {/* title: '' on every screen that renders its own heading.
+            Four screens set a stack title AND drew the same words again in the
+            body, so "Quiz" appeared twice, one above the other. The pattern was
+            already solved for set/[id]/index — a long set name collided with
+            the back control, so its stack title was blanked and the screen
+            names itself. It was simply never applied to the rest.
+            NOTES §35. */}
+        <Stack.Screen name="new" options={{ title: '', ...backable }} />
         {/* Nomi is reached from the heading of Study and Progress, not from the
             tab bar. The four tabs are the learning loop, and a fifth for a
             companion would make Nomi somewhere you go INSTEAD of studying
@@ -103,13 +110,13 @@ function RootNavigator() {
         <Stack.Screen name="note/[id]" options={{ title: 'Note', ...backable }} />
         {/* Title is set by the screen itself, to the set's own name. */}
         <Stack.Screen name="set/[id]/index" options={{ title: '', ...backable }} />
-        <Stack.Screen name="set/[id]/flashcards" options={{ title: 'Flashcards', ...backable }} />
-        <Stack.Screen name="set/[id]/quiz" options={{ title: 'Quiz', ...backable }} />
+        <Stack.Screen name="set/[id]/flashcards" options={{ title: '', ...backable }} />
+        <Stack.Screen name="set/[id]/quiz" options={{ title: '', ...backable }} />
         {/* Without this the header falls back to the route pattern and reads
             "set/[id]/blanks" to the user. */}
         <Stack.Screen
           name="set/[id]/blanks"
-          options={{ title: 'Fill in the blanks', ...backable }}
+          options={{ title: '', ...backable }}
         />
         {/* Registered for the same reason as the routes above: without it the
             header reads "+not-found". `backable` matters more here than

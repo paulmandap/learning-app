@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Linking, Platform, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { emptyLevelCopy, LevelSegment } from '../../../src/ui/segment';
 import { useQuery } from '@tanstack/react-query';
 import {
   Body,
@@ -23,12 +24,6 @@ import { reviewStatesForSet } from '../../../src/data/review';
 import { isDue, studyOrder } from '../../../src/core/schedule';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import type { Level } from '../../../src/core/planner';
-
-const LEVELS: { key: Level; label: string }[] = [
-  { key: 'remember', label: 'Remember' },
-  { key: 'understand', label: 'Understand' },
-  { key: 'apply', label: 'Apply' },
-];
 
 export default function Flashcards() {
   const { id, retry } = useLocalSearchParams<{ id: string; retry?: string }>();
@@ -290,24 +285,14 @@ export default function Flashcards() {
     <Screen>
       <Title>{retryOnly ? 'Retry what you missed' : 'Flashcards'}</Title>
 
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        {LEVELS.map((l) => (
-          <View key={l.key} style={{ flex: 1 }}>
-            <Button
-              label={`${l.label} ${countByLevel[l.key] ?? 0}`}
-              variant={level === l.key ? 'primary' : 'secondary'}
-              onPress={() => setLevel(l.key)}
-            />
-          </View>
-        ))}
-      </View>
+      <LevelSegment value={level} counts={countByLevel} onChange={setLevel} />
 
       {items.length === 0 ? (
         <Card>
           <Body muted>
             {retryOnly
-              ? 'Nothing to retry here — you have not missed anything at this level yet.'
-              : 'No cards at this level yet.'}
+              ? emptyLevelCopy('cards', true)
+              : emptyLevelCopy('cards', false)}
           </Body>
           <Button label="Back to set" variant="secondary" onPress={() => router.back()} />
         </Card>

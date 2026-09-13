@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Pressable, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { emptyLevelCopy, LevelSegment } from '../../../src/ui/segment';
 import { useQuery } from '@tanstack/react-query';
 import {
   Body,
@@ -30,12 +31,6 @@ import {
   type GradedAnswer,
 } from '../../../src/core/grade';
 import type { Level } from '../../../src/core/planner';
-
-const LEVELS: { key: Level; label: string }[] = [
-  { key: 'remember', label: 'Remember' },
-  { key: 'understand', label: 'Understand' },
-  { key: 'apply', label: 'Apply' },
-];
 
 interface Answered {
   item: StudyItem;
@@ -279,8 +274,8 @@ export default function Quiz() {
           {answered.length === 0 ? (
             <Body muted>
               {retryOnly
-                ? 'Nothing to retry — you have not missed anything here yet.'
-                : 'No questions at this level yet.'}
+                ? emptyLevelCopy('questions', true)
+                : emptyLevelCopy('questions', false)}
             </Body>
           ) : null}
         </Card>
@@ -350,31 +345,15 @@ export default function Quiz() {
       <Title>{retryOnly ? 'Retry' : 'Quiz'}</Title>
 
       {!retryOnly ? (
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          {LEVELS.map((l) => (
-            <View key={l.key} style={{ flex: 1 }}>
-              {/* The count was computed and then not shown — see countByLevel,
-                  whose own note explains why a button that promises 10 and
-                  deals 3 is a lie. Flashcards and Blanks both carried theirs;
-                  this was the one segment that did not. Only rendered outside
-                  retry mode, so the count over `quizzable` is what the tap
-                  actually deals. */}
-              <Button
-                label={`${l.label} ${countByLevel[l.key] ?? 0}`}
-                variant={level === l.key ? 'primary' : 'secondary'}
-                onPress={() => setLevel(l.key)}
-              />
-            </View>
-          ))}
-        </View>
+        <LevelSegment value={level} counts={countByLevel} onChange={setLevel} />
       ) : null}
 
       {items.length === 0 ? (
         <Card>
           <Body muted>
             {retryOnly
-              ? 'Nothing to retry here — you have not missed anything yet.'
-              : 'No quiz questions at this level yet.'}
+              ? emptyLevelCopy('questions', true)
+              : emptyLevelCopy('questions', false)}
           </Body>
           {/* back(), not replace(): replace destroys the history entry, which is
             what left the installed PWA with no way back — it has no edge-swipe

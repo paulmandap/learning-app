@@ -103,18 +103,35 @@ describe('the dashboard button goes where it says', () => {
 describe('every level segment says how many cards it will deal', () => {
   // A button promising 10 that then deals 3 is a lie — the rule was written in
   // quiz.tsx's own countByLevel docstring and then not applied to its buttons.
+  //
+  // The guard MOVED rather than weakened. The picker used to be three hand
+  // rolled Buttons in each of three screens, so this had to check three copies
+  // of the same JSX; §23.2 records them drifting exactly once, with quiz
+  // shipping without its counts. There is now one `LevelSegment`, so the
+  // question splits: does each screen hand it the counts, and does the control
+  // actually draw them.
   const screens = ['flashcards.tsx', 'quiz.tsx', 'blanks.tsx'];
 
   for (const screen of screens) {
-    it(`${screen} shows the count on the level buttons`, () => {
+    it(`${screen} hands its counts to the shared segment`, () => {
       const source = read('app', 'set', '[id]', screen);
-      expect(levelSegment(source)).toContain('countByLevel');
+      expect(source).toMatch(/<LevelSegment[^>]*counts=\{countByLevel\}/s);
     });
   }
 
-  it('quiz no longer renders a bare label', () => {
-    const source = read('app', 'set', '[id]', 'quiz.tsx');
-    expect(levelSegment(source)).not.toMatch(/label=\{l\.label\}/);
+  it('the segment renders the count as its own element, not inside the label', () => {
+    // Concatenating it into the label is what made "Remember 5" wrap to two
+    // lines while "Apply 4" did not.
+    const source = read('src', 'ui', 'segment.tsx');
+    expect(source).toContain('{n}');
+    expect(source).not.toMatch(/\$\{l\.label\}\s*\$\{/);
+  });
+
+  it('no screen declares its own copy of LEVELS any more', () => {
+    for (const screen of screens) {
+      const source = read('app', 'set', '[id]', screen);
+      expect(source).not.toMatch(/const LEVELS/);
+    }
   });
 });
 

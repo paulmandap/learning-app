@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import {
   CONTENT_MAX_WIDTH,
+  FLOAT_CLEARANCE,
   INPUT_FONT_SIZE,
   radius,
   space,
@@ -183,7 +184,7 @@ export function ListRow({
       ]}
     >
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={[type.body, { color: t.text, fontWeight: '600' }]} numberOfLines={2}>
+        <Text style={[type.bodyStrong, { color: t.text }]} numberOfLines={2}>
           {title}
         </Text>
         {meta ? <Text style={[type.caption, { color: t.textMuted }]}>{meta}</Text> : null}
@@ -289,10 +290,24 @@ export function ProgressBar({ value, total }: { value: number; total: number }) 
 }
 
 /** Inline status line. Never renders a raw API message or a key. */
-export function Notice({ tone, children }: { tone: 'ok' | 'error' | 'warn'; children: ReactNode }) {
+/**
+ * Inline status line. Never renders a raw API message or a key.
+ *
+ * `info` exists because the Settings privacy note is INFORMATION and was
+ * wearing alarm amber for want of anywhere else to sit — three paragraphs of
+ * warning colour as the first thing on the screen (NOTES §35).
+ */
+export function Notice({
+  tone,
+  children,
+}: {
+  tone: 'ok' | 'error' | 'warn' | 'info';
+  children: ReactNode;
+}) {
   const t = useTheme();
-  const color = tone === 'ok' ? t.ok : tone === 'error' ? t.danger : t.warnText;
-  const bg = tone === 'warn' ? t.warnBg : 'transparent';
+  const color =
+    tone === 'ok' ? t.ok : tone === 'error' ? t.danger : tone === 'info' ? t.infoText : t.warnText;
+  const bg = tone === 'warn' ? t.warnBg : tone === 'info' ? t.infoBg : 'transparent';
   return (
     <View style={[styles.notice, { backgroundColor: bg }]}>
       <Text style={[styles.body, { color }]}>{children}</Text>
@@ -307,7 +322,11 @@ const styles = StyleSheet.create({
     // A 28px large title sitting 16px under the navigation bar reads as text
     // that happens to be first rather than as a heading. It needs room above it.
     paddingTop: space.xxl,
-    paddingBottom: 48,
+    // Clears the floating ✦ rather than guessing. This was 48 — less than the
+    // button's own height — so on Settings the ✦ covered "Test connection".
+    // One token, so a screen cannot forget and the number cannot drift from
+    // the thing it is avoiding (NOTES §35).
+    paddingBottom: FLOAT_CLEARANCE,
   },
   card: { borderWidth: 1, borderRadius: radius.md, padding: space.lg, gap: space.md },
   row: {
@@ -355,6 +374,75 @@ const styles = StyleSheet.create({
     minHeight: TOUCH_TARGET,
     justifyContent: 'center',
   },
-  buttonLabel: { fontSize: 16, fontWeight: '600' },
+  buttonLabel: type.button,
   notice: { borderRadius: radius.sm, paddingVertical: space.sm, paddingHorizontal: space.md },
 });
+
+/**
+ * A small count or status label.
+ *
+ * Exists because counts were being concatenated into button labels — the level
+ * pickers rendered `"Remember 5"` as one string, so "Remember 5" wrapped to two
+ * lines while "Apply 4" did not (NOTES §35). A count is a different kind of
+ * thing from a label and should be able to sit beside one.
+ */
+export function Chip({
+  children,
+  tone = 'neutral',
+}: {
+  children: ReactNode;
+  tone?: 'neutral' | 'accent';
+}) {
+  const t = useTheme();
+  const onAccent = tone === 'accent';
+  return (
+    <View
+      style={{
+        borderRadius: radius.pill,
+        paddingHorizontal: space.sm,
+        paddingVertical: space.hair,
+        backgroundColor: onAccent ? t.accent : t.bg,
+        borderWidth: 1,
+        borderColor: onAccent ? t.accent : t.border,
+      }}
+    >
+      <Text style={[type.caption, { color: onAccent ? t.accentText : t.textMuted }]}>
+        {children}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * Nothing here yet, said once.
+ *
+ * The audit found seven near-duplicate empty strings across the study screens,
+ * including three different phrasings of the SAME sentence about the retry
+ * pile. That is §23.2's "three copies drift apart", in copy rather than code —
+ * so the wording lives in one place and the screens pass a subject.
+ */
+export function EmptyState({ title, detail }: { title: string; detail?: string }) {
+  const t = useTheme();
+  return (
+    <View style={{ gap: space.xs, paddingVertical: space.lg }}>
+      <Text style={[type.bodyStrong, { color: t.text }]}>{title}</Text>
+      {detail ? <Text style={[type.body, { color: t.textMuted }]}>{detail}</Text> : null}
+    </View>
+  );
+}
+
+/**
+ * Waiting, said the same way everywhere.
+ *
+ * `Loading…` appeared eight times as bare muted text, hand-written per screen.
+ * No spinner by default: a study app that flashes a spinner for a 60ms cached
+ * read is noisier than one that simply says what it is doing.
+ */
+export function LoadingState({ what = 'Loading…' }: { what?: string }) {
+  const t = useTheme();
+  return (
+    <View style={{ paddingVertical: space.lg }}>
+      <Text style={[type.body, { color: t.textMuted }]}>{what}</Text>
+    </View>
+  );
+}

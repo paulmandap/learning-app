@@ -11,7 +11,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { INPUT_FONT_SIZE, radius, space, useTheme } from './theme';
+import { elevation, INPUT_FONT_SIZE, radius, space, TAB_BAR_HEIGHT, useTheme } from './theme';
 import { fetchProfile } from '../data/profile';
 import { askAssistant } from '../data/assistant';
 import { useAssistantContext } from '../data/assistant-context';
@@ -79,7 +79,7 @@ const NARROW_MAX_WIDTH = 520;
  * touch target. The safe-area inset is added separately by both, so it is not
  * counted twice.
  */
-const TAB_BAR_HEIGHT = space.xs + 44;
+
 
 /** Sidebar layouts put navigation on the left, so nothing to clear at the bottom. */
 const SIDEBAR_MIN_WIDTH = 800;
@@ -114,6 +114,10 @@ export function StudyAssistant() {
   // carries the home indicator under it left the two crowding each other, and a
   // floating control that nearly touches fixed furniture looks misplaced rather
   // than floating.
+  // TAB_BAR_HEIGHT comes from theme.ts, which is where the tab bar's height is
+  // actually decided. It used to be rebuilt here as `space.xs + 44` from a
+  // layout this file does not own, so changing the bar would have moved the
+  // ✦ without anything saying so (NOTES §35).
   const bottomOffset = insets.bottom + space.xl + (overTabs ? TAB_BAR_HEIGHT : 0);
 
   // Escape closes it, the way any overlay should on a keyboard.
@@ -160,7 +164,7 @@ export function StudyAssistant() {
           bottom: bottomOffset,
           // Explicit, so this does not depend on being a later sibling of
           // <Stack> than the navigator's own positioned containers.
-          zIndex: 30,
+          zIndex: elevation.float,
           width: CLOSED_SIZE,
           height: CLOSED_SIZE,
           borderRadius: CLOSED_SIZE / 2,
@@ -203,7 +207,7 @@ export function StudyAssistant() {
         left: 0,
         right: 0,
         bottom: 0,
-        zIndex: 30,
+        zIndex: elevation.float,
         alignItems: narrow ? 'center' : 'flex-end',
         justifyContent: narrow ? 'flex-start' : 'flex-end',
       }}

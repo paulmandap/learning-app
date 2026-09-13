@@ -42,6 +42,10 @@ export const CONTENT_MAX_WIDTH = 560;
 
 /** 4px base scale. Use these rather than raw numbers. */
 export const space = {
+  /** Optical nudges. Named so they stop being invented per file: the audit
+   *  found 2, 3, 5, 6 and 10 used as one-off gaps nobody could repeat. */
+  hair: 2,
+  tight: 6,
   xs: 4,
   sm: 8,
   md: 12,
@@ -81,6 +85,10 @@ export const type = {
   body: { fontSize: 15, fontWeight: '400' as const, lineHeight: 22 },
   label: { fontSize: 13, fontWeight: '500' as const, lineHeight: 18 },
   caption: { fontSize: 12, fontWeight: '400' as const, lineHeight: 16 },
+  /** Body at list-row weight. `ListRow` hand-rolled this; now it is a step. */
+  bodyStrong: { fontSize: 15, fontWeight: '600' as const, lineHeight: 22 },
+  /** Button labels. Was a bare 16/600 inside the stylesheet. */
+  button: { fontSize: 16, fontWeight: '600' as const, lineHeight: 20 },
 } as const;
 
 /**
@@ -114,3 +122,41 @@ export const swipeTint = {
   gotIt: '#1d7a4c',
   missed: '#b3822a',
 } as const;
+
+/**
+ * Elevation: there isn't any, and that is the system.
+ *
+ * Every surface in this app is flat with a 1px hairline. No shadows anywhere.
+ * That was already true and was never written down, which is how a system
+ * gets violated — the next person adds one shadow and nothing says no.
+ *
+ * Exactly ONE thing floats: the assistant ✦. It gets a named layer rather than
+ * a number sprinkled at a call site.
+ */
+export const elevation = {
+  /** The only floating layer in the app. */
+  float: 30,
+} as const;
+
+/**
+ * How much room a screen must leave at the bottom for the floating ✦.
+ *
+ * This is a defect fix promoted to a token. `Screen` used to pad the bottom by
+ * 48 while the ✦ occupies its own height plus a gap plus the safe-area inset —
+ * so on Settings the button sat on top of "Test connection" and covered a real
+ * control (NOTES §35). Padding by a number that had nothing to do with the
+ * thing it was avoiding is why it drifted.
+ *
+ * The safe-area inset is added by the caller, which is the only place that
+ * knows it.
+ */
+export const FLOAT_SIZE = 56;
+export const FLOAT_CLEARANCE = FLOAT_SIZE + space.xl;
+
+/**
+ * The tab bar's height, owned HERE rather than reconstructed.
+ *
+ * `assistant.tsx` used to rebuild this as `space.xs + 44` from a layout it
+ * does not own, so changing the bar would silently misplace the ✦.
+ */
+export const TAB_BAR_HEIGHT = space.xs + TOUCH_TARGET;
