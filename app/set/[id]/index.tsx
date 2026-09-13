@@ -14,12 +14,12 @@ import {
   OptionList,
   Screen,
 } from '../../../src/ui/components';
+import { StatePanel } from '../../../src/ui/states';
 import { OverflowMenu } from '../../../src/ui/menu';
 import { space } from '../../../src/ui/theme';
 import { formatSetTitle } from '../../../src/core/title';
 import { fetchProfile } from '../../../src/data/profile';
 import { deleteSet, getSet, updateSet } from '../../../src/data/sets';
-import { describeDrops } from '../../../src/core/validate';
 import { freeUpSpace, listDocuments, pagesForSet } from '../../../src/data/documents';
 import { formatBytes } from '../../../src/core/storage';
 import { useAssistantContext } from '../../../src/data/assistant-context';
@@ -28,6 +28,9 @@ import { countItems } from '../../../src/data/items';
 import { dueCountForSet, dueLevelsForSet } from '../../../src/data/review';
 import { busiestLevel } from '../../../src/core/deck';
 import { generateSet, type Progress } from '../../../src/data/pipeline';
+
+/** Said when a run ended badly and did not say why. */
+const GENERIC_FAILURE = 'Something went wrong making cards. Your finished cards are saved.';
 
 /**
  * One screen for both "Preparing" and "Set ready" — which one you see depends
@@ -50,6 +53,9 @@ export default function SetScreen() {
   const [freed, setFreed] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Why making cards stopped, kept apart from rename/free/delete errors. */
+  const [runError, setRunError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
   // null = not renaming. Holds the RAW stored title while editing, not the
   // formatted one, so opening and saving without typing is a no-op rather than
   // quietly overwriting the original with its prettified version.
@@ -178,15 +184,19 @@ export default function SetScreen() {
 
   const run = useCallback(async () => {
     if (!apiKey) return;
-    setError(null);
+    setRunError(null);
+    setProgress(null);
+    setRunning(true);
     try {
       await generateSet({ setId, apiKey, onProgress: setProgress });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      setRunError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
+      setRunning(false);
       await refetchSet();
       await refetchCount();
       await queryClient.invalidateQueries({ queryKey: ['items', setId] });
+      await queryClient.invalidateQueries({ queryKey: ['sets'] });
     }
   }, [apiKey, setId, refetchSet, refetchCount, queryClient]);
 
@@ -209,15 +219,10 @@ export default function SetScreen() {
 
   const plan = set.plan;
   const unreadable = plan?.unreadablePages ?? [];
-  const droppedLine = plan?.droppedSummary ? describeDrops(plan.droppedSummary) : null;
-
-  // How much of a shortfall the notes are actually responsible for: the gap,
-  // less anything we discarded ourselves.
-  const droppedCount = Object.values(plan?.droppedSummary ?? {}).reduce((a, b) => a + b, 0);
-  const notesFellShort = plan
-    ? Math.max(0, plan.requestedCount - itemCount - droppedCount)
-    : 0;
   const isGenerating = set.status === 'generating';
+  const requested = plan?.requestedCount ?? 0;
+  // A run that ended badly carries its reason on its last event.
+  const problem = runError ?? (!running && progress?.phase === 'failed' ? (progress.message ?? GENERIC_FAILURE) : null);
 
   const displayTitle = formatSetTitle(set.title);
   // "Free up space" only appears while there is space to free — once the
@@ -225,6 +230,8 @@ export default function SetScreen() {
   const hasFiles = docs.some((d) => d.storage_path);
   // Where "7 due" actually is. Null opens the deck on its usual default.
   const dueLevel = dueCount > 0 ? busiestLevel(dueLevels) : null;
+  const studyNow = () =>
+    router.push(dueLevel ? `/set/${setId}/flashcards?level=${dueLevel}` : `/set/${setId}/flashcards`);
 
   return (
     <Screen>
@@ -297,48 +304,45 @@ export default function SetScreen() {
         </Card>
       ) : null}
 
+      {/* Making cards, and what went wrong if it stopped — from the owner's
+          reference (NOTES §37). The failure used to be an amber strip inside
+          the same "Making cards…" card, so the screen said two opposite things
+          at once. Now it is one or the other.
+
+          "We left out 12 cards: …" and "Your notes supported N good ones" are
+          gone at the owner's request: the pipeline makes the count asked for. */}
       {isGenerating ? (
-        <Card>
-          <Body>
-            {progress?.phase === 'reading'
-              ? 'Reading your notes…'
-              : progress?.sectionsTotal
-                ? `Making cards… ${progress.sectionsDone ?? 0} of ${progress.sectionsTotal} parts`
-                : 'Getting started…'}
-          </Body>
-          <Body muted>
-            {itemCount > 0
-              ? `${itemCount} card${itemCount === 1 ? '' : 's'} ready so far — you can start as soon as the first ones appear.`
-              : 'Your first cards will appear here shortly.'}
-          </Body>
-          {progress?.message ? <Notice tone="warn">{progress.message}</Notice> : null}
-        </Card>
+        !apiKey ? (
+          <StatePanel kind="problem"
+            title="Add your Gemini key first"
+            detail="Your cards are made with your own free key. Add it in Settings, then come back to this set."
+            action={{ label: 'Open Settings', onPress: () => router.push('/settings') }}
+          />
+        ) : problem ? (
+          <StatePanel kind="problem"
+            title="Couldn't make your cards"
+            detail={problem}
+            action={{ label: 'Retry', onPress: () => void run(), busy: running }}
+            secondary={itemCount > 0 ? { label: `Study the ${itemCount} ready`, onPress: studyNow } : undefined}
+          />
+        ) : (
+          <StatePanel kind="working"
+            title={progress?.phase === 'reading' ? 'Reading your notes' : 'Making your flashcards'}
+            detail={
+              itemCount > 0
+                ? `${itemCount}${requested > itemCount ? ` of ${requested}` : ''} ready. You can start on these while the rest are made.`
+                : 'Your first cards will appear here shortly.'
+            }
+            action={itemCount > 0 ? { label: 'Start studying', onPress: studyNow } : undefined}
+          />
+        )
       ) : (
-        // Metadata, not a container. This was a bordered Card holding one short
-        // sentence, which read as a disabled text input and pushed the actual
-        // actions down the screen. A muted line under the title says the same
-        // thing and gets out of the way.
-        <View style={{ gap: space.xs }}>
-          <Body muted>
-            {itemCount} card{itemCount === 1 ? '' : 's'}
-            {dueCount > 0 ? ` · ${dueCount} due today` : ' · Ready'}
-          </Body>
-          {/* Only claims your notes were the limit when they ACTUALLY were.
-              This used to fire on any shortfall, so a set of 9 from a requested
-              10 said "your notes supported 9 good ones" when the notes were
-              rich and we had simply discarded one card. Blaming the notes for
-              our own drop is both wrong and discouraging. When drops explain
-              the gap, the line below says so and this one stays quiet. */}
-          {plan && notesFellShort > 0 ? (
-            <Body muted>
-              You asked for up to {plan.requestedCount}. Your notes supported {itemCount} good
-              ones, and we'd rather stop than pad.
-            </Body>
-          ) : null}
-          {/* Only rendered when cards were actually left out, so a clean run
-              shows nothing extra. This is the "why 19 of 20?" answer. */}
-          {droppedLine ? <Body muted>{droppedLine}</Body> : null}
-        </View>
+        // Metadata, not a container. A muted line under the title says how many
+        // and gets out of the way of the actions below it.
+        <Body muted>
+          {itemCount} card{itemCount === 1 ? '' : 's'}
+          {dueCount > 0 ? ` · ${dueCount} due today` : ' · Ready'}
+        </Body>
       )}
 
       {/* Three ways to study the same cards, as a choice between peers.
@@ -403,14 +407,14 @@ export default function SetScreen() {
 
       {error ? <Notice tone="error">{error}</Notice> : null}
 
-      {!apiKey ? (
+      {!apiKey && !isGenerating ? (
         <Notice tone="error">Add your Gemini key in Settings before making cards.</Notice>
       ) : null}
 
       {/* Reads the state, never the ref — see the note on `started`. This is
-          the manual way in when the automatic one could not take it: arriving
-          with no key set, or coming back to a set left half-generated. */}
-      {isGenerating && !hasStarted ? <Button label="Keep going" onPress={run} /> : null}
+          the manual way in when the automatic one could not take it: coming
+          back to a set left half-made, with a key, before the run began. */}
+      {isGenerating && apiKey && !hasStarted ? <Button label="Keep going" onPress={run} /> : null}
 
       {/* The Home button is gone, and Delete no longer sits underneath where it
           was — the header back chevron handles navigation, and Delete lives in

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Linking, View } from 'react-native';
+import { Linking, Pressable, Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Body, Button, Card, Field, Label, Notice, Screen, Title } from '../../src/ui/components';
 import {
@@ -12,9 +12,10 @@ import {
   uploadAvatarPhoto,
 } from '../../src/data/profile';
 import { Avatar, FacePicker, pickProfilePhoto } from '../../src/ui/avatar';
+import { PrivacyNotice } from '../../src/ui/privacy';
 import { parseAvatar } from '../../src/core/avatar';
 import { useSessionStore } from '../../src/data/session';
-import { space } from '../../src/ui/theme';
+import { space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
 import { PetChooser } from '../../src/ui/pet';
 import { toPetSpecies, type PetSpecies } from '../../src/core/pet';
 import { deleteAllMyData } from '../../src/data/sets';
@@ -28,7 +29,16 @@ type TestState =
   | { kind: 'ok'; count: number }
   | { kind: 'error'; message: string };
 
+/**
+ * Settings, in the owner's order (NOTES §37): you, your pet, your key, how to
+ * get one, your account, and deleting your data last.
+ *
+ * "Where your notes go" is no longer a card here. It became a notice shown once
+ * after signing in (`src/ui/privacy.tsx`), and "Privacy" under Your account
+ * opens the same words again.
+ */
 export default function Settings() {
+  const t = useTheme();
   const queryClient = useQueryClient();
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
 
@@ -39,6 +49,7 @@ export default function Settings() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState<string | null>(null);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
 
   /**
    * The pet, held locally while the save is in flight.
@@ -81,7 +92,15 @@ export default function Settings() {
     }
   }
 
+  /**
+   * What to say when a picture will not save — and the real reason, logged.
+   *
+   * The screen said "try again in a moment" for every failure, and the one the
+   * owner hit could never be fixed by waiting: the column did not exist yet
+   * (NOTES §37). The sentence stays plain; the console now says why.
+   */
   function describeAvatarError(err: unknown): string {
+    console.warn(`[settings] picture not saved: ${err instanceof Error ? err.message : String(err)}`);
     return err instanceof AvatarsUnavailableError
       ? "Choosing a picture isn't switched on yet."
       : "Couldn't save that picture just now. Try again in a moment.";
@@ -217,37 +236,14 @@ export default function Settings() {
         {avatarError ? <Notice tone="error">{avatarError}</Notice> : null}
       </Card>
 
-      {/* ------------------------------------------------ privacy notice -- */}
-      {/* Visible immediately, next to the key field — never behind a tap or a
-          link. The "a real person at Google may read them" sentence is the one
-          users are least likely to assume; it must not be trimmed away.
-
-          INFO, not warn. It is information the student needs, not an alarm
-          about something going wrong, and three paragraphs of warning amber
-          as the first thing on the screen outshouted the real warnings below
-          it (NOTES §35). Re-toned only: D13's wording is untouched, and
-          tests/screens.test.ts still pins it. */}
+      {/* ----------------------------------------------------- your pet -- */}
       <Card>
-        <Body>Where your notes go</Body>
-        <Notice tone="info">
-          When you make cards, your notes are sent to Google using your own free key. The key is
-          free, so Google may keep your notes to help improve its products — and a real person at
-          Google may read them.{'\n\n'}
-          Please don't add patient information, anyone's personal details, or confidential work
-          documents. A good test: if you wouldn't want a stranger reading it, don't put it here.
-          {'\n\n'}
-          {/* D13 fixes this copy and says it must not be paraphrased smaller,
-              so the assistant is NAMED here rather than left implied — it sends
-              notes to Google more often, and more casually, than making cards
-              does. Wording approved by the owner (Phase 9c), and EXTENDED with
-              his approval on 2026-09-13 when the assistant began sending what it
-              knows about the student's studying with each message (NOTES §36).
-              The companion's name stays out of this paragraph, comments
-              included — tests/screens.test.ts reads the whole block. */}
-          The study assistant works the same way — what you ask it, the notes it looks at, and
-          what it knows about your studying (your name, sets, streak and progress) are sent to
-          Google too.
-        </Notice>
+        <Body>Your study pet</Body>
+        <Body muted>
+          It grows the longer you keep your streak going. Pick the one you'd rather see.
+        </Body>
+        <PetChooser value={pet} onChange={choosePet} disabled={!profile} />
+        {petError ? <Notice tone="error">{petError}</Notice> : null}
       </Card>
 
       {/* ---------------------------------------------------- key + test -- */}
@@ -300,16 +296,6 @@ export default function Settings() {
         </Body>
       </Card>
 
-      {/* ----------------------------------------------------- your pet -- */}
-      <Card>
-        <Body>Your study pet</Body>
-        <Body muted>
-          It grows the longer you keep your streak going. Pick the one you'd rather see.
-        </Body>
-        <PetChooser value={pet} onChange={choosePet} disabled={!profile} />
-        {petError ? <Notice tone="error">{petError}</Notice> : null}
-      </Card>
-
       {/* ------------------------------------------------------ account -- */}
       <Card>
         <Body>Your account</Body>
@@ -321,6 +307,16 @@ export default function Settings() {
             void supabase.auth.signOut();
           }}
         />
+        {/* The privacy notice, to read again. It was shown once after signing
+            in; this is where to find it after that (NOTES §37). */}
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setPrivacyOpen(true)}
+          hitSlop={8}
+          style={{ minHeight: TOUCH_TARGET, justifyContent: 'center' }}
+        >
+          <Text style={[type.label, { color: t.accent }]}>Privacy: where your notes go</Text>
+        </Pressable>
       </Card>
 
       {/* Deleting is irreversible, so it asks once rather than acting on the
@@ -350,6 +346,8 @@ export default function Settings() {
         )}
         {deleted ? <Notice tone="ok">{deleted}</Notice> : null}
       </Card>
+
+      <PrivacyNotice visible={privacyOpen} onClose={() => setPrivacyOpen(false)} />
     </Screen>
   );
 }

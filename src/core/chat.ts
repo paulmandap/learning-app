@@ -137,8 +137,16 @@ export const MAX_REPLY_TOKENS = 1024;
  */
 export const MAX_NOTES_CHARS = 4000;
 
-/** Longest message accepted. A chat message, not an essay pasted in. */
+/** Longest message sent to Gemini as a question. A chat message, not an essay pasted in. */
 export const MAX_QUESTION_CHARS = 1000;
+
+/**
+ * Longest message the chat box takes at all: notes pasted for Nomi to make a
+ * set from (NOTES §37). None of that goes to Gemini as a question — a paste is
+ * handled by Nomi itself (`src/core/nomi-actions.ts`), and its notes are sent
+ * only when the student confirms making cards from them.
+ */
+export const MAX_PASTE_CHARS = 20_000;
 
 /** Remaining questions at or below which the screen starts saying so. */
 export const LOW_REMAINING = 5;
@@ -192,6 +200,12 @@ export function trimNotes(notes: string, max: number = MAX_NOTES_CHARS): string 
 export function isAskable(question: string): boolean {
   const clean = question.trim();
   return clean.length >= 1 && clean.length <= MAX_QUESTION_CHARS;
+}
+
+/** Can this go in the chat box? Anything from "hi" to a page of pasted notes. */
+export function isSendable(message: string): boolean {
+  const clean = message.trim();
+  return clean.length >= 1 && clean.length <= MAX_PASTE_CHARS;
 }
 
 /**

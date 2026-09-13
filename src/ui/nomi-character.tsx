@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
   Animated,
   AppState,
   Easing as RNEasing,
@@ -24,6 +23,7 @@ import {
   type NomiState,
 } from '../core/nomi-motion';
 import { NOMI_RIG } from './nomi-rig';
+import { useReducedMotion } from './motion';
 
 /**
  * Nomi, drawn and moving.
@@ -68,28 +68,8 @@ const EASINGS: Record<Easing, (t: number) => number> = {
   linear: RNEasing.linear,
 };
 
-/** The system's reduce-motion setting; `null` until it has been read. */
-function useReducedMotion(): boolean | null {
-  const [reduce, setReduce] = useState<boolean | null>(null);
-  useEffect(() => {
-    let alive = true;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((value) => {
-        if (alive) setReduce(value);
-      })
-      .catch(() => {
-        if (alive) setReduce(false);
-      });
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (value) =>
-      setReduce(value),
-    );
-    return () => {
-      alive = false;
-      subscription?.remove();
-    };
-  }, []);
-  return reduce;
-}
+// The reduce-motion setting is read by `useReducedMotion` in ./motion.ts, shared
+// since NOTES §37 with everything else that moves.
 
 /** False while the app is backgrounded — or, on the web, the tab is hidden. */
 function useAppVisible(): boolean {

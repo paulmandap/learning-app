@@ -7,6 +7,14 @@
  */
 
 import { splitSentences } from '../core/text';
+import {
+  describeBand,
+  describeLines,
+  inSpan,
+  type Band,
+  type SentenceRef,
+  type SentenceSpan,
+} from '../core/coverage';
 import type { TierBudget } from '../core/planner';
 import type { AssistantContext } from '../core/chat';
 
@@ -31,24 +39,102 @@ Rules:
 - Do not summarise, correct, reword or reorder anything. This is transcription.
 - Preserve the author's own wording exactly, including any errors.`;
 
-/** Wording matters: excerpts must be verbatim or the validator drops the item. */
+/** Longest list of existing cards sent with a request. The newest are kept. */
+export const MAX_AVOID = 80;
+
+/**
+ * The generation prompt.
+ *
+ * ## What changed, and the measurement behind it (NOTES §37)
+ *
+ * It said "Write AT MOST N items" and "if the notes do not support the number
+ * of items asked for, return FEWER". On the owner's pasted song — 965 words,
+ * 104 lines — that turned a request for 10 into 2 cards from the first six
+ * lines, with nothing dropped, so nothing was replaced. Asked for 60 it wrote
+ * 15. The owner's call: the count asked for is the count wanted, weak notes or
+ * strong. So it now asks for EXACTLY N, says how many to take from each part
+ * of the text, and forbids a repeated answer — and each of those has a check
+ * behind it: the fill passes in `src/data/pipeline.ts`, the band quota and
+ * `sameAnswer` in `src/core/validate.ts`.
+ *
+ * Wording matters: citations must resolve or the validator drops the item.
+ */
 export function buildGeneratePrompt(input: {
   sectionTitle: string;
   budget: TierBudget;
   pagesText: string;
+  /** How many to take from each part of the notes. */
+  bands?: readonly Band[];
+  /** Cards already in the set; none of these questions or answers may be repeated. */
+  avoid?: readonly { prompt: string; answer: string }[];
+  /** A fill pass: the levels are a guide and the total is the target. */
+  flexibleLevels?: boolean;
+  /** The notes have been used already; ask about facts from a new angle. */
+  angles?: boolean;
+  /** Only these lines may be cited — the ones with no card yet. */
+  onlyLines?: readonly SentenceRef[];
 }): string {
-  const { sectionTitle, budget, pagesText } = input;
+  const {
+    sectionTitle,
+    budget,
+    pagesText,
+    bands = [],
+    avoid = [],
+    flexibleLevels,
+    angles,
+    onlyLines = [],
+  } = input;
   const total = budget.remember + budget.understand + budget.apply;
+
+  const spread =
+    bands.length > 0
+      ? `
+Spread them across the WHOLE of the notes. Take this many from each part:
+${bands.map((b) => `- ${describeBand(b)}: ${b.quota}`).join('\n')}
+A part that already has its share is full, and an extra item from it is thrown away.
+`
+      : '';
+
+  const fresh =
+    onlyLines.length > 0
+      ? `
+Every other line of these notes already has a card. Take every item from THESE lines only —
+an item citing any other line is thrown away:
+${describeLines(onlyLines)}
+`
+      : '';
+
+  const angleRule = angles
+    ? `
+MORE CARDS FROM NOTES ALREADY USED. Cards have already been made from these notes — they
+are listed below. Where the new facts run out, ask about a detail from a different angle:
+the other way round ("what did she give him?" becomes "who gave him the book?"), as a
+choice between options, or what comes just before or after a line. The answer must still be
+different from every card listed.
+`
+    : '';
+
+  const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+  const written =
+    avoid.length > 0
+      ? `
+ALREADY WRITTEN — do not repeat any of these questions, and do not reuse any of these answers:
+${avoid
+  .slice(-MAX_AVOID)
+  .map((c) => `- ${clip(c.prompt, 120)} → ${clip(c.answer, 80)}`)
+  .join('\n')}
+`
+      : '';
 
   return `You write study questions from a student's own notes.
 
 SECTION: ${sectionTitle}
 
-Write at most ${total} items from the notes below:
+Write exactly ${total} items from the notes below${flexibleLevels ? ', roughly' : ''}:
 - ${budget.remember} at level "remember" — recall a fact, definition or name.
 - ${budget.understand} at level "understand" — explain, compare, or say why something follows.
 - ${budget.apply} at level "apply" — use the idea on a new case or scenario.
-
+${flexibleLevels ? `The levels are a guide. The total of ${total} is what matters.\n` : ''}${spread}${fresh}
 Item kinds:
 - "flashcard": a prompt and a short answer.
 - "mcq": a question with 3 or 4 options, exactly one correct. Wrong options must be
@@ -62,13 +148,19 @@ WRITE IN YOUR OWN WORDS. This is the difference between a good card and a bad on
 - The "prompt" and "answer" must be written as clean, natural questions and answers,
   phrased by you. Do NOT copy sentences out of the notes into them.
 - Every card must stand on its own. A student sees ONE card with no notes beside it,
-  so never write "as shown above", "option B", "the third one", or "see the diagram".
+  so never write "as shown above", "option B", "the third one", or "see the diagram" —
+  and never mention a line, sentence or page number: those are for "source_sentence" only.
 - If the notes are ALREADY a quiz, do not copy it. Rewrite each question so it reads
   naturally, and write the answer as a plain statement of the fact — never as a letter
   or a number. "A. To unify word forms" is wrong; "To unify word forms" is right.
 - Strip any numbering or lettering. The card must contain no "1.", "A.", "b)" markers.
 - Keep the meaning exactly as the notes have it. Rewording is required; changing,
   correcting or embellishing the facts is not.
+
+ANY TEXT IS STUDY MATERIAL. Lecture notes, a textbook page, a story, a poem, a speech,
+song lyrics, a list — whatever the student gave you is what they want to learn. Ask about
+its people, places, events, details, images, wording, the order things happen in, and what
+it means. Never decide the text is not worth studying.
 
 HARD RULES — an item breaking any of these is discarded:
 1. Use ONLY the facts in the text provided below. Do not add outside knowledge,
@@ -78,28 +170,32 @@ HARD RULES — an item breaking any of these is discarded:
    "page_index" to its [PAGE n]. Do NOT copy the sentence text — just give the number.
    The number is checked automatically: if it does not exist, or the sentence does not
    actually support your answer, the card is thrown away. Cite the sentence that
-   contains the answer, not one that merely mentions the topic.
+   contains the answer, not one that merely mentions the topic. For "understand" and
+   "apply" items, use the key words of the line you cite in your answer — the check
+   compares the two, and an answer that shares none of that line's words is thrown away.
 3. Never put the answer inside its own prompt.
 4. For "mcq", the correct option's text must not appear word-for-word in the prompt.
-5. Do not write two items that ask the same thing in different words.
-6. If the notes do not support the number of items asked for, return FEWER. Padding with
-   weak or repetitive questions is worse than returning nothing.
+5. Do not write two items that ask the same thing in different words, and NO TWO ITEMS
+   MAY HAVE THE SAME ANSWER — reworded counts: "The left ventricle" and "Left ventricle"
+   are the same answer.
+6. Write the full number asked for. When the obvious facts run out, look for the smaller
+   details, then the order things happen in, then what a line means — every line of the
+   notes is a possible item.
 7. Include "rubric" ONLY on "short_answer" items. Leave it out entirely for flashcards
    and multiple choice — it is not used for them.
 8. Set "check_flag" ONLY if the notes clearly contradict established knowledge, and say
    what the conflict is. Do not flag things you merely find surprising or incomplete.
 9. Each item needs a short "topic" — a two-to-four-word label for what it is about.
-10. Make cards about the SUBJECT, not about the course. Real study material is full
-    of housekeeping: instructions to students, marking schemes, what to bring, dates,
-    room numbers, how an assessment is run, who prepared a specimen. None of that is
-    worth memorising. Ask yourself whether knowing a sentence would help someone
-    understand the topic itself — if not, skip it and return fewer items.
+10. Prefer the SUBJECT to the housekeeping. Real study material is full of instructions
+    to students, marking schemes, what to bring, dates, room numbers, how an assessment
+    is run, who prepared a specimen. Make cards about the subject itself first, and use
+    housekeeping only when nothing else in that part of the notes is left.
 11. A figure or diagram is study material. When the notes label parts of something and
     give a function or meaning for each, those pairings are exactly what gets examined,
     so make cards from them. Ask for the part given its function, or the function given
     its part. Where a label has no function printed beside it, only the name is known —
     do not invent one.
-
+${angleRule}${written}
 NOTES:
 ${pagesText}`;
 }
@@ -132,16 +228,26 @@ ${pagesText}`;
  * resolve the citation, or an index would mean two different things on the two
  * sides of the round trip.
  */
-export function renderPagesForPrompt(pages: { page_index: number; text: string }[]): string {
+export function renderPagesForPrompt(
+  pages: { page_index: number; text: string }[],
+  /**
+   * Only these lines, for one part of a split section (NOTES §37). They keep
+   * their ORIGINAL numbers, so a citation still resolves against the whole page.
+   */
+  span?: SentenceSpan,
+): string {
   return pages
     .slice()
     .sort((a, b) => a.page_index - b.page_index)
     .map((p) => {
       const numbered = splitSentences(p.text)
-        .map((s, i) => `[${i}] ${s}`)
+        .map((s, i) => ({ s, i }))
+        .filter(({ i }) => !span || inSpan({ page: p.page_index, sentence: i }, span))
+        .map(({ s, i }) => `[${i}] ${s}`)
         .join('\n');
-      return `[PAGE ${p.page_index}]\n${numbered}`;
+      return numbered ? `[PAGE ${p.page_index}]\n${numbered}` : '';
     })
+    .filter((block) => block.length > 0)
     .join('\n\n');
 }
 
@@ -284,6 +390,13 @@ export function buildNomiSystemPrompt(input: { brief: string; context: Assistant
     '   what they missed, their progress — use ONLY the facts below. Never guess or estimate',
     "   a number that is not there. If it isn't in the facts, say you can't see that.",
     '4. Plain language. No headings, no bullet lists, no markdown.',
+    '5. The app itself can do a few things when the student says so plainly, and asks them to confirm:',
+    '   make a study set from notes they paste ("make flashcards from this", then the notes), add pasted',
+    '   notes to a set ("add these to Biology", then the notes), rename a set ("rename Biology to Bio 101"),',
+    '   save text as a note ("save this as a note", then the text), and change their name ("call me Sam"),',
+    '   study pet ("switch my pet to the cat") or picture ("use face 3"). If they ask for one of these in',
+    '   other words, tell them the words to use. Nothing can delete anything, sign them out, or change',
+    '   their key from this chat — say so if asked.',
     '',
     input.brief,
   ];

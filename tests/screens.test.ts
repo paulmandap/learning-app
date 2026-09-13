@@ -340,13 +340,23 @@ describe('the existing assistant still works, and is now called Nomi', () => {
     // approved copy that D13 says must not be paraphrased smaller, and the word
     // Nomi does not enter it. Extended with his approval on 2026-09-13, when
     // Nomi began sending what it knows about the student (NOTES §36).
-    const settings = read('app', '(tabs)', 'settings.tsx');
-    expect(settings).toContain(
+    //
+    // MOVED with the copy (NOTES §37): from a card on Settings to the notice
+    // shown once after signing in. Same words, same rule.
+    const source = read('src', 'ui', 'privacy.tsx');
+    const block = source.slice(source.indexOf('PRIVACY COPY START'), source.indexOf('PRIVACY COPY END'));
+    expect(block.length).toBeGreaterThan(0);
+    for (const line of [
+      'When you make cards, your notes are sent to Google using your own free key. The key is',
+      'free, so Google may keep your notes to help improve its products — and a real person at',
+      "Please don't add patient information, anyone's personal details, or confidential work",
+      "documents. A good test: if you wouldn't want a stranger reading it, don't put it here.",
       'The study assistant works the same way — what you ask it, the notes it looks at, and',
-    );
-    expect(settings).toContain('what it knows about your studying (your name, sets, streak and progress) are sent to');
-    const notice = settings.slice(settings.indexOf('Where your notes go'), settings.indexOf('key + test'));
-    expect(notice).not.toMatch(/nomi/i);
+      'what it knows about your studying (your name, sets, streak and progress) are sent to',
+    ]) {
+      expect(block).toContain(line);
+    }
+    expect(block).not.toMatch(/nomi/i);
   });
 });
 
@@ -439,6 +449,111 @@ describe('symbols and waiting are each said one way', () => {
   });
 });
 
+describe("the owner's third round (NOTES §37)", () => {
+  it('Settings reads: you, pet, key, how to get a key, account, delete — with no privacy card', () => {
+    const settings = code(read('app', '(tabs)', 'settings.tsx'));
+    const order = [
+      '<Body>You</Body>',
+      '<Body>Your study pet</Body>',
+      '<Body>Your Gemini key</Body>',
+      '<Body>How to get a key</Body>',
+      '<Body>Your account</Body>',
+      '<Body>Delete my data</Body>',
+    ].map((heading) => settings.indexOf(heading));
+    expect(order.every((i) => i >= 0), 'a Settings card is missing').toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(settings).not.toContain('Where your notes go');
+    expect(settings).toContain('<PrivacyNotice');
+  });
+
+  it('the privacy notice is shown from the root, over whatever screen comes first', () => {
+    expect(code(read('app', '_layout.tsx'))).toContain('<PrivacyGate');
+  });
+
+  it('nothing explains left-out cards any more', () => {
+    const set = code(read('app', 'set', '[id]', 'index.tsx'));
+    expect(set).not.toContain('describeDrops');
+    expect(set).not.toMatch(/We left out|rather stop than pad/);
+    expect(code(read('src', 'core', 'validate.ts'))).not.toContain('function describeDrops');
+    expect(code(read('app', 'new.tsx'))).not.toMatch(/at most|fewer rather than filler/);
+  });
+
+  it('making cards, a failure, and nothing yet use the drawn state panels', () => {
+    const set = code(read('app', 'set', '[id]', 'index.tsx'));
+    expect(set).toContain('<StatePanel kind="working"');
+    expect(set).toContain('<StatePanel kind="problem"');
+    expect(code(read('app', '(tabs)', 'notes.tsx'))).toContain('<StatePanel kind="empty"');
+    expect(code(read('app', '(tabs)', 'index.tsx'))).toContain('<StatePanel kind="empty"');
+  });
+
+  it('Home lists sets with cards due first', () => {
+    const home = code(read('app', '(tabs)', 'index.tsx'));
+    expect(home).toMatch(/dueFirst\(sets,/);
+    expect(home).toContain('ordered.map(');
+  });
+
+  it('Nomi on Home thinks, then types, and cleans up after itself', () => {
+    const nomi = code(read('src', 'ui', 'nomi.tsx'));
+    expect(nomi).toContain('THINK_MS');
+    expect(nomi).toContain('revealedCount(');
+    expect(nomi).toContain('<ThinkingDots');
+    expect(nomi).toContain('clearTimeout(think)');
+    expect(nomi).toContain('clearInterval(tick)');
+  });
+
+  it('a missing column is recognised by both of its codes wherever one is checked', () => {
+    for (const file of [
+      ['src', 'data', 'profile.ts'],
+      ['src', 'data', 'sets.ts'],
+    ]) {
+      const source = code(read(...file));
+      expect(source, file.join('/')).toContain('isMissingColumn(');
+      expect(source, file.join('/')).not.toContain("'42703'");
+    }
+  });
+
+  it("Nomi's writes cannot reach anything destructive", () => {
+    // The owner: "give Nomi write access to the app but don't give to critical
+    // writes such as deleting user's account or signing out."
+    const agent = code(read('src', 'data', 'nomi-agent.ts'));
+    for (const forbidden of [
+      'deleteSet',
+      'deleteAllMyData',
+      'deleteNote',
+      'deleteConversation',
+      'saveGeminiKey',
+      'signOut',
+      'removeAvatarPhotos',
+      "from('",
+      'supabase',
+    ]) {
+      expect(agent, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('Nomi only acts on a tap, in both windows onto the chat', () => {
+    expect(code(read('app', 'nomi.tsx'))).toContain('<ActionCard');
+    expect(code(read('src', 'ui', 'assistant.tsx'))).toContain('<ActionCard');
+    // Sending a message can propose; only confirm() carries anything out.
+    expect(code(read('src', 'data', 'nomi-chat.ts'))).not.toContain('carryOut');
+    expect(code(read('src', 'data', 'nomi-session.ts'))).toMatch(/const confirm = [\s\S]*?carryOut\(/);
+  });
+
+  it('Add notes and Nomi start a set the same way', () => {
+    // Raw source, not code(): new.tsx holds the string '.pdf,.txt,image/*', whose
+    // "/*" the crude comment stripper reads as the start of a block comment.
+    expect(read('app', 'new.tsx')).toContain('await startSet(');
+    expect(code(read('src', 'data', 'nomi-agent.ts'))).toContain('startSet(');
+  });
+
+  it('Progress draws the week as columns against a count axis', () => {
+    const progress = code(read('app', '(tabs)', 'progress.tsx'));
+    expect(progress).toContain('forecastShortLabel(');
+    expect(progress).toContain('axisTicks(');
+    expect(progress).toMatch(/<GrowBar\s+direction="up"/);
+  });
+});
+
 describe('Nomi guides, the pet celebrates', () => {
   it('no screen asks Nomi to encourage or celebrate', () => {
     // `encouraging` and `success` are built into src/core/nomi-motion.ts and
@@ -458,8 +573,12 @@ describe('Nomi moves without getting in the way', () => {
   const renderer = code(read('src', 'ui', 'nomi-character.tsx'));
 
   it('honours the reduce-motion setting, and follows it when it changes', () => {
-    expect(renderer).toContain('isReduceMotionEnabled');
-    expect(renderer).toContain("'reduceMotionChanged'");
+    // MOVED, not weakened (NOTES §37): the hook lives in src/ui/motion.ts now,
+    // shared with the spinner, Nomi's typing and the Progress bars.
+    expect(renderer).toContain('useReducedMotion()');
+    const motion = code(read('src', 'ui', 'motion.ts'));
+    expect(motion).toContain('isReduceMotionEnabled');
+    expect(motion).toContain("'reduceMotionChanged'");
   });
 
   it('stops every animation and timer it starts', () => {

@@ -7,6 +7,7 @@
  */
 
 import { wordCount } from './text';
+import { flattenLines, shareOut, splitSpans, type SentenceSpan } from './coverage';
 
 /** One item per this many words is what notes realistically support (D3). */
 export const WORDS_PER_ITEM = 70;
@@ -22,6 +23,21 @@ export const FALLBACK_WINDOW_WORDS = 400;
 
 /** Tier mix, Remember/Understand/Apply (D2). */
 export const TIER_MIX = { remember: 0.5, understand: 0.3, apply: 0.2 } as const;
+
+/**
+ * The most cards one request to the model is asked to write.
+ *
+ * ## Why a big request is split (NOTES §37)
+ *
+ * Generation is output-bound. Measured on the owner's pasted song, one request
+ * for 60 cards ran 108 seconds and came back with 15; the whole set was one
+ * request because pasted text is one page and one section, which §5 chose on
+ * purpose — for a 20-card paste, ten small requests were six times slower than
+ * one. Both findings hold at their own sizes, so the split happens only above
+ * this line: 10 and 15 stay one request, 40 and 60 become parts of the text
+ * that run two at a time through the queue.
+ */
+export const MAX_ITEMS_PER_CALL = 15;
 
 export type Level = 'remember' | 'understand' | 'apply';
 
@@ -47,6 +63,11 @@ export interface PlannedSection {
   words: number;
   budget: TierBudget;
   total: number;
+  /**
+   * Only these lines of the pages, when a big section was split into parts.
+   * Absent means every line — and on every plan stored before §37.
+   */
+  span?: SentenceSpan;
 }
 
 export interface Plan {
@@ -240,11 +261,12 @@ export function buildPlan(pages: PageInput[], requested: number): Plan {
   // notes that plainly held more. Asking a student to choose and then ignoring
   // the choice is worse than not asking.
   //
-  // Anti-padding — D3's actual concern — has not been abandoned, it has moved
-  // to where it belongs: the generation prompt instructs the model to return
-  // FEWER items when the text does not support the budget, dedup drops
-  // near-identical prompts, and excerpt verification drops anything invented.
-  // Those act on what was really written, rather than guessing from word count.
+  // Anti-padding then moved into the prompt, which told the model to return
+  // FEWER when it judged the text thin — and on the owner's pasted song that
+  // turned 10 into 2 (NOTES §37). His decision: the count asked for is the
+  // count made, weak notes or strong. What stops that becoming junk is what
+  // the validators check on every card: it cites a real line that supports
+  // it, it does not repeat a question, and it does not repeat an answer.
   const maxTotal = Math.max(0, requested);
 
   if (maxTotal === 0 || rawSections.length === 0) {
@@ -325,13 +347,43 @@ export function buildPlan(pages: PageInput[], requested: number): Plan {
   });
 
   return {
-    sections: sections.filter((s) => s.total > 0),
+    sections: sections.filter((s) => s.total > 0).flatMap((s) => splitForRequests(s, pages)),
     unreadablePages,
     totalWords,
     supported,
     requested,
     maxTotal,
   };
+}
+
+/**
+ * A section asking for more than one request should write, as parts.
+ *
+ * Contiguous runs of its lines, each asked for an equal share — the bands
+ * inside each part then weight by words. Ids extend the section's own, so a
+ * resumed run still matches every part to what is already done, and a section
+ * that fits in one request keeps exactly the id and shape it always had.
+ */
+function splitForRequests(section: PlannedSection, pages: PageInput[]): PlannedSection[] {
+  if (section.total <= MAX_ITEMS_PER_CALL) return [section];
+
+  const lines = flattenLines(pages.filter((p) => section.pages.includes(p.page_index)));
+  const parts = splitSpans(lines, Math.ceil(section.total / MAX_ITEMS_PER_CALL));
+  // One long unbroken line cannot be divided; it stays one request.
+  if (parts.length <= 1) return [section];
+
+  const totals = shareOut(section.total, parts.map(() => 1));
+  return parts
+    .map((part, k): PlannedSection => ({
+      id: `${section.id}p${k}`,
+      title: section.title,
+      pages: section.pages.filter((idx) => idx >= part.span.from.page && idx <= part.span.to.page),
+      words: part.words,
+      total: totals[k]!,
+      budget: allocateTiers(totals[k]!),
+      span: part.span,
+    }))
+    .filter((part) => part.total > 0);
 }
 
 /** Floor, but a section with enough words is worth at least one item (§3.2.2). */

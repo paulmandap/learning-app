@@ -40,6 +40,8 @@ interface Candidate {
   accent: string;
   accentText: string;
   danger: string;
+  dangerBg: string;
+  onDanger: string;
   ok: string;
   warnBg: string;
   warnText: string;
@@ -97,12 +99,18 @@ function report(mode: string, p: Candidate) {
   check('infoText on infoBg', contrastHex(p.infoText, p.infoBg), TEXT_MIN);
   check('featureText on feature', contrastHex(p.featureText, p.feature), TEXT_MIN);
   check('featureMuted on feature', contrastHex(p.featureMuted, p.feature), TEXT_MIN);
+  // The "Couldn't make your cards" panel and its Retry button (NOTES §37).
+  check('text on dangerBg', contrastHex(p.text, p.dangerBg), TEXT_MIN);
+  check('textMuted on dangerBg', contrastHex(p.textMuted, p.dangerBg), TEXT_MIN);
+  check('onDanger on danger', contrastHex(p.onDanger, p.danger), TEXT_MIN);
 
   console.log('\n  large elements and fills');
   check('accent fill on bg', contrastHex(p.accent, p.bg), FILL_MIN);
   check('accent fill on card', contrastHex(p.accent, p.card), FILL_MIN);
   // The Continue card's button sits on the shaded surface, not on the page.
   check('accent fill on feature', contrastHex(p.accent, p.feature), FILL_MIN);
+  // The warning sign and the Retry button both sit on the pale red panel.
+  check('danger fill on dangerBg', contrastHex(p.danger, p.dangerBg), FILL_MIN);
   for (const [name, hex] of Object.entries(p.chart)) {
     check(`chart.${name} on card`, contrastHex(hex, p.card), FILL_MIN);
   }

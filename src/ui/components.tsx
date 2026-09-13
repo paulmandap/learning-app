@@ -286,14 +286,25 @@ export function Button({
   onPress: () => void;
   busy?: boolean;
   disabled?: boolean;
-  variant?: 'primary' | 'outline' | 'secondary';
+  variant?: 'primary' | 'outline' | 'secondary' | 'danger';
 }) {
   const t = useTheme();
   const off = disabled || busy;
 
-  const fill = variant === 'primary' ? t.accent : 'transparent';
-  const border = variant === 'primary' ? t.accent : variant === 'outline' ? t.accent : t.border;
-  const label_ = variant === 'primary' ? t.accentText : variant === 'outline' ? t.accent : t.text;
+  // `danger` is the filled button on a problem panel — "Retry" on red, from the
+  // owner's reference (NOTES §37). It takes the primary's place there; it is
+  // still the one filled button on the screen.
+  const fill = variant === 'primary' ? t.accent : variant === 'danger' ? t.danger : 'transparent';
+  const border =
+    variant === 'primary' || variant === 'outline' ? t.accent : variant === 'danger' ? t.danger : t.border;
+  const label_ =
+    variant === 'primary'
+      ? t.accentText
+      : variant === 'danger'
+        ? t.onDanger
+        : variant === 'outline'
+          ? t.accent
+          : t.text;
 
   return (
     <Pressable

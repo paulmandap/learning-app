@@ -4921,6 +4921,301 @@ dark of Home, Settings, `/nomi` empty, mid-chat and its history, the ✦ panel;
 Home at 393 light and 1100 dark.
 
 
+## 37. Round three from daily use: the count asked for, Nomi that acts, and the screens redrawn (2026-09-13)
+
+The owner reported two defects — card making, and profile pictures — and asked
+for six changes: Settings reordered with its privacy card gone, drawn feedback
+states, Nomi on Home as a speech bubble that thinks and types, Progress as
+columns, sets with cards due listed first, and Nomi able to act in the app.
+Both defects were reproduced before anything was changed. Four decisions were
+put to him before building, and are recorded where they apply.
+
+### 37.1 "I asked for 10 cards and got 4, and three were about one detail"
+
+Reproduced with `scripts/generation-probe.ts`, which drives the real pipeline
+and records what the model wrote BEFORE the checks, so a shortfall can be
+attributed. The owner's text was a copyrighted song and was not reproduced;
+an original ballad of the same shape stood in — 965 words, 104 short
+unpunctuated lines, a chorus four times, one-off concrete details.
+
+```
+BEFORE (f5dee47, live)
+asked 10   model wrote 2, from lines 0 and 5 of 104     dropped 0     stored 2
+asked 60   model wrote 15 in 108s                       dropped 6     stored 14
+           5 interpretive answers shared no words with the line they cited
+           the top-up asked for 5 and wrote near-copies of cards already kept:
+           "Two free peaches…" / "Two peaches…", "plates saved for Easter" x2,
+           "It was twenty minutes fast." x2
+           all 14 at "remember"; nothing from lines 78-103
+```
+
+Three causes, and none of them was the notes:
+
+1. **The prompt asked for fewer.** "Write at most N", "if the notes do not
+   support the number of items asked for, return FEWER", and a housekeeping
+   rule that ended "return fewer items". The model judged a song thin and wrote
+   two.
+2. **The pipeline believed it.** The top-up (HANDOFF deviation 8) replaced only
+   cards our own checks had dropped, on the reasoning that a model writing fewer
+   meant notes holding fewer. Nothing was dropped, so nothing was asked again.
+3. **Dedup compared prompts only.** One fact asked three ways is three prompts
+   sharing about half their words, under the 0.8 Jaccard bar — the owner's
+   three cards about one detail, and a quiz whose answer was the same phrase
+   three times.
+
+And one request over 104 lines stays near the top of them.
+
+### 37.2 What changed
+
+The owner's decision: *"when i asked for 60, give 60 … even if the pasted
+materials were weak or strong, the logic should be able to handle that."*
+Asked what should happen when notes are genuinely too thin for that many
+different cards, he chose "always the exact number — asked from new angles,
+never an identical question or a repeated answer".
+
+- **The prompt** asks for exactly N; says any text is study material, song
+  lyrics named; forbids two items with the same answer; says how many to take
+  from each part of the notes; forbids a line, sentence or page number in a
+  card; and on later rounds lists the cards already written, asks for new
+  angles, and names the lines that still have no card.
+- **The planner** splits a section asking for more than `MAX_ITEMS_PER_CALL`
+  (15) into contiguous parts that run two at a time. 10 stays one request,
+  which §5 measured as best for a paste; 60 becomes four.
+- **`src/core/coverage.ts`**: parts of about 12 lines with quotas by words;
+  a later round's quota goes to the parts with fewest cards; stored cards are
+  placed back on their lines by their quote.
+- **`validateItems`** holds each request to its part quotas, its named lines
+  and its count, and drops: a repeated answer (`sameAnswer`, content words,
+  0.6 for short answers and 0.8 for long); a second card on the same line whose
+  answer overlaps the first by half (`answerOverlap`); and a card naming a line
+  or page number (`mentionsPosition`, reason `self_reference`).
+- **The pipeline** asks every section once, then up to `MAX_FILL_PASSES` (3)
+  rounds count what is stored and ask for the shortfall. Strict rounds may cite
+  only lines with no card yet, matched by text so a chorus counts once; the last
+  may cite any line; a round that adds nothing ends the run. A round that FAILS
+  leaves the set "generating", so opening it again carries on.
+- **Removed**: `describeDrops` and `droppedSummary` ("We left out 12 cards…"),
+  "Your notes supported N good ones, and we'd rather stop than pad", and Add
+  notes' "up to this many … fewer rather than filler". Drops are logged.
+
+### 37.3 Measured after — and what each check cost
+
+Same ballad, same test account, `GEMINI_API_KEY` from `.env`, 2026-09-13:
+
+```
+                          before   exact +        + same-line &    + only lines     + no part quotas
+                                   parts          line numbers     with no card     in those rounds
+song, asked 10            2        10 (131.7s)    -                 9  (35.9s)      10 (31.4s)
+song, asked 60            14       60 (286.3s)    55 (138.9s)       57 (233.5s)     56 (163.3s)
+3 sentences, asked 60     -        39 (220.8s)    8  (84.3s)        6  (90.4s)      -
+```
+
+**The last column undid a check fighting another.** Held to lines with no card
+AND to a quota per part, a fill round asking for 2 threw away six answers for
+landing in a part that already had its share, and a request for 10 ended at 9.
+The lines with no card already are the spread, so those rounds now ask for one
+total across their part; quotas per part stay on the first pass and on rounds
+where every line already has a card.
+
+**Where it settles, and the lever.** On this ballad, three runs with every check
+landed at 55, 57 and 56 of 60, each with no repeated answer and cards from the
+first line to the last; the third fill round added 0 or 1. The only run that
+reached 60 kept near-repeats of a chorus sung four times. So the last few cards
+are the trade between the owner's two requests, not a fault in filling. If he
+would rather have exactly 60 with a few rewordings on repetitive text, the lever
+is the same-line check (`SAME_LINE_OVERLAP`), or letting the last round skip it
+— his call, and one line either way.
+
+**"60 of 60" was not yet clean.** Three cards said "according to line 93" —
+numbering the parts of the notes invited it — and near-repeats remained: "The
+speaker still knows it all by heart and note for note" beside "I still know it
+all by heart and note for note" (0.57 on `sameAnswer`, under its bar), the
+lantern flame three ways. The same-line and line-number checks dropped them and
+cost five cards; every one of the 33 drops in the 55 run was read, and each
+same-line drop was a real rewording, not a different fact. The fill rounds had
+spent themselves rewording lines that already had cards while verse lines went
+unasked, which is what "only lines with no card" addresses.
+
+**Thin notes stop short, on purpose.** Three sentences asked for 60 gave 39 on
+the looser checks, and they were one fact reworded: "The required intake is
+oxygen and glucose", "Functional inputs are oxygen and glucose",
+"Prerequisites include oxygen and glucose". The option the owner chose promised
+the count AND no repeated answer; on three sentences both cannot hold, and the
+repeated answer is the failure he reported, so the check wins. What would
+reopen it: filling thin notes with fill-in-the-blank cards built from the
+notes' own lines, which the app already knows how to make.
+
+**Timings are noise here.** The first model was unavailable for most of these
+runs and requests fell to `gemini-3.5-flash-lite` (rung 4); one 10-card
+request took 108s and another 15-card one 29s. §5's two-minute target was
+measured on a different day's models; not re-measured.
+
+### 37.4 "I can't change my picture" — two causes
+
+Reproduced with `scripts/avatar-probe.ts` as the test user:
+
+```
+FAIL  face 2: Error: Could not find the 'avatar' column of 'profiles' in the schema cache
+FAIL  photo #1: AvatarsUnavailableError: Profile pictures are not switched on yet.
+```
+
+1. **Migration 0016 is not applied in production.** The column does not exist.
+2. **The error said to wait.** An upsert naming a missing column is refused by
+   PostgREST as `PGRST204` before Postgres sees it; `saveAvatar` recognised only
+   Postgres's `42703`, so it fell through to "Couldn't save that picture just
+   now. Try again in a moment". The same check sat in Delete my data's last
+   step: before 0016, it deleted every set and then reported "Something went
+   wrong".
+
+"It worked once" was **not reproduced**: with no column, no save can have
+succeeded against this project. Fixed with `isMissingColumn` / `isMissingTable`
+in `src/core/db-errors.ts`, used by profile, sets and Nomi's chat; Settings now
+logs the real reason. After 0016 is applied, the probe should print OK on every
+line.
+
+### 37.5 Settings, and the privacy notice
+
+Order, the owner's: You, Your study pet, Your Gemini key, How to get a key,
+Your account, Delete my data.
+
+He also asked to remove "Where your notes go". Told it was D13's approved
+wording and the only place saying that chats with Nomi go to Google, he asked
+whether a long privacy policy at sign-up would be cleaner. The answer given: a
+short notice once, yes; a long document accepted without reading, no — D13
+exists so that one sentence is read, and a long document hides it. He chose the
+short notice, shown once, with a Privacy link in Settings.
+
+- `src/ui/privacy.tsx`: the same words, unchanged; `PrivacyGate` at the root
+  shows them over whatever screen comes first until "I understand".
+- Migration **0017** adds `profiles.privacy_accepted_at`, so it is once per
+  account. Before it, the answer is kept on the device and the console says so.
+- `openPage` marks it read for the test user; `privacyNotice: 'unseen'` shows it.
+- The D13 guard moved with the copy and still forbids Nomi's name in it.
+
+### 37.6 Feedback states, from the owner's reference
+
+`StatePanel` (`src/ui/states.tsx`): a drawing, one line, one sentence, at most
+one button. `working` — a ring of dots turning; `problem` — a pale red panel, a
+warning sign and a red Retry; `empty` — a note with a pencil. All drawn from
+Views. The failure had been an amber strip inside the "Making cards…" card, so
+the screen said two opposite things; now it is one or the other, and it says
+why — "That key didn't work. Check you copied all of it, then try again." — the
+reason is carried on the pipeline's last event, where an earlier separate event
+had been overwritten by it. Used on the set screen (making, failed, no key),
+the empty notebook, Home with no sets, and Progress with no answers.
+
+New tokens `dangerBg` and `onDanger`, through the gate:
+
+```
+                           light     dark    floor
+text on dangerBg          13.08:1   12.58:1  4.5
+textMuted on dangerBg      4.90:1    6.51:1  4.5
+onDanger on danger         7.46:1    9.83:1  4.5
+danger fill on dangerBg    6.09:1    8.09:1  3
+```
+
+### 37.7 Nomi on Home: a speech bubble that thinks, then types
+
+The owner, pointing at another app's companion: its line *"is on a text
+chat"*, and of Nomi's, *"it is static … like Nomi is thinking for about 1
+second and it will say that with the animation like it is typing, letter by
+letter"*. Nomi now stands beside a bubble with a tail; each time Home comes into
+view or the line changes, three dots for 1000ms with the owl thinking, then the
+line typed — punctuation pauses, never longer than 2000ms (`src/core/typing.ts`).
+The full line is laid out invisibly underneath, so the bubble does not grow as
+it types. Reduced motion shows the line at once. The reduce-motion hook moved to
+`src/ui/motion.ts`, shared by everything that moves; its guard moved with it.
+
+Seen in the built app: dots at ~120ms, "4 cards due today. W" at ~1.3s, the
+whole line at ~3.9s.
+
+### 37.8 Study: sets with cards due first
+
+`dueFirst` in `src/core/set-order.ts`: a stable move, not a sort. A set with
+cards due today goes to the top, keeping the order among due sets, and returns
+to its place once they are answered — the deck already refreshes Home when it
+closes (§36). Not visible on the test account, whose two sets are both due.
+
+### 37.9 Progress as columns
+
+*"everything is like a horizontal bar chart. it feels so static … the days of
+the week could be at the x axis, and on the y axis is the number … clean not
+too detailed."* The week is seven columns against a count axis of at most three
+numbers (`niceAxisTop`, `axisTicks`), labelled with three-letter weekdays,
+today in bold. What you know is four columns with the count on each, its
+explanations kept below. "How each part is going" stays as rows — a section's
+name is a sentence — and every bar grows in (`GrowBar`), still under reduced
+motion. The raw font sizes in this file became type tokens.
+
+### 37.10 Nomi acts — on one tap, from a closed list
+
+*"it would be cool if Nomi could act as an agent … the user pasted their notes
+to Nomi, and nomi will be the one to handle it … letting Nomi choose the number
+of flashcards (10, 20, 40, 60) if it was not stated"*, and *"give Nomi write
+access to the app but don't give to critical writes such as deleting user's
+account or signing out."* Decisions asked for: act at once or confirm first —
+**one tap to confirm**; which writes — **all four offered**.
+
+- **The allow-list is a type**, `NomiAction`: make a set from pasted notes, add
+  notes to a set, rename a set, save text as a note, change name, pet or face.
+  `src/data/nomi-agent.ts` carries one out through the functions the screens
+  already use, and a guard fails if it imports anything that deletes, signs
+  out, touches the key, or talks to the database directly.
+- **Recognised by patterns, not by the model** (`src/core/nomi-actions.ts`),
+  with near-misses tested: "call me later", "is a cat a good pet?", "explain
+  this: …". A set name matching two sets asks which. Other wordings go to Gemini
+  as chat, and Nomi's instruction lists the words that work. A model-proposed
+  write would need the same checks after a call that spends the allowance; not
+  built.
+- **The count Nomi picks** is the largest of 10/20/40/60 the notes support by
+  the planner's own estimate, never below 10: the 965-word ballad supports 13,
+  so 10; 1,500 words 20; 3,000 words 40; 5,000 words 60. Picking above what the
+  notes hold would be choosing padding for the student; the offer shows the four
+  counts to change it.
+- **A paste** of up to 20,000 characters goes in the chat box, is handled
+  without Gemini, and is kept in the conversation as "Pasted notes, N words: …".
+- **Add notes and Nomi start a set the same way** (`src/data/start-set.ts`).
+  The offer shows in both the full chat and the ✦ panel.
+
+Driven in the built app as the test user: pasted 78 words → *"Want me to make a
+new set, "Probe Photosynthesis 37", with 10 cards? I picked 10 for notes this
+long."* → tapped 20 → Make it → landed on the new set → Couldn't make your cards
+(the account's placeholder key). "switch my pet to the cat" → Switch → stored
+`cat`, restored to `potato`. The probe set was deleted.
+
+### 37.11 Found, not fixed
+
+- **Two documents in one set share page numbers.** Pages are numbered per
+  document, and `generateSet` keys page text by page number alone, so a set with
+  two documents resolves citations against whichever page 0 came last. Older
+  than this work; not reached by the owner's report.
+- The UTC day boundary (§36.1) and the off-scale type values elsewhere (§35.8).
+- **Not seen on an iPhone**: the notice, the bubble's typing, pasting into the
+  chat, the columns.
+
+### 37.12 Verified
+
+typecheck clean · **886 tests**, 3 skipped (+118 since §36) · `expo export` ·
+boot 5/5 · `palette-check` both modes · `scroll-probe --height 420`: all four
+tabs · the generation runs above · `scripts/avatar-probe.ts` · screenshots at
+393 dark of the notice, Home thinking / typing / said, Settings, Progress, the
+empty notebook, Nomi's offer before and after changing the count, the set
+making cards and failing, and a pet switched through Nomi; Home at 393 light.
+
+**Migrations 0016 and 0017, applied by the owner and verified 2026-09-13:**
+
+```
+isolation-test        24/24 — incl. nomi_conversations, nomi_messages, a write into
+                      A's conversation by B (42501), avatars download/list/write
+avatar-probe          OK: face 2, face 5, face 9, photo #1, photo #2, face 1 after a photo
+nomi-chat-probe       brain reply + Gemini reply, 4 messages saved, then deleted
+privacy column        select ok; acceptPrivacy → "account"; restored to null
+```
+
+`npm run test:isolation` itself does not load `.env`; run the script with
+`npx tsx --env-file=.env scripts/isolation-test.ts`. **Not deployed.**
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

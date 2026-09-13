@@ -7,18 +7,15 @@ import { INPUT_FONT_SIZE, useTheme } from '../src/ui/theme';
 import { fetchProfile } from '../src/data/profile';
 import { storageUsedBytes } from '../src/data/documents';
 import { checkUpload } from '../src/core/storage';
-import { createSet } from '../src/data/sets';
-import {
-  addDocumentToSet,
-  extendPlanForDocument,
-  planSet,
-  type FileSource,
-} from '../src/data/pipeline';
+import { type FileSource } from '../src/data/pipeline';
+import { startSet } from '../src/data/start-set';
+import { CARD_COUNTS } from '../src/core/nomi-actions';
 import { extractHeadings } from '../src/ai/gemini';
 import { fetchNote, linkNoteToSet } from '../src/data/notes';
 import { noteTitle } from '../src/core/notes';
 
-const COUNTS = [10, 20, 40, 60] as const;
+/** The same four Nomi chooses between, so the two can never offer different counts. */
+const COUNTS = CARD_COUNTS;
 
 /**
  * Add notes + set setup, on one screen.
@@ -138,9 +135,6 @@ export default function NewSet() {
     try {
       const heading = extractHeadings(text)[0];
       const setName = title.trim() || heading || file?.name || 'My notes';
-      const targetId = addingToExisting ? existingSetId : (await createSet(setName)).id;
-
-      setStatus('Reading your notes…');
       const source: { text: string } | FileSource = file
         ? {
             kind: file.mime.startsWith('image/') ? 'image' : 'pdf',
@@ -150,19 +144,15 @@ export default function NewSet() {
           }
         : { text };
 
-      const { documentId } = await addDocumentToSet({
-        setId: targetId,
-        apiKey,
+      // The same way Nomi starts a set, so the two cannot drift (NOTES §37).
+      const { setId: targetId } = await startSet({
+        setId: addingToExisting ? existingSetId : undefined,
         title: setName,
         source,
+        count,
+        apiKey,
+        onStatus: setStatus,
       });
-
-      setStatus('Planning your cards…');
-      if (addingToExisting) {
-        await extendPlanForDocument({ setId: targetId, documentId, requestedCount: count });
-      } else {
-        await planSet(targetId, count);
-      }
 
       // Remember where a note's cards went, so the note can offer a way back
       // to them. Best effort inside linkNoteToSet — the cards exist either way.
@@ -233,7 +223,7 @@ export default function NewSet() {
       <Card>
         <Field label="Name" value={title} onChangeText={setTitle} placeholder="Cardiac Conduction" autoCapitalize="sentences" />
 
-        <Body>How many cards at most?</Body>
+        <Body>How many cards?</Body>
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
           {COUNTS.map((c) => (
             <View key={c} style={{ flexGrow: 1, minWidth: 68 }}>
@@ -246,10 +236,10 @@ export default function NewSet() {
           ))}
         </View>
 
-        <Body muted>
-          We'll make up to this many. If your notes genuinely don't hold that many good
-          cards, you'll get fewer rather than filler.
-        </Body>
+        {/* It said "up to this many … you'll get fewer rather than filler", and
+            on the owner's pasted song "fewer" meant 2 of 10. The count asked
+            for is now the count made (NOTES §37). */}
+        <Body muted>We'll make this many, from all through your notes.</Body>
       </Card>
 
       <Button label="Make my study set" onPress={make} busy={busy} disabled={!hasInput} />

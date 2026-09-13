@@ -3,8 +3,10 @@ import { create } from 'zustand';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchProfile } from './profile';
 import { getAppSnapshot } from './nomi';
-import { listMessages, sendToNomi, type Message, type NomiReply } from './nomi-chat';
+import { addNomiMessage, listMessages, sendToNomi, type Message, type NomiReply } from './nomi-chat';
+import { carryOut, NeedsKeyError, type Done } from './nomi-agent';
 import { EMPTY_SNAPSHOT } from '../core/nomi-brain';
+import { compactForChat, type NomiAction } from '../core/nomi-actions';
 import type { AssistantContext, ChatTurn } from '../core/chat';
 
 /**
@@ -24,17 +26,27 @@ interface NomiSessionStore {
    * Empty whenever a saved conversation is open.
    */
   unsaved: ChatTurn[];
-  set: (patch: Partial<Pick<NomiSessionStore, 'conversationId' | 'unsaved'>>) => void;
+  /**
+   * What Nomi has offered to do and is waiting on a tap for (NOTES §37).
+   *
+   * Here rather than on a message: saved messages are text, and the refetch
+   * that replaces the optimistic rows with the real ones would otherwise take
+   * the offer away with it. Both windows show the same offer.
+   */
+  pending: NomiAction | null;
+  set: (patch: Partial<Pick<NomiSessionStore, 'conversationId' | 'unsaved' | 'pending'>>) => void;
 }
 
 export const useNomiSession = create<NomiSessionStore>((set) => ({
   conversationId: null,
   unsaved: [],
+  pending: null,
   set: (patch) => set(patch),
 }));
 
 /**
- * Everything a chat window needs: the turns to show, and a way to send.
+ * Everything a chat window needs: the turns to show, a way to send, and what to
+ * do about an offer.
  *
  * `context` is what the screen has open — a card, a set's notes, or nothing —
  * attached to each message sent from here.
@@ -43,6 +55,7 @@ export function useNomiConversation(context: AssistantContext) {
   const client = useQueryClient();
   const conversationId = useNomiSession((s) => s.conversationId);
   const unsaved = useNomiSession((s) => s.unsaved);
+  const pending = useNomiSession((s) => s.pending);
   const setSession = useNomiSession((s) => s.set);
 
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
@@ -57,10 +70,13 @@ export function useNomiConversation(context: AssistantContext) {
     enabled: conversationId !== null,
   });
 
-  const [pending, setPending] = useState<string | null>(null);
+  /** The student's message while the reply is on its way. */
+  const [waiting, setWaiting] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [acting, setActing] = useState(false);
   // A ref, set synchronously: the same double-tap that once spent two of a
-  // capped allowance on one question would otherwise send a message twice.
+  // capped allowance on one question would otherwise send a message twice —
+  // or make a set twice.
   const inFlight = useRef(false);
 
   const turns: ChatTurn[] = conversationId
@@ -71,7 +87,7 @@ export function useNomiConversation(context: AssistantContext) {
     async (text: string): Promise<NomiReply | null> => {
       if (inFlight.current || text.trim().length === 0) return null;
       inFlight.current = true;
-      setPending(text.trim());
+      setWaiting(compactForChat(text));
       setNote(null);
       try {
         const reply = await sendToNomi({
@@ -83,7 +99,7 @@ export function useNomiConversation(context: AssistantContext) {
           apiKey: profile?.gemini_api_key ?? '',
         });
 
-        const said: ChatTurn = { role: 'user', text: text.trim() };
+        const said: ChatTurn = { role: 'user', text: reply.said };
         const answered: ChatTurn[] = reply.ok ? [{ role: 'nomi', text: reply.text }] : [];
 
         if (reply.conversationId) {
@@ -112,32 +128,108 @@ export function useNomiConversation(context: AssistantContext) {
           setSession({ unsaved: [...turns, said, ...answered] });
         }
 
+        // An offer lasts until it is taken, turned down, or overtaken by the
+        // next message.
+        setSession({ pending: reply.ok ? reply.proposal : null });
         setNote(reply.ok ? reply.note : reply.message);
         return reply;
       } finally {
-        setPending(null);
+        setWaiting(null);
         inFlight.current = false;
       }
     },
     [client, conversationId, turns, saved, snapshot, context, profile, setSession],
   );
 
-  const shown: ChatTurn[] = pending ? [...turns, { role: 'user', text: pending }] : turns;
+  /** One of Nomi's lines, added to whichever conversation is open. */
+  const nomiSays = useCallback(
+    async (text: string) => {
+      const id = useNomiSession.getState().conversationId;
+      if (id) {
+        client.setQueryData<Message[]>(['nomi-messages', id], (old) => [
+          ...(old ?? []),
+          { id: `local-${Date.now()}`, conversation_id: id, role: 'nomi', content: text, created_at: new Date().toISOString() },
+        ]);
+        await addNomiMessage(id, text);
+        void client.invalidateQueries({ queryKey: ['nomi-messages', id] });
+      } else {
+        const state = useNomiSession.getState();
+        state.set({ unsaved: [...state.unsaved, { role: 'nomi', text }] });
+      }
+    },
+    [client],
+  );
+
+  /** Do what Nomi offered. The only way anything Nomi proposes gets written. */
+  const confirm = useCallback(async (): Promise<Done | null> => {
+    const action = useNomiSession.getState().pending;
+    if (!action || inFlight.current) return null;
+    inFlight.current = true;
+    setActing(true);
+    setNote(null);
+    try {
+      const done = await carryOut(action, { apiKey: profile?.gemini_api_key ?? '' });
+      setSession({ pending: null });
+      await nomiSays(done.text);
+      await Promise.all(
+        [['sets'], ['nomi-brain'], ['profile'], ['notes'], ['dashboard']].map((queryKey) =>
+          client.invalidateQueries({ queryKey }),
+        ),
+      );
+      return done;
+    } catch (err) {
+      console.warn(`[nomi] could not do that: ${err instanceof Error ? err.message : String(err)}`);
+      setNote(
+        err instanceof NeedsKeyError
+          ? 'Add your Gemini key in Settings and I can make cards from these.'
+          : "I couldn't do that just now. Try again in a moment.",
+      );
+      return null;
+    } finally {
+      setActing(false);
+      inFlight.current = false;
+    }
+  }, [client, profile, nomiSays, setSession]);
+
+  /** "Not now." */
+  const dismiss = useCallback(() => {
+    if (!useNomiSession.getState().pending) return;
+    setSession({ pending: null });
+    void nomiSays("Okay, I'll leave it.");
+  }, [nomiSays, setSession]);
+
+  /** Change how many cards before confirming. */
+  const setCount = useCallback(
+    (count: number) => {
+      const action = useNomiSession.getState().pending;
+      if (action && (action.kind === 'make_set' || action.kind === 'add_notes')) {
+        setSession({ pending: { ...action, count, countPicked: false } });
+      }
+    },
+    [setSession],
+  );
+
+  const shown: ChatTurn[] = waiting ? [...turns, { role: 'user', text: waiting }] : turns;
 
   return {
     conversationId,
     turns: shown,
-    busy: pending !== null,
+    busy: waiting !== null,
     loading: conversationId !== null && isLoading,
     note,
     snapshot,
     send,
+    pending,
+    acting,
+    confirm,
+    dismiss,
+    setCount,
     startNew: () => {
-      setSession({ conversationId: null, unsaved: [] });
+      setSession({ conversationId: null, unsaved: [], pending: null });
       setNote(null);
     },
     open: (id: string) => {
-      setSession({ conversationId: id, unsaved: [] });
+      setSession({ conversationId: id, unsaved: [], pending: null });
       setNote(null);
     },
   };

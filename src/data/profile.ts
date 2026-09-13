@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { isValidAvatarValue, parseAvatar, photoPath, photoValue } from '../core/avatar';
+import { isMissingColumn } from '../core/db-errors';
 
 /**
  * The user's own profile row. RLS restricts every one of these calls to the
@@ -18,15 +19,10 @@ export interface Profile {
    * See `src/core/avatar.ts` for what each means (migration 0016).
    */
   avatar: string | null;
+  /** When the privacy notice was accepted (migration 0017). NULL: not yet. */
+  privacy_accepted_at: string | null;
   created_at: string;
 }
-
-const COLUMNS = 'id, display_name, gemini_api_key, pet, avatar, created_at';
-const COLUMNS_BEFORE_0016 = 'id, display_name, gemini_api_key, pet, created_at';
-const COLUMNS_BEFORE_0011 = 'id, display_name, gemini_api_key, created_at';
-
-/** Postgres: column does not exist. */
-const UNDEFINED_COLUMN = '42703';
 
 /** A profile picture was chosen before the database could store one. */
 export class AvatarsUnavailableError extends Error {
@@ -35,6 +31,28 @@ export class AvatarsUnavailableError extends Error {
     this.name = 'AvatarsUnavailableError';
   }
 }
+
+/**
+ * The columns to ask for, newest migration first, and what it means when a
+ * step is the first to work.
+ */
+const COLUMN_STEPS: readonly { columns: string; missing: string | null }[] = [
+  { columns: 'id, display_name, gemini_api_key, pet, avatar, privacy_accepted_at, created_at', missing: null },
+  {
+    columns: 'id, display_name, gemini_api_key, pet, avatar, created_at',
+    missing: '0017_privacy_notice.sql — the privacy notice is remembered on this device instead',
+  },
+  {
+    columns: 'id, display_name, gemini_api_key, pet, created_at',
+    missing: '0016_profile_pictures_and_nomi_chats.sql — everyone gets a default face',
+  },
+  {
+    columns: 'id, display_name, gemini_api_key, created_at',
+    missing: '0011_pet_choice.sql — everyone gets the default pet',
+  },
+];
+
+const warnedMissing = new Set<string>();
 
 /**
  * Fetch the signed-in user's profile, creating it if the trigger has not yet.
@@ -49,32 +67,26 @@ export class AvatarsUnavailableError extends Error {
  *
  * That is the failure §12 flagged for 0009 and §10 for 0007 — a build that
  * SELECTs a column the database has not got. So this asks for everything and,
- * on exactly the "no such column" error, steps back one migration at a time:
- * without `avatar` (0016), then without `pet` (0011). One query in the normal
- * case; more only while a migration is outstanding.
+ * on exactly the "no such column" error, steps back one migration at a time.
+ * One query in the normal case; more only while a migration is outstanding,
+ * and the console says which, once.
  */
 export async function fetchProfile(): Promise<Profile | null> {
-  const { data, error } = await supabase.from('profiles').select(COLUMNS).maybeSingle();
-  if (!error) return data as Profile | null;
-  if (error.code !== UNDEFINED_COLUMN) throw new Error(error.message);
-
-  const before0016 = await supabase.from('profiles').select(COLUMNS_BEFORE_0016).maybeSingle();
-  if (!before0016.error) {
-    console.warn(
-      '[profile] no "avatar" column — everyone gets a default face. ' +
-        'Apply supabase/migrations/0016_profile_pictures_and_nomi_chats.sql to allow choosing.',
-    );
-    return before0016.data ? { ...(before0016.data as Omit<Profile, 'avatar'>), avatar: null } : null;
+  let last = 'Could not read your profile.';
+  for (const step of COLUMN_STEPS) {
+    const { data, error } = await supabase.from('profiles').select(step.columns).maybeSingle();
+    if (!error) {
+      if (step.missing && !warnedMissing.has(step.missing)) {
+        warnedMissing.add(step.missing);
+        console.warn(`[profile] a column is missing. Apply supabase/migrations/${step.missing}.`);
+      }
+      if (!data) return null;
+      return { pet: null, avatar: null, privacy_accepted_at: null, ...(data as unknown as object) } as Profile;
+    }
+    if (!isMissingColumn(error)) throw new Error(error.message);
+    last = error.message;
   }
-  if (before0016.error.code !== UNDEFINED_COLUMN) throw new Error(before0016.error.message);
-
-  console.warn(
-    '[profile] no "pet" column — everyone gets the default pet. ' +
-      'Apply supabase/migrations/0011_pet_choice.sql to let people choose.',
-  );
-  const fallback = await supabase.from('profiles').select(COLUMNS_BEFORE_0011).maybeSingle();
-  if (fallback.error) throw new Error(fallback.error.message);
-  return fallback.data ? { ...fallback.data, pet: null, avatar: null } : null;
+  throw new Error(last);
 }
 
 async function currentUserId(): Promise<string> {
@@ -122,12 +134,20 @@ export async function saveDisplayName(name: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-/** Choose a built-in face, or clear the choice with null. */
+/**
+ * Choose a built-in face, or clear the choice with null.
+ *
+ * A missing `avatar` column arrives here as PGRST204, not 42703: an upsert body
+ * is checked against PostgREST's schema cache before Postgres sees it. Checking
+ * 42703 alone is why the owner was told "Couldn't save that picture just now.
+ * Try again in a moment" for as long as migration 0016 was not applied — a
+ * wait that could never work (NOTES §37).
+ */
 export async function saveAvatar(value: string | null): Promise<void> {
   if (!isValidAvatarValue(value)) throw new Error(`Not a profile picture: ${value}`);
   const id = await currentUserId();
   const { error } = await supabase.from('profiles').upsert({ id, avatar: value }, { onConflict: 'id' });
-  if (error?.code === UNDEFINED_COLUMN) throw new AvatarsUnavailableError();
+  if (isMissingColumn(error)) throw new AvatarsUnavailableError();
   if (error) throw new Error(error.message);
 }
 
@@ -176,4 +196,58 @@ export async function removeAvatarPhotos(): Promise<void> {
   const { data, error } = await supabase.storage.from('avatars').list(id);
   if (error || !data || data.length === 0) return;
   await supabase.storage.from('avatars').remove(data.map((f) => `${id}/${f.name}`));
+}
+
+// ------------------------------------------------------------ privacy notice --
+
+/**
+ * Where the answer is kept on this device, before migration 0017 can keep it on
+ * the account. Exported for `scripts/screenshot.ts`, which marks the notice
+ * read for the test account so a probe of another screen is not a probe of the
+ * notice covering it.
+ */
+export function privacyDeviceKey(userId: string): string {
+  return `privacy-notice-accepted:${userId}`;
+}
+
+function deviceStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Has this person accepted the privacy notice — on their account, or on this device? */
+export function hasAcceptedPrivacy(
+  profile: Pick<Profile, 'privacy_accepted_at'> | null | undefined,
+  userId: string,
+): boolean {
+  if (profile?.privacy_accepted_at) return true;
+  return !!deviceStorage()?.getItem(privacyDeviceKey(userId));
+}
+
+/**
+ * "I understand", recorded.
+ *
+ * On the account when migration 0017 exists, so the notice shows once across
+ * a phone and a laptop. Before it, on this device, and said so — a notice that
+ * reappeared on every launch because a column was missing would teach people
+ * to tap past it, which is the opposite of what it is for.
+ */
+export async function acceptPrivacy(): Promise<'account' | 'device'> {
+  const id = await currentUserId();
+  const at = new Date().toISOString();
+  const { error } = await supabase
+    .from('profiles')
+    .upsert({ id, privacy_accepted_at: at }, { onConflict: 'id' });
+  if (!error) return 'account';
+  if (!isMissingColumn(error)) throw new Error(error.message);
+
+  console.warn(
+    '[profile] no "privacy_accepted_at" column — remembering the privacy notice on this device. ' +
+      'Apply supabase/migrations/0017_privacy_notice.sql to remember it on the account.',
+  );
+  deviceStorage()?.setItem(privacyDeviceKey(id), at);
+  return 'device';
 }

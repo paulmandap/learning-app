@@ -7,7 +7,7 @@ import { useAssistantContext } from '../data/assistant-context';
 import { useNomiConversation } from '../data/nomi-session';
 import type { NomiState } from '../core/nomi-motion';
 import { NomiCharacter } from './nomi-character';
-import { ChatBubble, Composer } from './nomi';
+import { ActionCard, ChatBubble, Composer } from './nomi';
 import { GLYPH } from './glyphs';
 
 /**
@@ -227,6 +227,23 @@ export function StudyAssistant() {
         ) : null}
 
         {chat.busy ? <Text style={[type.label, { color: t.textMuted }]}>Nomi is thinking…</Text> : null}
+        {/* The same offer as the full chat — one conversation, two windows. */}
+        {chat.pending && !chat.busy ? (
+          <ActionCard
+            action={chat.pending}
+            busy={chat.acting}
+            onCount={chat.setCount}
+            onDismiss={chat.dismiss}
+            onConfirm={() =>
+              void chat.confirm().then((done) => {
+                if (done?.openSetId) {
+                  setOpen(false);
+                  router.push(`/set/${done.openSetId}`);
+                }
+              })
+            }
+          />
+        ) : null}
         {chat.note ? <Text style={[type.label, { color: t.textMuted }]}>{chat.note}</Text> : null}
 
         <Composer

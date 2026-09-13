@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   cleanCandidate,
-  describeDrops,
   detectLeak,
+  sameAnswer,
   resolveSource,
   SOURCE_SUPPORT_THRESHOLD,
   sourceSupportScore,
@@ -304,39 +304,11 @@ describe('rubric is only kept where it is used', () => {
   });
 });
 
-describe('describeDrops — explains "19 of 20"', () => {
-  it('names a single reason in plain language', () => {
-    expect(describeDrops({ duplicate: 1 })).toBe(
-      'We left out 1 card because it repeated another card.',
-    );
-  });
-
-  it('pluralises the subject as well as the noun', () => {
-    // "3 cards because it repeated" is the bug this pins.
-    expect(describeDrops({ duplicate: 3 })).toBe(
-      'We left out 3 cards because they repeated other cards.',
-    );
-  });
-
-  it('lists multiple reasons, commonest first', () => {
-    expect(describeDrops({ leak: 1, duplicate: 2 })).toBe(
-      'We left out 3 cards: 2 repeated another card, 1 gave away the answer.',
-    );
-  });
-
-  it('returns null when nothing was dropped, so no line is shown', () => {
-    expect(describeDrops({})).toBeNull();
-    expect(describeDrops({ duplicate: 0 })).toBeNull();
-  });
-
-  it('uses no technical vocabulary on any reason', () => {
-    const all = describeDrops({
-      schema: 1, excerpt_unmatched: 1, mc_invalid: 1, leak: 1, duplicate: 1, over_budget: 1,
-    })!;
-    expect(all).not.toMatch(/schema|excerpt|validator|token|index|JSON|budget|tier/i);
-  });
-
-  it('summariseDrops counts by reason', () => {
+// "We left out 12 cards: …" (describeDrops) was removed at the owner's request
+// (NOTES §37) — the pipeline now makes the count asked for, so there is no
+// shortfall to explain on screen. The reasons are still counted, for the log.
+describe('summariseDrops', () => {
+  it('counts by reason', () => {
     expect(
       summariseDrops([
         { reason: 'duplicate', detail: '', prompt: '', excerpt: '', page_index: 0 },
@@ -344,6 +316,173 @@ describe('describeDrops — explains "19 of 20"', () => {
         { reason: 'leak', detail: '', prompt: '', excerpt: '', page_index: 0 },
       ]),
     ).toEqual({ duplicate: 2, leak: 1 });
+  });
+});
+
+describe('sameAnswer — one fact asked twice (NOTES §37)', () => {
+  it('catches the pairs the 60-card reproduction kept', () => {
+    expect(
+      sameAnswer('Two free peaches and a warning about the rain', 'Two peaches and a warning about the rain.'),
+    ).toBe(true);
+    expect(sameAnswer('Plates saved for Easter', 'The plates she had saved for Easter.')).toBe(true);
+    expect(sameAnswer('It was twenty minutes fast.', 'It was twenty minutes fast.')).toBe(true);
+  });
+
+  it('catches one phrase given as the answer again and again', () => {
+    // The owner's report: three quiz questions, every correct answer the same.
+    expect(sameAnswer('Tee-ball team', 'the tee-ball team')).toBe(true);
+  });
+
+  it('keeps different answers apart, even when they share a word', () => {
+    expect(sameAnswer('The sinoatrial node', 'The atrioventricular node')).toBe(false);
+    expect(sameAnswer('Water and minerals', 'Water and sugars')).toBe(false);
+    expect(sameAnswer('Cider', 'Late October')).toBe(false);
+  });
+
+  it('judges long answers on a stricter overlap', () => {
+    expect(
+      sameAnswer(
+        'The xylem carries water and dissolved minerals upward from the roots to the leaves',
+        'The phloem carries sugars made in the leaves downward to the roots and fruits',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('validateItems — no repeated answer, and every part of the notes (NOTES §37)', () => {
+  it('drops a card whose answer repeats one already stored', () => {
+    const { kept, dropped } = validateItems(
+      [item({ prompt: 'What sets the pace of the heartbeat?' })],
+      pageTexts,
+      budget,
+      [{ prompt: 'Which structure is the natural pacemaker?', answer: 'The sinoatrial node' }],
+    );
+    expect(kept).toHaveLength(0);
+    expect(dropped[0]!.reason).toBe('duplicate');
+    expect(dropped[0]!.detail).toMatch(/answer repeats/);
+  });
+
+  it('drops the second of two cards in one batch with the same answer', () => {
+    const { kept, dropped } = validateItems(
+      [item(), item({ prompt: 'What is the heart pacemaker called in these notes?' })],
+      pageTexts,
+      budget,
+    );
+    expect(kept).toHaveLength(1);
+    expect(dropped.map((d) => d.reason)).toEqual(['duplicate']);
+  });
+
+  it('holds each part of the notes to its share', () => {
+    const bands = [
+      { from: { page: 0, sentence: 0 }, to: { page: 0, sentence: 0 }, quota: 1 },
+      { from: { page: 0, sentence: 1 }, to: { page: 0, sentence: 2 }, quota: 1 },
+    ];
+    const { kept, dropped } = validateItems(
+      [
+        item(),
+        item({ prompt: 'What is the resting rhythm set by?', answer: 'The natural pacemaker of the heart' }),
+        item({ prompt: 'How often does the SA node fire?', answer: '60-100 times a minute', source_sentence: 1 }),
+      ],
+      pageTexts,
+      budget,
+      [],
+      { bands },
+    );
+    expect(kept.map((k) => k.source_sentence)).toEqual([0, 1]);
+    expect(dropped.map((d) => d.reason)).toEqual(['over_budget']);
+    expect(dropped[0]!.detail).toMatch(/already has its 1/);
+  });
+
+  it('drops a card from outside the parts asked for', () => {
+    const bands = [{ from: { page: 0, sentence: 1 }, to: { page: 0, sentence: 2 }, quota: 5 }];
+    const { kept, dropped } = validateItems([item()], pageTexts, budget, [], { bands });
+    expect(kept).toHaveLength(0);
+    expect(dropped[0]!.detail).toMatch(/outside the part/);
+  });
+
+  it('keeps no more than the number asked for', () => {
+    const { kept, dropped } = validateItems(
+      [item(), item({ prompt: 'How often does the SA node fire?', answer: '60-100 times a minute', source_sentence: 1 })],
+      pageTexts,
+      budget,
+      [],
+      { maxTotal: 1 },
+    );
+    expect(kept).toHaveLength(1);
+    expect(dropped[0]!.detail).toMatch(/already have the 1/);
+  });
+});
+
+describe('validateItems — two faults the first 60-card run found (NOTES §37)', () => {
+  it('drops a card that points at a line number the student never sees', () => {
+    for (const prompt of [
+      'What characteristic defined the promises referenced in line 93?',
+      'What does sentence two state the process needs?',
+      'According to page 3, which structure fires first?',
+    ]) {
+      const { kept, dropped } = validateItems([item({ prompt })], pageTexts, budget);
+      expect(kept, prompt).toHaveLength(0);
+      expect(dropped[0]!.reason, prompt).toBe('self_reference');
+    }
+  });
+
+  it('keeps a card that merely contains a number', () => {
+    const { kept } = validateItems(
+      [item({ prompt: 'How often does the SA node fire each minute?', answer: '60-100 times a minute', source_sentence: 1 })],
+      pageTexts,
+      budget,
+    );
+    expect(kept).toHaveLength(1);
+  });
+
+  it('drops a second card about the same line whose answer is only reworded', () => {
+    const existing = [
+      { prompt: 'How often does the SA node fire?', answer: '60-100 times per minute', excerpt: 'It fires 60-100 times per minute.' },
+    ];
+    const { kept, dropped } = validateItems(
+      [
+        item({
+          prompt: 'What is the resting rate of the natural pacemaker?',
+          answer: 'It fires about 60-100 times each minute',
+          source_sentence: 1,
+        }),
+      ],
+      pageTexts,
+      budget,
+      existing,
+    );
+    expect(kept).toHaveLength(0);
+    expect(dropped[0]!.detail).toMatch(/same line/);
+  });
+
+  it('holds a fill request to the lines it named', () => {
+    const lines = new Set(['0:1', '0:2']);
+    const { kept, dropped } = validateItems(
+      [item(), item({ prompt: 'How often does the SA node fire?', answer: '60-100 times a minute', source_sentence: 1 })],
+      pageTexts,
+      budget,
+      [],
+      { lines },
+    );
+    expect(kept.map((k) => k.source_sentence)).toEqual([1]);
+    expect(dropped[0]!.detail).toMatch(/already has a card/);
+  });
+
+  it('keeps two different facts from one line', () => {
+    const existing = [
+      {
+        prompt: 'Which structure is the natural pacemaker?',
+        answer: 'The sinoatrial node',
+        excerpt: 'The sinoatrial node is the natural pacemaker of the heart.',
+      },
+    ];
+    const { kept } = validateItems(
+      [item({ prompt: 'What role does the sinoatrial node play?', answer: 'The natural pacemaker of the heart' })],
+      pageTexts,
+      budget,
+      existing,
+    );
+    expect(kept).toHaveLength(1);
   });
 });
 
@@ -437,10 +576,21 @@ describe('validateItems', () => {
 
   it('enforces the per-tier budget', () => {
     const tight: TierBudget = { remember: 1, understand: 0, apply: 0 };
+    // Different answers on purpose: three cards with one answer are now the
+    // same card, and would be dropped as duplicates before the budget is asked.
     const candidates = [
       item({ prompt: 'Question one about the pacemaker?' }),
-      item({ prompt: 'Roughly how many times a minute does it fire?' }),
-      item({ level: 'understand', prompt: 'Why does conduction slow at the AV node?' }),
+      item({
+        prompt: 'Roughly how many times a minute does it fire?',
+        answer: '60-100 times a minute',
+        source_sentence: 1,
+      }),
+      item({
+        level: 'understand',
+        prompt: 'Why does conduction slow at the AV node?',
+        answer: 'So the ventricles can fill with blood',
+        source_sentence: 2,
+      }),
     ];
 
     const { kept, dropped } = validateItems(candidates, pageTexts, tight);
@@ -580,7 +730,12 @@ describe('an mcq with no options becomes a flashcard', () => {
     const { kept, dropped } = validateItems(
       [
         item({ kind: 'mcq', options: undefined, answer: 'The sinoatrial node', source_sentence: 0 }),
-        item({ prompt: 'Second question about the pacemaker?', answer: 'The sinoatrial node', source_sentence: 0 }),
+        // A different answer, or it would be dropped as a duplicate first (§37).
+        item({
+          prompt: 'Second question about the pacemaker?',
+          answer: 'The natural pacemaker of the heart',
+          source_sentence: 0,
+        }),
       ],
       pageTexts,
       tight,
@@ -648,6 +803,8 @@ describe('a written answer with no rubric becomes a flashcard', () => {
         item({ kind: 'short_answer', rubric: undefined, source_sentence: 0 }),
         item({
           prompt: 'Second question about the pacemaker?',
+          // A different answer, or it would be dropped as a duplicate (§37).
+          answer: 'The natural pacemaker of the heart',
           kind: 'short_answer',
           rubric: withRubric,
           source_sentence: 0,

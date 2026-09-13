@@ -4,6 +4,7 @@ import {
   buildPlan,
   countAtomicUnits,
   estimateSupported,
+  MAX_ITEMS_PER_CALL,
   splitIntoSections,
   supportedFor,
   WORDS_PER_ITEM,
@@ -230,9 +231,9 @@ describe('buildPlan', () => {
     expect(plan.unreadablePages).toEqual([1]);
   });
 
-  it('still plans something for very short notes — the model returns fewer', () => {
-    // No longer zeroed out by a word-count rule. The generation prompt is what
-    // declines to pad, based on the actual text.
+  it('still plans the full request for very short notes', () => {
+    // No longer zeroed out by a word-count rule — and no longer handed to a
+    // prompt that returns fewer: the count asked for is the count made (§37).
     const plan = buildPlan([page(0, 30)], 20);
     expect(plan.maxTotal).toBe(20);
     expect(plan.sections.length).toBeGreaterThan(0);
@@ -259,6 +260,50 @@ describe('buildPlan', () => {
     const a = buildPlan(pages, 20);
     const b = buildPlan(pages, 20);
     expect(a.sections.map((s) => s.id)).toEqual(b.sections.map((s) => s.id));
+  });
+});
+
+describe('buildPlan — a big request is split into parts (NOTES §37)', () => {
+  // The shape of the owner's pasted song: one page, 104 short lines.
+  const song = Array.from({ length: 104 }, (_, i) => `the words of line ${i} go here`).join('\n');
+  const pasted: PageInput = { page_index: 0, text: song, readability: 1, headings: [] };
+
+  it('asks no single request for more than MAX_ITEMS_PER_CALL', () => {
+    const plan = buildPlan([pasted], 60);
+    expect(plan.sections).toHaveLength(4);
+    expect(plan.sections.every((s) => s.total <= MAX_ITEMS_PER_CALL)).toBe(true);
+    expect(sum(plan)).toBe(60);
+  });
+
+  it('covers the whole text, part after part', () => {
+    const { sections } = buildPlan([pasted], 60);
+    expect(sections[0]!.span!.from).toEqual({ page: 0, sentence: 0 });
+    expect(sections.at(-1)!.span!.to).toEqual({ page: 0, sentence: 103 });
+    for (let i = 1; i < sections.length; i++) {
+      expect(sections[i]!.span!.from.sentence).toBe(sections[i - 1]!.span!.to.sentence + 1);
+    }
+  });
+
+  it('leaves a request that fits in one call exactly as it was', () => {
+    const plan = buildPlan([pasted], 10);
+    expect(plan.sections).toHaveLength(1);
+    expect(plan.sections[0]!.span).toBeUndefined();
+    expect(plan.sections[0]!.id).toBe('s0-0');
+  });
+
+  it('gives each part stable ids and a budget that sums to its total', () => {
+    const a = buildPlan([pasted], 40);
+    const b = buildPlan([pasted], 40);
+    expect(a.sections.map((s) => s.id)).toEqual(b.sections.map((s) => s.id));
+    for (const s of a.sections) {
+      expect(s.budget.remember + s.budget.understand + s.budget.apply).toBe(s.total);
+    }
+  });
+
+  it('cannot split one unbroken line, so leaves it whole', () => {
+    const plan = buildPlan([page(0, 3000, { headings: ['A'] })], 60);
+    expect(plan.sections).toHaveLength(1);
+    expect(sum(plan)).toBe(60);
   });
 });
 

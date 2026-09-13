@@ -1,4 +1,5 @@
 import { supabase, type Db } from './supabase';
+import { isMissingTable } from '../core/db-errors';
 import { GeminiBrowserProvider, GeminiCallError } from '../ai/gemini';
 import { reasonToMessage } from '../core/ai-errors';
 import { buildNomiSystemPrompt } from '../ai/prompts';
@@ -9,11 +10,13 @@ import {
   DAILY_MESSAGE_LIMIT,
   describeRemaining,
   historyWindow,
-  isAskable,
+  isSendable,
+  MAX_QUESTION_CHARS,
   type AssistantContext,
   type ChatTurn,
 } from '../core/chat';
 import { answerLocally, modelBrief, type AppSnapshot } from '../core/nomi-brain';
+import { compactForChat, proposeAction, type NomiAction } from '../core/nomi-actions';
 
 /**
  * Nomi's conversations: saved, listed, and answered.
@@ -58,10 +61,6 @@ export interface Message {
   content: string;
   created_at: string;
 }
-
-/** PostgREST: relation not in the schema cache. Postgres: undefined table. */
-const MISSING_TABLE = new Set(['PGRST205', '42P01']);
-const isMissingTable = (error: { code?: string } | null) => !!error && MISSING_TABLE.has(error.code ?? '');
 
 let warnedMissing = false;
 function noteMissing(): void {
@@ -163,6 +162,19 @@ async function claimMessage(db: Db): Promise<number | null> {
   return typeof data === 'number' ? data : null;
 }
 
+/**
+ * Nomi saying something that is not a reply to a message — "Done", once the
+ * student has confirmed an action (NOTES §37). Best effort, like every save
+ * here: a line that did not save is logged, never a reason to fail.
+ */
+export async function addNomiMessage(conversationId: string, text: string, db: Db = supabase): Promise<void> {
+  try {
+    await saveMessage(conversationId, 'nomi', text, db);
+  } catch (err) {
+    console.warn(`[nomi] could not save that line: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 export type NomiReply =
   | {
       ok: true;
@@ -173,13 +185,18 @@ export type NomiReply =
       conversationId: string | null;
       /** "3 more replies from me today", when worth saying. */
       note: string | null;
+      /** Something Nomi offers to do, waiting on the student's tap (NOTES §37). */
+      proposal: NomiAction | null;
+      /** The student's message as the conversation shows it — a paste, shortened. */
+      said: string;
     }
   | {
       ok: false;
       /** `rejected`: Google refused the call for a stated reason — a bad key, quota. */
-      reason: 'empty' | 'no_key' | 'limit_reached' | 'busy' | 'rejected';
+      reason: 'empty' | 'too_long' | 'no_key' | 'limit_reached' | 'busy' | 'rejected';
       message: string;
       conversationId: string | null;
+      said: string;
     };
 
 export async function sendToNomi(
@@ -209,17 +226,21 @@ export async function sendToNomi(
   const run = deps.run ?? (<T>(task: () => Promise<T>) => queue.run(task));
   const text = input.text.trim();
   let conversationId = input.conversationId;
+  // A pasted page of notes is shown, saved and titled as how much was pasted.
+  const said = compactForChat(text);
 
-  if (!isAskable(text)) {
-    return { ok: false, reason: 'empty', message: 'Type a message first.', conversationId };
+  if (!isSendable(text)) {
+    return text.length === 0
+      ? { ok: false, reason: 'empty', message: 'Type a message first.', conversationId, said }
+      : { ok: false, reason: 'too_long', message: "That's more than I can take in one message.", conversationId, said };
   }
 
   // 1. The student's words, saved first. A failure to SAVE is logged and the
   //    conversation carries on unsaved — refusing to reply because a history
   //    row would not write is the worse failure.
   try {
-    if (!conversationId) conversationId = await createConversation(conversationTitle(text), db);
-    if (conversationId) await saveMessage(conversationId, 'user', text, db);
+    if (!conversationId) conversationId = await createConversation(conversationTitle(said), db);
+    if (conversationId) await saveMessage(conversationId, 'user', said, db);
   } catch (err) {
     console.warn(`[nomi] could not save that message: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -233,26 +254,45 @@ export async function sendToNomi(
     }
   };
 
-  // 2. Nomi's own brain.
+  // 2. Something Nomi can DO (NOTES §37) — offered, never done, until the
+  //    student taps. No model call and no allowance: the offer is recognised
+  //    here, and nothing is written by this function either way.
+  const proposal = proposeAction(text, input.snapshot);
+  if (proposal) {
+    await keep(proposal.say);
+    return { ok: true, text: proposal.say, source: 'brain', conversationId, note: null, proposal: proposal.action, said };
+  }
+
+  // 3. Nomi's own brain.
   const local = answerLocally(text, input.snapshot);
   if (local) {
     await keep(local.text);
-    return { ok: true, text: local.text, source: 'brain', conversationId, note: null };
+    return { ok: true, text: local.text, source: 'brain', conversationId, note: null, proposal: null, said };
   }
 
-  // 3. Gemini.
+  // A long message that is not notes Nomi can act on is still too long to send
+  // Gemini as a question — the cap that keeps one message cheap.
+  if (text.length > MAX_QUESTION_CHARS) {
+    const reply =
+      "That's a lot for one message. Paste it as notes and I can make a set from it, or ask me about one part of it.";
+    await keep(reply);
+    return { ok: true, text: reply, source: 'brain', conversationId, note: null, proposal: null, said };
+  }
+
+  // 4. Gemini.
   if (!input.apiKey) {
     return {
       ok: false,
       reason: 'no_key',
       message: 'Add your Gemini key in Settings and I can chat about anything.',
       conversationId,
+      said,
     };
   }
 
   const remaining = await claimMessage(db);
   if (remaining !== null && remaining < 0) {
-    return { ok: false, reason: 'limit_reached', message: describeRemaining(-1)!, conversationId };
+    return { ok: false, reason: 'limit_reached', message: describeRemaining(-1)!, conversationId, said };
   }
 
   try {
@@ -267,6 +307,7 @@ export async function sendToNomi(
         reason: 'busy',
         message: "I couldn't come up with a reply to that one. Try asking it differently.",
         conversationId,
+        said,
       };
     }
     await keep(answer);
@@ -276,6 +317,8 @@ export async function sendToNomi(
       source: 'gemini',
       conversationId,
       note: describeRemaining(remaining ?? DAILY_MESSAGE_LIMIT),
+      proposal: null,
+      said,
     };
   } catch (err) {
     // The claimed reply is not refunded, for the reason assistant.ts gave: the
@@ -286,13 +329,14 @@ export async function sendToNomi(
     // the first live check hunting for an outage that was an invalid key
     // (NOTES §36). An invalid key is fixable in Settings; "busy" says wait.
     if (err instanceof GeminiCallError) {
-      return { ok: false, reason: 'rejected', message: reasonToMessage(err.reason), conversationId };
+      return { ok: false, reason: 'rejected', message: reasonToMessage(err.reason), conversationId, said };
     }
     return {
       ok: false,
       reason: 'busy',
       message: 'Gemini is busy right now — try again in a minute.',
       conversationId,
+      said,
     };
   }
 }

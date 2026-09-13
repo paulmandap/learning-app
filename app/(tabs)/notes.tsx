@@ -12,6 +12,7 @@ import {
 } from '../../src/ui/components';
 import { listNotes, createNote, NotesUnavailableError } from '../../src/data/notes';
 import { noteTitle, notePreview } from '../../src/core/notes';
+import { StatePanel } from '../../src/ui/states';
 
 /**
  * The notebook (Phase 10).
@@ -87,12 +88,12 @@ export default function Notes() {
       ) : null}
 
       {notes.length === 0 ? (
-        <Card>
-          <Body>Nothing written yet.</Body>
-          <Body muted>
-            Type your notes here during class, then turn them into cards when you're done.
-          </Body>
-        </Card>
+        // A drawing and one line, from the owner's reference (NOTES §37) —
+        // it was a bordered card of two sentences.
+        <StatePanel kind="empty"
+          title="Add your first notes to begin"
+          detail="Type your notes here during class, then turn them into cards when you're done."
+        />
       ) : (
         notes.map((note) => (
           <ListRow

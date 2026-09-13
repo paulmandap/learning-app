@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { startSessionListener, useSessionStore } from '../src/data/session';
 import { HeaderBackButton } from '../src/ui/menu';
 import { StudyAssistant } from '../src/ui/assistant';
+import { PrivacyGate } from '../src/ui/privacy';
 import { useTheme } from '../src/ui/theme';
 
 const queryClient = new QueryClient({
@@ -128,6 +129,9 @@ function RootNavigator() {
         <Stack.Screen name="+not-found" options={{ title: 'Not found', ...backable }} />
       </Stack>
       {showAssistant ? <StudyAssistant /> : null}
+      {/* D13's notice, read once before anything is sent (NOTES §37). It moved
+          here from a card on Settings, at the owner's request. */}
+      <PrivacyGate />
     </View>
   );
 }

@@ -1,8 +1,33 @@
-import { GeminiBrowserProvider } from '../ai/gemini';
+import { GeminiBrowserProvider, GeminiCallError } from '../ai/gemini';
 import { renderPagesForPrompt } from '../ai/prompts';
+import { reasonToMessage } from '../core/ai-errors';
 import { CallQueue, GeminiBusyError } from '../core/queue';
-import { buildPlan, MIN_READABILITY, type PageInput } from '../core/planner';
-import { summariseDrops, validateItems, type DroppedItem } from '../core/validate';
+import {
+  allocateTiers,
+  buildPlan,
+  MAX_ITEMS_PER_CALL,
+  MIN_READABILITY,
+  type PageInput,
+  type PlannedSection,
+  type TierBudget,
+} from '../core/planner';
+import {
+  fillQuotas,
+  flattenLines,
+  inSpan,
+  lineKey,
+  locateExcerpt,
+  planBands,
+  shareOut,
+  shortfallBySection,
+  splitSpans,
+  type Band,
+  type Line,
+  type SentenceRef,
+  type SentenceSpan,
+} from '../core/coverage';
+import { normalize, splitSentences } from '../core/text';
+import { summariseDrops, validateItems, type DroppedItem, type ExistingCard } from '../core/validate';
 import {
   createDocument,
   markDocumentFailed,
@@ -11,19 +36,23 @@ import {
   uploadOriginal,
   type DocumentKind,
 } from './documents';
-import { countItems, existingPrompts, insertItems } from './items';
+import { existingCards, insertItems, type ExistingCardRow } from './items';
 import { verifyRubrics } from './rubrics';
 import { getSet, markSectionComplete, updateSet, type StoredPlan } from './sets';
 
 /**
  * Orchestration: Read → Plan → Generate → Validate → store.
  *
- * Two properties matter more than speed here:
+ * Three properties matter more than speed here:
  *
  *  - **Resumable.** The plan lives on the set and each section is marked done
  *    as it lands, so a refresh mid-generation picks up where it stopped.
- *  - **Incremental.** Items are inserted per section, so cards appear while
+ *  - **Incremental.** Items are inserted per request, so cards appear while
  *    the rest is still being written.
+ *  - **The count asked for is the count made** (NOTES §37). Every section is
+ *    asked once; then, for as long as the set holds fewer cards than were asked
+ *    for, bounded fill passes ask for what is still owed — from the parts of the
+ *    notes with fewest cards, never repeating a question or an answer.
  *
  * The 2-minute target for a 10-page PDF is a measured goal, not a licence to
  * raise concurrency or skip validation. Pacing stays at concurrency 2 with a
@@ -224,10 +253,51 @@ export async function extendPlanForDocument(input: {
 }
 
 /**
- * Generate items for every section not already done.
+ * Rounds of asking for what is still owed, once every section has been asked.
  *
- * Safe to call repeatedly: completed sections are skipped, which is exactly
- * what makes a refresh resume rather than restart.
+ * Three, and bounded so a run always ends. The first two hold each request to
+ * the thinnest parts of the notes; the last lets a card come from anywhere in
+ * the section, and a round that adds nothing ends the run early. Notes that
+ * genuinely cannot hold N different cards — a few sentences asked for sixty —
+ * stop there rather than loop, and the set is finished with what exists.
+ */
+export const MAX_FILL_PASSES = 3;
+
+type Failure = { kind: 'busy' | 'error'; message: string } | null;
+
+const GENERIC_FAILURE = 'Something went wrong making cards. Your finished cards are saved.';
+
+/**
+ * The worst thing that went wrong in a round of requests, logged either way.
+ *
+ * Busy wins, because it is the one that says "wait and retry". A refusal Google
+ * explains (an invalid key) is said plainly rather than as "something went
+ * wrong" — the same lesson as NOTES §36, where an invalid key read as an outage.
+ */
+function failureOf(results: PromiseSettledResult<unknown>[], current: Failure): Failure {
+  let out = current;
+  for (const r of results) {
+    if (r.status !== 'rejected') continue;
+    const err: unknown = r.reason;
+    console.warn(`[pipeline] a request failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (err instanceof GeminiBusyError) {
+      out = { kind: 'busy', message: err.message };
+    } else if (out === null) {
+      out = {
+        kind: 'error',
+        message: err instanceof GeminiCallError ? reasonToMessage(err.reason) : GENERIC_FAILURE,
+      };
+    }
+  }
+  return out;
+}
+
+/**
+ * Generate items until the set holds the number asked for.
+ *
+ * Safe to call repeatedly: completed sections are skipped and the fill passes
+ * count what is already stored, which is exactly what makes a refresh resume
+ * rather than restart.
  */
 export async function generateSet(input: {
   setId: string;
@@ -257,191 +327,222 @@ export async function generateSet(input: {
   let dbMs = 0;
   let calls = 0;
 
-  onProgress?.({
-    phase: 'generating',
-    sectionsDone: done.size,
-    sectionsTotal: plan.sections.length,
-    itemsSoFar: 0,
-  });
+  const report = () =>
+    onProgress?.({
+      phase: 'generating',
+      sectionsDone: done.size,
+      sectionsTotal: plan.sections.length,
+      itemsSoFar: itemsCreated,
+    });
+  report();
 
-  // Sections run THROUGH THE QUEUE, concurrently.
+  // Every card already in the set, read ONCE up front and then extended as
+  // requests land. Sections run concurrently, so dedup has to see siblings
+  // that have already landed — otherwise two sections can write the same card.
+  const seen: ExistingCard[] = (await existingCards(setId)).map(({ prompt, answer, source_excerpt }) => ({
+    prompt,
+    answer,
+    excerpt: source_excerpt,
+  }));
+  let failure: Failure = null;
+
+  const pagesOf = (section: PlannedSection) =>
+    section.pages
+      .map((idx) => ({ page_index: idx, text: pageText.get(idx) ?? '' }))
+      .filter((p) => p.text.length > 0);
+
+  /** Ask the model once, validate what comes back, store what survives. */
+  const ask = async (
+    section: PlannedSection,
+    request: {
+      budget: TierBudget;
+      bands: Band[];
+      maxTotal: number;
+      /** A fill pass: any level, this part of the notes, and — while strict — only these lines. */
+      fill?: { span: SentenceSpan; angles: boolean; onlyLines?: Line[] };
+    },
+  ): Promise<number> => {
+    const bands = request.bands.filter((b) => b.quota > 0);
+    const callStart = Date.now();
+    const generated = await provider.generateItems({
+      sectionText: renderPagesForPrompt(pagesOf(section), request.fill?.span ?? section.span),
+      sectionTitle: section.title,
+      budget: request.budget,
+      pageRange: {
+        from: section.pages[0] ?? 0,
+        to: section.pages[section.pages.length - 1] ?? 0,
+      },
+      bands,
+      avoid: seen.length > 0 ? [...seen] : undefined,
+      flexibleLevels: request.fill !== undefined,
+      angles: request.fill?.angles,
+      onlyLines: request.fill?.onlyLines,
+    });
+    generateMs += Date.now() - callStart;
+    calls++;
+
+    // A fill pass takes a card at whatever level the notes give it; what is
+    // owed is the total. The same validators run either way.
+    const n = request.maxTotal;
+    const caps: TierBudget = request.fill ? { remember: n, understand: n, apply: n } : request.budget;
+    const onlyLines = request.fill?.onlyLines;
+    const { kept, dropped: lost } = validateItems(generated, pageText, caps, seen, {
+      bands,
+      maxTotal: n,
+      lines: onlyLines ? new Set(onlyLines.map(lineKey)) : undefined,
+    });
+    for (const k of kept) seen.push({ prompt: k.prompt, answer: k.answer, excerpt: k.source_excerpt });
+    dropped.push(...lost);
+
+    const dbStart = Date.now();
+    const inserted = await insertItems(setId, documentIdByPage, section.title, kept);
+    dbMs += Date.now() - dbStart;
+    itemsCreated += inserted;
+    return inserted;
+  };
+
+  // ------------------------------------------------------ every section once --
   //
-  // This used to be a sequential `for` loop that awaited the Gemini call and
-  // four database round-trips before starting the next section, so the queue's
-  // concurrency of 2 was never exercised — only one call was ever in flight.
-  // On a multi-section document that was most of the wall-clock time.
-  //
-  // Each section still settles independently: one failing does not cancel the
+  // Sections run THROUGH THE QUEUE, concurrently. This used to be a sequential
+  // `for` loop, so the queue's concurrency of 2 was never exercised. Each
+  // section still settles independently: one failing does not cancel the
   // others, and completed sections are recorded as they land so a refresh
   // resumes rather than restarting.
-  //
-  // Prompts already stored are read ONCE up front rather than per section. The
-  // per-section re-read was a serialising database round-trip; dedup within
-  // this run is handled by the shared accumulator below.
-  const priorPrompts = await existingPrompts(setId);
-  const seenPrompts: string[] = [...priorPrompts];
-  let failure: 'busy' | 'error' | null = null;
-
   const results = await Promise.allSettled(
     pending.map((section) =>
       queue.run(async () => {
-        const sectionPages = section.pages
-          .map((idx) => ({ page_index: idx, text: pageText.get(idx) ?? '' }))
-          .filter((p) => p.text.length > 0);
-
-        if (sectionPages.length === 0) {
-          await markSectionComplete(setId, section.id);
-          return;
+        const lines = flattenLines(pagesOf(section), section.span);
+        if (lines.length > 0) {
+          await ask(section, {
+            budget: section.budget,
+            bands: planBands(lines, section.total),
+            maxTotal: section.total,
+          });
         }
-
-        const callStart = Date.now();
-        const generated = await provider.generateItems({
-          sectionText: renderPagesForPrompt(sectionPages),
-          sectionTitle: section.title,
-          budget: section.budget,
-          pageRange: {
-            from: section.pages[0] ?? 0,
-            to: section.pages[section.pages.length - 1] ?? 0,
-          },
-        });
-        generateMs += Date.now() - callStart;
-        calls++;
-
-        // Snapshot the shared prompt list, then append what this section kept.
-        // Sections finish concurrently, so dedup has to see siblings that have
-        // already landed — otherwise two sections can write the same card.
-        const { kept, dropped: sectionDropped } = validateItems(
-          generated,
-          pageText,
-          section.budget,
-          seenPrompts,
-        );
-        for (const k of kept) seenPrompts.push(k.prompt);
-        dropped.push(...sectionDropped);
-
         const dbStart = Date.now();
-        const inserted = await insertItems(setId, documentIdByPage, section.title, kept);
-        itemsCreated += inserted;
-
         await markSectionComplete(setId, section.id);
         dbMs += Date.now() - dbStart;
         done.add(section.id);
-
-        // Reported as each section lands, so cards appear while the rest run.
-        onProgress?.({
-          phase: 'generating',
-          sectionsDone: done.size,
-          sectionsTotal: plan.sections.length,
-          itemsSoFar: itemsCreated,
-        });
+        report();
       }),
     ),
   );
+  failure = failureOf(results, failure);
 
-  for (const r of results) {
-    if (r.status !== 'rejected') continue;
-    failure = r.reason instanceof GeminiBusyError ? 'busy' : failure ?? 'error';
-  }
-
-  if (failure === 'busy') {
-    onProgress?.({ phase: 'failed', message: new GeminiBusyError().message });
-  } else if (failure === 'error') {
-    onProgress?.({
-      phase: 'failed',
-      message: 'Something went wrong making cards. Your finished cards are saved.',
-    });
-  }
-
-  // ------------------------------------------------- replace what we dropped --
+  // ------------------------------------------------- until the count is met --
   //
-  // A card discarded by our own validators is not the notes falling short, and
-  // the user should not pay for it. Asking for 10 and receiving 9 because one
-  // citation would not resolve is our problem, so one extra pass asks for the
-  // difference.
-  //
-  // Bounded three ways, so this cannot become the padding D3 warned about:
-  //  - only up to the number we DROPPED. If the model deliberately wrote fewer
-  //    because the text did not support more (prompt rule 6), that is respected
-  //    and not topped up.
-  //  - one pass, never a loop.
-  //  - the replacements go through exactly the same validators, so a bad
-  //    replacement is dropped like any other card.
+  // This replaced a single "top-up" that asked again only for cards OUR checks
+  // had dropped, on the grounds that a model writing fewer meant the notes held
+  // fewer. On the owner's song the model wrote 2 of 10 and nothing was dropped,
+  // so nothing was asked again; at 60 the one top-up wrote near-copies of cards
+  // already kept (NOTES §37). The owner's decision is that the count asked for
+  // is the count made. So: count what is stored, ask for the difference from the
+  // parts of the notes with fewest cards, and repeat — within MAX_FILL_PASSES.
   const allSectionsDone = plan.sections.every((s) => done.has(s.id));
-  if (allSectionsDone && dropped.length > 0 && failure === null) {
-    const stored = await countItems(setId);
-    const replaceable = Math.min(plan.requestedCount - stored, dropped.length);
+  if (allSectionsDone && failure === null) {
+    const citedLine = (card: ExistingCardRow): SentenceRef | null => {
+      if (card.page_index === null) return null;
+      const text = pageText.get(card.page_index);
+      const sentence = text === undefined ? -1 : locateExcerpt(text, card.source_excerpt);
+      return sentence < 0 ? null : { page: card.page_index, sentence };
+    };
+    const inSection = (section: PlannedSection, ref: SentenceRef) =>
+      section.pages.includes(ref.page) && (!section.span || inSpan(ref, section.span));
 
-    // Generate from the section with the most words: the best chance of finding
-    // something genuinely new rather than a near-duplicate.
-    const richest = [...plan.sections].sort((a, b) => b.words - a.words)[0];
+    let relaxed = false;
+    for (let pass = 1; pass <= MAX_FILL_PASSES; pass++) {
+      const cards = (await existingCards(setId)).filter((c) => !c.hidden);
+      const short = plan.requestedCount - cards.length;
+      if (short <= 0) break;
 
-    if (replaceable > 0 && richest) {
-      try {
-        const sectionPages = richest.pages
-          .map((idx) => ({ page_index: idx, text: pageText.get(idx) ?? '' }))
-          .filter((p) => p.text.length > 0);
+      const cited = cards.map(citedLine).filter((ref): ref is SentenceRef => ref !== null);
+      // Lines that already have a card, by their TEXT: a chorus line with a card
+      // has one everywhere it repeats.
+      const usedText = new Set(
+        cited.map((ref) => normalize(splitSentences(pageText.get(ref.page) ?? '')[ref.sentence] ?? '')),
+      );
+      const have = new Map(plan.sections.map((s) => [s.id, cited.filter((ref) => inSection(s, ref)).length]));
+      const owed = shortfallBySection(plan.sections, have, short);
+      const strict = !relaxed && pass < MAX_FILL_PASSES;
 
-        if (sectionPages.length > 0) {
-          const callStart = Date.now();
-          const extra = await queue.run(() =>
-            provider.generateItems({
-              sectionText: renderPagesForPrompt(sectionPages),
-              sectionTitle: richest.title,
-              // Ask at every level and take the best `replaceable` of what
-              // comes back, rather than dictating which level the replacement
-              // must be — the notes decide that better than we can.
-              budget: { remember: replaceable, understand: replaceable, apply: replaceable },
-              pageRange: {
-                from: richest.pages[0] ?? 0,
-                to: richest.pages[richest.pages.length - 1] ?? 0,
-              },
-            }),
+      const before = itemsCreated;
+      const requests: Promise<number>[] = [];
+      for (const section of plan.sections) {
+        const n = owed.get(section.id) ?? 0;
+        if (n <= 0) continue;
+        const lines = flattenLines(pagesOf(section), section.span);
+        if (lines.length === 0) continue;
+
+        // While strict, only lines with no card yet. The 55-of-60 run before
+        // this spent its fill passes rewording lines that already had cards —
+        // five cards on one chorus line — while verse lines went unasked
+        // (NOTES §37). The notes are still shown whole, for context; the prompt
+        // names the lines and the validator holds the model to them.
+        const fresh = strict ? lines.filter((line) => !usedText.has(normalize(line.text))) : [];
+        const pool = fresh.length > 0 ? fresh : lines;
+
+        // No request asked for more than one should write; parts run two at a time.
+        const parts = splitSpans(pool, Math.ceil(n / MAX_ITEMS_PER_CALL));
+        const counts = shareOut(n, parts.map(() => 1));
+        parts.forEach((part, k) => {
+          const want = counts[k] ?? 0;
+          if (want <= 0) return;
+          const partLines = pool.filter((line) => inSpan(line, part.span));
+          // Held to lines with no card, a request needs no quota per part as
+          // well: the lines ARE the spread. With both, a request for 2 threw
+          // away 6 answers for landing in a part that had its share, and a
+          // request for 10 ended at 9 (NOTES §37). Quotas per part are kept
+          // for when every line already has a card.
+          const base = strict && fresh.length === 0 ? planBands(partLines, want) : [];
+          const bands =
+            base.length > 0
+              ? fillQuotas(base, base.map((b) => cited.filter((ref) => inSpan(ref, b)).length), want)
+              : [{ ...part.span, quota: want }];
+          requests.push(
+            queue.run(() =>
+              ask(section, {
+                budget: allocateTiers(want),
+                bands,
+                maxTotal: want,
+                fill: {
+                  span: part.span,
+                  angles: pass > 1,
+                  onlyLines: fresh.length > 0 ? partLines : undefined,
+                },
+              }),
+            ),
           );
-          generateMs += Date.now() - callStart;
-          calls++;
+        });
+      }
 
-          // seenPrompts already holds every prompt kept this run and everything
-          // stored before it, so a replacement cannot repeat an existing card.
-          // The budget allows `replaceable` at EVERY level, and the result is
-          // then sliced to that many. allocateTiers(1) would have permitted one
-          // "remember" item and nothing else, so a replacement written at any
-          // other level was discarded as over_budget — replacing a dropped card
-          // with a second dropped card. A replacement is welcome at whatever
-          // level the notes support.
-          const generous = { remember: replaceable, understand: replaceable, apply: replaceable };
-          const { kept, dropped: extraDropped } = validateItems(
-            extra,
-            pageText,
-            generous,
-            seenPrompts,
-          );
-          dropped.push(...extraDropped);
-          const take = kept.slice(0, replaceable);
-          itemsCreated += await insertItems(setId, documentIdByPage, richest.title, take);
-          console.warn(
-            `[pipeline] replaced ${take.length} of ${replaceable} dropped card(s)` +
-              `${extraDropped.length ? `; ${extraDropped.length} replacement(s) also dropped` : ''}`,
-          );
-        }
-      } catch (err) {
-        // Best effort: the set is already complete and usable, so a failed
-        // top-up must not turn a finished run into a failed one. But it is
-        // logged rather than swallowed — a silently failing top-up is
-        // indistinguishable from one that never ran, and that ambiguity has
-        // already cost one wrong conclusion in this codebase.
-        console.warn(
-          `[pipeline] top-up failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
+      const settled = await Promise.allSettled(requests);
+      failure = failureOf(settled, failure);
+      const gained = itemsCreated - before;
+      console.warn(
+        `[pipeline] fill pass ${pass}${strict ? '' : ' (anywhere in the notes)'}: owed ${short}, made ${gained}`,
+      );
+      report();
+
+      if (failure !== null) break;
+      if (gained === 0) {
+        if (!strict) break;
+        relaxed = true;
       }
     }
   }
 
-  const allDone = allSectionsDone;
-  // Persist WHY cards were left out. Without this the reasons are collected and
-  // then thrown away, leaving "19 of 20" unexplainable.
+  if (dropped.length > 0) {
+    // Logged, not shown (NOTES §37) — but never silently thrown away.
+    console.warn(`[pipeline] ${dropped.length} card(s) dropped: ${JSON.stringify(summariseDrops(dropped))}`);
+  }
+
+  // A set is finished when every section has run and nothing failed. A failed
+  // round leaves it "generating", so opening the set again carries on from the
+  // cards already stored rather than calling a short set done.
+  const finished = allSectionsDone && failure === null;
   await updateSet(setId, {
-    status: allDone ? 'ready' : 'generating',
-    plan: { ...plan, completedSectionIds: [...done], droppedSummary: summariseDrops(dropped) },
+    status: finished ? 'ready' : 'generating',
+    plan: { ...plan, completedSectionIds: [...done] },
   });
 
   // ------------------------------------- D7's second pass over Apply rubrics --
@@ -455,7 +556,7 @@ export async function generateSet(input: {
   //
   // Awaited rather than detached so a caller that wants to know can wait, and so
   // the run is not cut off by the page navigating away the instant cards appear.
-  if (allDone && failure === null) {
+  if (finished) {
     const pass = await verifyRubrics({ setId, apiKey });
     if (pass.checked > 0 || pass.failed > 0) {
       console.warn(
@@ -472,10 +573,13 @@ export async function generateSet(input: {
   );
 
   onProgress?.({
-    phase: allDone ? 'done' : 'failed',
+    phase: finished ? 'done' : 'failed',
     sectionsDone: done.size,
     sectionsTotal: plan.sections.length,
     itemsSoFar: itemsCreated,
+    // Carried on the last event, so the screen still has the reason once the
+    // run has ended — an earlier event of its own was overwritten by this one.
+    ...(failure ? { message: failure.message } : {}),
   });
 
   return {

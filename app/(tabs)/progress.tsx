@@ -2,14 +2,19 @@ import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Body, Button, Card, LoadingState, Screen, TitleRow } from '../../src/ui/components';
-import { radius, space, useTheme } from '../../src/ui/theme';
+import { StatePanel } from '../../src/ui/states';
+import { GrowBar } from '../../src/ui/charts';
+import { radius, space, type, useTheme } from '../../src/ui/theme';
 import { useSessionStore } from '../../src/data/session';
 import { fetchDashboard, EMPTY_DASHBOARD, type DashboardData } from '../../src/data/dashboard';
 import {
+  axisTicks,
   describeForecast,
   forecastDayLabel,
+  forecastShortLabel,
   KNOWN_REPS,
   MIN_SECTION_ATTEMPTS,
+  niceAxisTop,
   type SectionScore,
   type SectionTrend,
   type TrendDirection,
@@ -18,6 +23,9 @@ import { formatBytes, MAX_USER_BYTES } from '../../src/core/storage';
 import { PetStreak } from '../../src/ui/pet';
 import { toPetSpecies } from '../../src/core/pet';
 import { fetchProfile } from '../../src/data/profile';
+
+/** The plotting height of a column chart. Enough for a week to read at a glance. */
+const CHART_HEIGHT = 128;
 
 /**
  * Progress — am I getting anywhere, and what should I look at next?
@@ -35,13 +43,14 @@ import { fetchProfile } from '../../src/data/profile';
  * you are going, what you know, what is coming, where you stand, and one thing
  * to do next.
  *
- * **Two charts, and both had to earn it — and one was replaced when it turned
- * out not to have.** The streak is a hero number carried by the pet, not a
- * gauge. Mastery is part-to-whole, so a stacked bar — not the donut that was
- * asked for, for the reasons on `Mastery`. The third block used to plot answers
- * per day and now plots the week ahead: the owner asked what he gained from
- * "225 answers in 2 days" and the honest answer was nothing, because it
- * measured effort rather than learning. See `Forecast`.
+ * **Two charts, both columns now.** The owner: *"everything is like a
+ * horizontal bar chart. it feels so static … maybe vertical bar chart? like …
+ * coming up this week graph, the days of the week could be at the x axis, and
+ * on the y axis is the number? but make it clean not too detailed"* (NOTES
+ * §37). So the week is seven columns against a count axis, what you know is
+ * four columns with the count on each, and every bar grows in. "How each part
+ * is going" stays as rows, because a section's name is a sentence and does not
+ * fit under a column.
  *
  * There is deliberately no chart of accuracy over time: with a handful of
  * answers a day it would be mostly noise, and a noisy chart of a real measure
@@ -89,18 +98,15 @@ export default function Progress() {
     return (
       <Screen>
         <TitleRow title="Progress" />
-        <Card>
-          <Body>Nothing to show yet — you haven't answered any cards.</Body>
-          {/* Names the blocks it will fill in, in the words those blocks
-              actually use. It said "what has stuck" and "worth another look"
-              after those headings had been rewritten, which is how an empty
-              state quietly stops describing the screen it introduces. */}
-          <Body muted>
-            Study a set and this fills in: how many days in a row you've kept going, what you
-            know, what's coming up, and how each part of your notes is going.
-          </Body>
-          <Button label="Go to your sets" onPress={() => router.push('/')} />
-        </Card>
+        {/* Names the blocks it will fill in, in the words those blocks
+            actually use. It said "what has stuck" and "worth another look"
+            after those headings had been rewritten, which is how an empty
+            state quietly stops describing the screen it introduces. */}
+        <StatePanel kind="empty"
+          title="Nothing to show yet"
+          detail="Study a set and this fills in: how many days in a row you've kept going, what you know, what's coming up, and how each part of your notes is going."
+          action={{ label: 'Go to your sets', onPress: () => router.push('/') }}
+        />
         {/* Someone can have uploaded a large file and answered nothing yet —
             which is exactly when "how much room have I used?" gets asked. */}
         <Space data={data} />
@@ -156,15 +162,16 @@ function Streak({ data }: { data: DashboardData }) {
 }
 
 /**
- * What has stuck: one stacked bar, four labelled counts.
+ * What has stuck: four columns, each with its count, and what puts a card there.
  *
- * ## Why a stacked bar and not a donut
+ * ## From one stacked bar to four columns
  *
- * This is part-to-whole, and for part-to-whole a horizontal stacked bar beats a
- * ring: shares are read against a common baseline instead of by comparing arc
- * angles, it survives being 340px wide on a phone, and the labels sit beside the
- * numbers rather than orbiting them. A donut would also need SVG — which is not
- * a dependency this project has — to draw something the guidance rates worse.
+ * It was a single horizontal stacked bar — part-to-whole, read against a common
+ * baseline, and chosen over a donut for exactly that (a donut compares arc
+ * angles, and needs SVG this project does not have). It was also the chart the
+ * owner meant by "static". Four columns keep the common baseline, which is what
+ * made the bar better than a ring, and show each band's size directly; the count
+ * sits on its column, so nothing has to be read off an axis.
  *
  * The colours are the validated chart steps, not the UI tokens. Reusing `border`
  * for "Not started" measured **1.27:1** against the card: the segment was there
@@ -176,13 +183,14 @@ function Mastery({ data }: { data: DashboardData }) {
   const total = known + getting + needsWork + notStarted;
   if (total === 0) return null;
 
-  // Every band says what PUT a card there. The owner, on the old version:
+  // Every band says what PUT a card there. The owner, on an earlier version:
   // "as a learner, i don't really know what's know well, getting there, and
   // not started. to me it's just a circle with different colors." A label
   // names a band; only the sentence beside it tells you how to move one.
-  const segments = [
+  const bands = [
     {
       key: 'known',
+      short: 'Know',
       label: 'You know these',
       hint: `right ${KNOWN_REPS} times in a row`,
       n: known,
@@ -190,6 +198,7 @@ function Mastery({ data }: { data: DashboardData }) {
     },
     {
       key: 'getting',
+      short: 'Getting there',
       label: 'Getting there',
       hint: 'right once or twice so far',
       n: getting,
@@ -197,6 +206,7 @@ function Mastery({ data }: { data: DashboardData }) {
     },
     {
       key: 'needsWork',
+      short: 'Needs work',
       label: 'Needs work',
       hint: 'your last answer was wrong',
       n: needsWork,
@@ -204,54 +214,72 @@ function Mastery({ data }: { data: DashboardData }) {
     },
     {
       key: 'notStarted',
+      short: 'Not started',
       label: 'Not started',
       hint: "you haven't been asked these yet",
       n: notStarted,
       color: t.chart.neutral,
     },
-  ].filter((s) => s.n > 0);
+  ];
+  const tallest = Math.max(...bands.map((b) => b.n));
 
   return (
     <Card>
       <Body>What you know</Body>
 
-      {/* A 2px gap in the SURFACE colour separates touching segments, rather
-          than a border drawn round each — a stroke would add ink that is not
-          data. The last segment carries no gap, so the bar ends flush. */}
-      <View style={{ flexDirection: 'row', height: 14, borderRadius: radius.sm, overflow: 'hidden' }}>
-        {segments.map((s, i) => (
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          height: CHART_HEIGHT + type.label.lineHeight + space.xs,
+          borderBottomWidth: 1,
+          borderBottomColor: t.border,
+        }}
+      >
+        {bands.map((b, i) => (
           <View
-            key={s.key}
-            style={{
-              flex: s.n,
-              backgroundColor: s.color,
-              marginRight: i < segments.length - 1 ? 2 : 0,
-            }}
-          />
+            key={b.key}
+            accessible
+            accessibilityLabel={`${b.label}: ${b.n}`}
+            style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', gap: space.xs }}
+          >
+            <Text style={[type.label, { color: t.text }]}>{b.n}</Text>
+            {b.n > 0 ? (
+              <GrowBar
+                direction="up"
+                share={b.n / tallest}
+                length={CHART_HEIGHT}
+                thickness={36}
+                color={b.color}
+                delay={i * 70}
+              />
+            ) : null}
+          </View>
+        ))}
+      </View>
+      <View style={{ flexDirection: 'row' }}>
+        {bands.map((b) => (
+          <Text key={b.key} style={[type.caption, { flex: 1, textAlign: 'center', color: t.textMuted }]}>
+            {b.short}
+          </Text>
         ))}
       </View>
 
-      {/* Every segment is named, explained and counted, so the bar is a summary
-          of the list rather than the only place the information lives. */}
+      {/* What puts a card in each band. The counts are on the columns, so
+          this is only the sentence that says how to move one. */}
       <View style={{ gap: space.sm }}>
-        {segments.map((s) => (
-          <View key={s.key} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm }}>
-            <View
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: 5,
-                backgroundColor: s.color,
-                marginTop: 5,
-              }}
-            />
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: t.text, fontSize: 14 }}>{s.label}</Text>
-              <Text style={{ color: t.textMuted, fontSize: 12 }}>{s.hint}</Text>
+        {bands
+          .filter((b) => b.n > 0)
+          .map((b) => (
+            <View key={b.key} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm }}>
+              <View
+                style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: b.color, marginTop: space.xs }}
+              />
+              <Text style={[type.caption, { flex: 1, color: t.textMuted }]}>
+                <Text style={{ color: t.text }}>{b.label}</Text> — {b.hint}
+              </Text>
             </View>
-            <Text style={{ color: t.text, fontSize: 14, fontWeight: '600' }}>{s.n}</Text>
-          </View>
-        ))}
+          ))}
       </View>
     </Card>
   );
@@ -275,12 +303,14 @@ function Mastery({ data }: { data: DashboardData }) {
  * light and tomorrow is heavy. It is the scheduler's own knowledge, which the
  * student otherwise discovers only by opening a deck.
  *
- * ## Why rows and not columns
+ * ## Columns, at the owner's request (NOTES §37)
  *
- * Seven bars need seven labels, and "Tomorrow" does not fit under a 40px
- * column. Horizontal rows give each day its name in full, put the count where
- * it is read rather than hovering above a bar, and stay legible at 340px.
- * Thirty columns needed no labels and so could be vertical; seven do.
+ * It was rows, because "Tomorrow" does not fit under a column. The labels have
+ * since become weekday names, and three letters of one fit under anything — so
+ * the owner's picture is now the chart: days along the bottom, the count up
+ * the side, three numbers on the axis at most. Today is the first column and
+ * its day is in bold. A day with nothing due has no bar and sits on the
+ * baseline, which is the axis saying zero.
  *
  * Drawn with plain Views — a charting library would be a dependency for
  * something the layout engine already does.
@@ -290,54 +320,95 @@ function Forecast({ data }: { data: DashboardData }) {
   const days = data.forecast;
   if (days.length === 0) return null;
 
-  const busiest = Math.max(...days.map((d) => d.due));
+  const top = niceAxisTop(Math.max(0, ...days.map((d) => d.due)));
+  const ticks = axisTicks(top);
   const today = days[0]!.dayStart;
   const summary = describeForecast(days, today);
+  const yOf = (value: number) => Math.min(CHART_HEIGHT - 1, CHART_HEIGHT - (value / top) * CHART_HEIGHT);
 
   return (
     <Card>
       <Body>Coming up this week</Body>
 
-      <View style={{ gap: 6 }}>
-        {days.map((d) => (
-          <View key={d.dayStart} style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-            <Text style={{ color: t.textMuted, fontSize: 13, width: 74 }}>
-              {forecastDayLabel(d.dayStart, today)}
-            </Text>
-
-            <View style={{ flex: 1, height: 10, justifyContent: 'center' }}>
-              {d.due > 0 ? (
-                <View
-                  style={{
-                    // Never a zero-width sliver: one card due on a day where
-                    // another holds forty would round below a pixel and read as
-                    // nothing due, which is the one thing this must not say.
-                    width: `${Math.max(4, (d.due / busiest) * 100)}%`,
-                    height: 10,
-                    borderRadius: 3,
-                    backgroundColor: t.chart.series,
-                  }}
-                />
-              ) : (
-                // An empty day is drawn, not skipped — a free day is
-                // information, and a missing row would just look like a bug.
-                <View style={{ width: 10, height: 2, borderRadius: 1, backgroundColor: t.border }} />
-              )}
-            </View>
-
+      <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.xs }}>
+        {/* The count, up the side. */}
+        <View style={{ width: 22, height: CHART_HEIGHT }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {ticks.map((v) => (
             <Text
-              style={{
-                color: d.due > 0 ? t.text : t.textMuted,
-                fontSize: 13,
-                fontWeight: d.due > 0 ? '600' : '400',
-                width: 28,
-                textAlign: 'right',
-              }}
+              key={v}
+              style={[
+                type.caption,
+                {
+                  position: 'absolute',
+                  right: 0,
+                  top: yOf(v) - type.caption.lineHeight / 2,
+                  color: t.textMuted,
+                },
+              ]}
             >
-              {d.due > 0 ? d.due : '—'}
+              {v}
             </Text>
+          ))}
+        </View>
+
+        <View style={{ flex: 1 }}>
+          <View style={{ height: CHART_HEIGHT }}>
+            {ticks.map((v) => (
+              <View
+                key={v}
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  top: yOf(v),
+                  height: 1,
+                  backgroundColor: t.border,
+                  // The baseline is the axis; the others only guide the eye.
+                  opacity: v === 0 ? 1 : 0.45,
+                }}
+              />
+            ))}
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'flex-end' }}>
+              {days.map((d, i) => (
+                <View
+                  key={d.dayStart}
+                  accessible
+                  accessibilityLabel={`${forecastDayLabel(d.dayStart, today)}: ${d.due} card${d.due === 1 ? '' : 's'}`}
+                  style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end' }}
+                >
+                  {d.due > 0 ? (
+                    <GrowBar
+                      direction="up"
+                      // Never shorter than a few points: one card beside forty
+                      // would otherwise round to nothing and read as none due.
+                      share={Math.max(d.due / top, 4 / CHART_HEIGHT)}
+                      length={CHART_HEIGHT}
+                      thickness={18}
+                      color={t.chart.series}
+                      delay={i * 45}
+                    />
+                  ) : null}
+                </View>
+              ))}
+            </View>
           </View>
-        ))}
+
+          <View style={{ flexDirection: 'row', marginTop: space.xs }}>
+            {days.map((d) => (
+              <Text
+                key={d.dayStart}
+                style={[
+                  type.caption,
+                  d.dayStart === today
+                    ? { flex: 1, textAlign: 'center', color: t.text, fontWeight: '700' }
+                    : { flex: 1, textAlign: 'center', color: t.textMuted },
+                ]}
+              >
+                {forecastShortLabel(d.dayStart)}
+              </Text>
+            ))}
+          </View>
+        </View>
       </View>
 
       {summary ? <Body muted>{summary}</Body> : null}
@@ -408,7 +479,7 @@ function TrendWord({ direction }: { direction?: TrendDirection }) {
 
   const climbing = direction === 'improving';
   return (
-    <Text style={{ color: climbing ? t.ok : t.warnText, fontSize: 13 }}>
+    <Text style={[type.label, { color: climbing ? t.ok : t.warnText }]}>
       {climbing ? 'climbing' : 'slipping'}
     </Text>
   );
@@ -430,13 +501,13 @@ function SectionList({
   const color = tone === 'ok' ? t.ok : t.warnText;
 
   return (
-    <View style={{ gap: 6 }}>
+    <View style={{ gap: space.tight }}>
       {/* The heading is the signal; the colour only reinforces it. */}
-      <Text style={{ color, fontSize: 13, fontWeight: '700' }}>{heading}</Text>
-      {sections.map((s) => (
-        <View key={s.section} style={{ gap: 4, paddingLeft: space.sm, paddingVertical: 2 }}>
+      <Text style={[type.label, { color, fontWeight: '700' }]}>{heading}</Text>
+      {sections.map((s, i) => (
+        <View key={s.section} style={{ gap: space.xs, paddingLeft: space.sm, paddingVertical: space.hair }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-            <Text style={{ color: t.text, fontSize: 15, flex: 1 }} numberOfLines={2}>
+            <Text style={[type.body, { color: t.text, flex: 1 }]} numberOfLines={2}>
               {s.section}
             </Text>
             {/* A percentage, on the owner's call: "instead of 22 of 22, just
@@ -463,23 +534,13 @@ function SectionList({
                 will speak, and claiming a direction on six is noise 38% of the
                 time (measured; see src/core/progress.ts). */}
             <TrendWord direction={trends.find((x) => x.section === s.section)?.direction} />
-            <Text style={{ color: t.textMuted, fontSize: 13 }}>
-              {Math.round(s.accuracy * 100)}%
-            </Text>
+            <Text style={[type.label, { color: t.textMuted }]}>{Math.round(s.accuracy * 100)}%</Text>
           </View>
           {/* A bar so two sections can be compared at a glance rather than by
-              doing the division in your head. It replaces the coloured left
-              border, which carried the same signal less usefully — this is the
-              measure itself, on a common baseline. */}
+              doing the division in your head — rows here, because a section's
+              name is a sentence. It grows in with the columns above. */}
           <View style={{ height: 6, borderRadius: 3, backgroundColor: t.bg, overflow: 'hidden' }}>
-            <View
-              style={{
-                width: `${Math.round(s.accuracy * 100)}%`,
-                height: '100%',
-                borderRadius: 3,
-                backgroundColor: color,
-              }}
-            />
+            <GrowBar direction="right" share={s.accuracy} thickness={6} color={color} delay={i * 60} />
           </View>
         </View>
       ))}

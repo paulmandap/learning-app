@@ -11,10 +11,13 @@
  *
  * Every drop is recorded with a reason. That log — not `excerpt_verified`, which
  * is true for every stored row by construction — is how "why did this section
- * only yield 4 cards?" gets answered.
+ * only yield 4 cards?" gets answered. It is logged, not shown: the owner asked
+ * for the on-screen "We left out 12 cards…" line to go (NOTES §37), because the
+ * pipeline now replaces what it drops until the set holds the count asked for.
  */
 
 import { jaccard, normalize, splitSentences, stripEnumeration, tokenize } from './text';
+import { bandIndex, describeBand, lineKey, type Band } from './coverage';
 import type { Level, TierBudget } from './planner';
 
 /** Prompts more similar than this are treated as the same card (§3.2.4). */
@@ -136,7 +139,9 @@ export type DropReason =
   | 'mc_invalid'
   | 'leak'
   | 'duplicate'
-  | 'over_budget';
+  | 'over_budget'
+  /** Points at the notes by number — "according to line 93" — which the student never sees. */
+  | 'self_reference';
 
 export interface CandidateItem {
   kind: 'flashcard' | 'mcq' | 'short_answer';
@@ -177,7 +182,15 @@ export interface ValidationResult {
   dropped: DroppedItem[];
 }
 
-/** Counts by reason, small enough to persist on the set's plan. */
+/** A card already in the set: what it asks, what it answers, and the quote it came from. */
+export interface ExistingCard {
+  prompt: string;
+  answer: string;
+  /** Its `source_excerpt`, when known — for spotting a second card about the same line. */
+  excerpt?: string;
+}
+
+/** Counts by reason — for the console, so a short run can still be explained. */
 export type DropSummary = Partial<Record<DropReason, number>>;
 
 export function summariseDrops(dropped: DroppedItem[]): DropSummary {
@@ -186,70 +199,91 @@ export function summariseDrops(dropped: DroppedItem[]): DropSummary {
   return out;
 }
 
-/**
- * Plain-English reasons. This text goes on screen, so: no jargon, and grammar
- * that survives both "1 card" and "3 cards".
- *
- * `one`/`many` complete the sentence "We left out N cards because …".
- * `short` is a bare noun phrase for when several reasons are listed together.
- */
-const DROP_WORDING: Record<DropReason, { one: string; many: string; short: string }> = {
-  duplicate: {
-    one: 'it repeated another card',
-    many: 'they repeated other cards',
-    short: 'repeated another card',
-  },
-  excerpt_unmatched: {
-    one: "we couldn't match it to your notes",
-    many: "we couldn't match them to your notes",
-    short: "couldn't be matched to your notes",
-  },
-  leak: {
-    one: 'it gave away its own answer',
-    many: 'they gave away their own answers',
-    short: 'gave away the answer',
-  },
-  mc_invalid: {
-    one: "its answer choices didn't work",
-    many: "their answer choices didn't work",
-    short: "had answer choices that didn't work",
-  },
-  schema: {
-    one: 'it came back incomplete',
-    many: 'they came back incomplete',
-    short: 'came back incomplete',
-  },
-  over_budget: {
-    one: 'we already had enough like it',
-    many: 'we already had enough like them',
-    short: 'were more than we needed',
-  },
-};
+/** Answers this short are judged on a lower overlap — one differing word is a lot of a short answer. */
+export const SHORT_ANSWER_WORDS = 6;
+export const SAME_ANSWER_SHORT = 0.6;
+export const SAME_ANSWER_LONG = 0.8;
+
+/** The words of an answer that make it this answer and not another. */
+function answerWords(answer: string): string[] {
+  return [
+    ...new Set(
+      tokenize(answer).filter((w) => !STOPWORDS.has(w) && (w.length > 2 || /\d/.test(w))),
+    ),
+  ];
+}
 
 /**
- * One sentence explaining why cards were left out, or null when none were.
+ * Do two cards give the same answer?
  *
- * Exists because "19 cards ready" when you asked for 20 is otherwise a mystery:
- * the drop reasons were being collected and then thrown away.
+ * ## Why prompt dedup was not enough (NOTES §37)
+ *
+ * The owner's first report: three flashcards about one detail of a song, and a
+ * three-question quiz whose correct answer was the same phrase every time. The
+ * only dedup was on PROMPTS, at a Jaccard of 0.8, and a model asking about one
+ * fact three ways writes three prompts that share half their words. Reproduced
+ * on a 60-card run, where the top-up wrote "Two peaches and a warning about the
+ * rain" beside "Two free peaches and a warning about the rain", and "The plates
+ * she had saved for Easter" beside "Plates saved for Easter".
+ *
+ * So answers are compared on their content words. Those two pairs score 0.83
+ * and 0.75; "the sinoatrial node" against "the atrioventricular node" scores
+ * 0.33 and stays two cards. The cost is honest: two genuinely different
+ * questions whose answer is the same word ("Roots") are now one card — and the
+ * pipeline replaces the dropped one with a different fact.
  */
-export function describeDrops(summary: DropSummary): string | null {
-  const parts = (Object.entries(summary) as [DropReason, number][])
-    .filter(([, n]) => n > 0)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+export function sameAnswer(a: string, b: string): boolean {
+  const plain = (s: string) => normalize(s).replace(/[.!?]+$/, '');
+  const pa = plain(a);
+  if (pa.length > 0 && pa === plain(b)) return true;
 
-  const total = parts.reduce((sum, [, n]) => sum + n, 0);
-  if (total === 0) return null;
+  const wa = answerWords(a);
+  const wb = answerWords(b);
+  if (wa.length === 0 || wb.length === 0) return false;
+  const shared = wa.filter((w) => wb.includes(w)).length;
+  const overlap = shared / (wa.length + wb.length - shared);
+  const threshold = Math.max(wa.length, wb.length) <= SHORT_ANSWER_WORDS ? SAME_ANSWER_SHORT : SAME_ANSWER_LONG;
+  return overlap >= threshold;
+}
 
-  const cards = (n: number) => `${n} card${n === 1 ? '' : 's'}`;
+/**
+ * How much of the shorter answer the other repeats: 0 to 1.
+ *
+ * For two cards drawn from the SAME line, where rewording is the whole
+ * difference. Measured on the 60-card run after the fill passes (NOTES §37):
+ * "The speaker still knows it all by heart and note for note" beside "I still
+ * know it all by heart and note for note" scores 0.57 on `sameAnswer` — under
+ * its bar, because one says "knows" — and 0.8 here. On three sentences asked
+ * for sixty, "The required intake is oxygen and glucose" beside "Functional
+ * inputs are oxygen and glucose": 0.5. Two different facts from one line —
+ * "Two free peaches" and "Rain", from "He gave us two free peaches and a
+ * warning about the rain" — share nothing and both stay.
+ */
+export function answerOverlap(a: string, b: string): number {
+  const wa = answerWords(a);
+  const wb = answerWords(b);
+  if (wa.length === 0 || wb.length === 0) return 0;
+  const shared = wa.filter((w) => wb.includes(w)).length;
+  return shared / Math.min(wa.length, wb.length);
+}
 
-  if (parts.length === 1) {
-    const [reason, n] = parts[0]!;
-    const wording = DROP_WORDING[reason];
-    return `We left out ${cards(n)} because ${n === 1 ? wording.one : wording.many}.`;
-  }
+/** Two cards about one line whose answers overlap this much are one card. */
+export const SAME_LINE_OVERLAP = 0.5;
 
-  const list = parts.map(([reason, n]) => `${n} ${DROP_WORDING[reason].short}`).join(', ');
-  return `We left out ${cards(total)}: ${list}.`;
+const POSITION =
+  /\b(?:line|sentence|page|paragraph)s?\s+(?:#\s*)?(?:\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/i;
+
+/**
+ * Does a card point at where it came from — "referenced in line 93",
+ * "according to sentence two"?
+ *
+ * The numbers exist so the model can CITE; a student sees one card and never
+ * sees them. Asking for parts of the notes by line number made the model start
+ * writing them into cards, measured on the first 60-card run (NOTES §37), and
+ * the prompt rule against it needs this behind it.
+ */
+export function mentionsPosition(text: string): boolean {
+  return POSITION.test(text);
 }
 
 /**
@@ -313,26 +347,48 @@ export function detectLeak(prompt: string, answer: string): boolean {
   return p.includes(a);
 }
 
+export interface ValidateOptions {
+  /**
+   * The parts of the notes this request covers and how many cards each may
+   * give (`src/core/coverage.ts`). A card citing a part that already has its
+   * share, or a line in no part at all, is dropped — which is what makes "take
+   * two from lines 12–23" a rule rather than a suggestion.
+   */
+  bands?: readonly Band[];
+  /** The most cards to keep from this batch: the number this request asked for. */
+  maxTotal?: number;
+  /**
+   * Only lines with these keys (`lineKey`) may be cited — a fill request that
+   * named the lines still without a card holds the model to them.
+   */
+  lines?: ReadonlySet<string>;
+}
+
 /**
  * Full validation pass for one section's candidates.
  *
  * @param candidates   Items as returned by the model (already schema-parsed).
  * @param pageTexts    page_index -> stored page text, for excerpt verification.
  * @param budget       Per-tier cap from the plan; excess is dropped.
- * @param existingPrompts Prompts already stored for this set, so dedup works
- *                        across sections and across resumed runs, not just
- *                        within one batch.
+ * @param existing     Cards already stored for this set — prompts alone, or
+ *                     prompts with answers — so dedup works across sections,
+ *                     fill passes and resumed runs, not just within one batch.
+ * @param options      Where in the notes the cards must come from, and how many.
  */
 export function validateItems(
   candidates: CandidateItem[],
   pageTexts: Map<number, string>,
   budget: TierBudget,
-  existingPrompts: string[] = [],
+  existing: readonly (string | ExistingCard)[] = [],
+  options: ValidateOptions = {},
 ): ValidationResult {
   const kept: ValidatedItem[] = [];
   const dropped: DroppedItem[] = [];
-  const seenPrompts: string[] = [...existingPrompts];
+  const seen: ExistingCard[] = existing.map((e) => (typeof e === 'string' ? { prompt: e, answer: '' } : e));
   const used: TierBudget = { remember: 0, understand: 0, apply: 0 };
+  const bands = options.bands ?? null;
+  const bandUsed = (bands ?? []).map(() => 0);
+  const maxTotal = options.maxTotal ?? Number.POSITIVE_INFINITY;
 
   const drop = (item: CandidateItem, reason: DropReason, detail: string) => {
     dropped.push({
@@ -405,6 +461,12 @@ export function validateItems(
       continue;
     }
 
+    // --- a card that points at the notes by number --------------------------
+    if ([item.prompt, item.answer, ...(item.options ?? []).map((o) => o.text)].some(mentionsPosition)) {
+      drop(item, 'self_reference', 'refers to a line or page number the student cannot see');
+      continue;
+    }
+
     // --- source grounding -------------------------------------------------
     // Two distinct checks. The index must RESOLVE (proving the source is real
     // text from the user's own notes — the app looks it up, so it cannot be
@@ -434,10 +496,52 @@ export function validateItems(
     }
 
     // --- dedup ------------------------------------------------------------
-    const duplicate = seenPrompts.find((p) => jaccard(p, item.prompt) > DEDUP_JACCARD_THRESHOLD);
+    // Prompt rule 5 asks for no question twice and no answer twice; these two
+    // checks are what hold it.
+    const duplicate = seen.find((c) => jaccard(c.prompt, item.prompt) > DEDUP_JACCARD_THRESHOLD);
     if (duplicate !== undefined) {
       drop(item, 'duplicate', 'prompt overlaps an existing card');
       continue;
+    }
+    const sameAs = seen.find((c) => c.answer.length > 0 && sameAnswer(c.answer, item.answer));
+    if (sameAs !== undefined) {
+      drop(item, 'duplicate', `answer repeats an existing card ("${sameAs.answer.slice(0, 60)}")`);
+      continue;
+    }
+    // The same line, asked again with the answer reworded. Compared by the
+    // line's TEXT, not its number, so a chorus that repeats a line counts as
+    // the one line it is.
+    const citedLine = normalize(splitSentences(pageText)[item.source_sentence] ?? '');
+    const sameLine =
+      citedLine.length > 0
+        ? seen.find(
+            (c) =>
+              c.excerpt !== undefined &&
+              normalize(c.excerpt).includes(citedLine) &&
+              answerOverlap(c.answer, item.answer) >= SAME_LINE_OVERLAP,
+          )
+        : undefined;
+    if (sameLine !== undefined) {
+      drop(item, 'duplicate', `asks about the same line as an existing card, with the same answer reworded`);
+      continue;
+    }
+
+    // --- where in the notes -----------------------------------------------
+    if (options.lines && !options.lines.has(lineKey({ page: item.page_index, sentence: item.source_sentence }))) {
+      drop(item, 'over_budget', `page ${item.page_index} line ${item.source_sentence} already has a card`);
+      continue;
+    }
+    let band = -1;
+    if (bands) {
+      band = bandIndex(bands, { page: item.page_index, sentence: item.source_sentence });
+      if (band === -1) {
+        drop(item, 'over_budget', `page ${item.page_index} line ${item.source_sentence} is outside the part asked for`);
+        continue;
+      }
+      if (bandUsed[band]! >= bands[band]!.quota) {
+        drop(item, 'over_budget', `${describeBand(bands[band]!)} already has its ${bands[band]!.quota}`);
+        continue;
+      }
     }
 
     // --- per-tier budget --------------------------------------------------
@@ -446,8 +550,15 @@ export function validateItems(
       continue;
     }
 
+    // --- the number asked for ---------------------------------------------
+    if (kept.length >= maxTotal) {
+      drop(item, 'over_budget', `already have the ${maxTotal} asked for`);
+      continue;
+    }
+
     used[item.level]++;
-    seenPrompts.push(item.prompt);
+    if (band >= 0) bandUsed[band]!++;
+    seen.push({ prompt: item.prompt, answer: item.answer, excerpt: source.text });
     kept.push({
       ...item,
       excerpt_verified: true,

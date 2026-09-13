@@ -1,16 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import {
-  Body,
-  Button,
-  Card,
-  ListRow,
-  LoadingState,
-  Notice,
-  PillButton,
-  Screen,
-  SectionRow,
-} from '../../src/ui/components';
+import { ListRow, LoadingState, Notice, PillButton, Screen, SectionRow } from '../../src/ui/components';
+import { StatePanel } from '../../src/ui/states';
 import { NomiCard } from '../../src/ui/nomi';
 import { ContinueCard, GreetingHeader } from '../../src/ui/home';
 import { fetchProfile } from '../../src/data/profile';
@@ -21,26 +12,28 @@ import { useSessionStore } from '../../src/data/session';
 import { formatSetTitle } from '../../src/core/title';
 import { greetingName } from '../../src/core/avatar';
 import { homeLine } from '../../src/core/nomi-brain';
+import { dueFirst } from '../../src/core/set-order';
 
 /**
  * Study — the tab you open to study.
  *
- * ## Laid out from the owner's reference (NOTES §36)
+ * ## Laid out from the owner's reference (NOTES §36, §37)
  *
  *  - **"Welcome back, <name>" and their picture**, top left and top right.
- *  - **Nomi standing on a card**, saying the most useful true thing it knows.
- *    Not a button in the heading — the owner's own words were that it looked
- *    "just like a button that needs to be clicked".
+ *  - **Nomi with a speech bubble**, thinking for a moment and then typing the
+ *    most useful true thing it knows — like the companion in the owner's
+ *    second reference, whose line sits in a chat bubble beside it.
  *  - **Continue, shaded**, with its heading above it and the set's progress in
  *    it, holding the screen's one filled button.
- *  - **Your sets**, each with how much of it is known.
+ *  - **Your sets**, each with how much of it is known — the ones with cards due
+ *    today first, back in their place once those are answered.
  *
  * ## Continuing outranks creating
  *
  * Continue carries the one primary button; "+ New set" is a compact control
  * beside the list it adds to. With nothing to continue, a new account gets the
- * primary "+ New set" back. What Continue points at did not change:
- * `continueTarget` is still "where you left off" (§23.1, §34).
+ * primary "+ New set" back, in the drawn empty state. What Continue points at
+ * did not change: `continueTarget` is still "where you left off" (§23.1, §34).
  */
 export default function Home() {
   const router = useRouter();
@@ -73,7 +66,7 @@ export default function Home() {
 
   // What Nomi knows — and, from the same round of queries, each set's due,
   // missed and known counts. One source for Nomi's line, the Continue card's
-  // progress and every row's bar, so the three cannot disagree.
+  // progress, every row's bar and the order of the list, so none can disagree.
   const { data: snapshot, isSuccess: knowsStudent } = useQuery({
     queryKey: ['nomi-brain'],
     queryFn: () => getAppSnapshot(),
@@ -86,6 +79,11 @@ export default function Home() {
   const continueSet = continueTo ? sets.find((s) => s.id === continueTo.studySetId) : undefined;
   const continueStats = continueSet ? statsBySet.get(continueSet.id) : undefined;
   const newSet = () => router.push('/new');
+
+  // "the ones that are due today sits at the top, then after answering, it will
+  // go back to its original position" — the owner (NOTES §37). A stable move,
+  // not a sort: nothing else in the list changes place.
+  const ordered = dueFirst(sets, new Map((snapshot?.sets ?? []).map((s) => [s.id, s.due])));
 
   return (
     <Screen>
@@ -132,14 +130,15 @@ export default function Home() {
       {setsLoading ? (
         <LoadingState />
       ) : sets.length === 0 ? (
-        <Card>
-          <Body muted>No sets yet. Add some notes and we'll make cards from them.</Body>
-          <Button label="+ New set" onPress={newSet} />
-        </Card>
+        <StatePanel kind="empty"
+          title="Add your first notes to begin"
+          detail="Paste your notes or choose a file, and they become flashcards."
+          action={{ label: '+ New set', onPress: newSet }}
+        />
       ) : (
         <>
           <SectionRow title="Your sets" action={<PillButton label="+ New set" onPress={newSet} />} />
-          {sets.map((set) => {
+          {ordered.map((set) => {
             const stats = statsBySet.get(set.id);
             const cards = set.cardCount ?? 0;
             return (

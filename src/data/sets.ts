@@ -1,6 +1,6 @@
 import { supabase, type Db } from './supabase';
 import type { Plan } from '../core/planner';
-import type { DropSummary } from '../core/validate';
+import { isMissingColumn, isMissingTable } from '../core/db-errors';
 import { removeAvatarPhotos } from './profile';
 
 /**
@@ -27,12 +27,16 @@ export interface StudySet {
  * Persisting completion per section is what makes a refresh mid-generation
  * resume instead of restarting — a Phase 2 acceptance criterion, and the
  * difference between a dropped connection costing 10 seconds or 2 minutes.
+ *
+ * It used to carry `droppedSummary`, the reasons cards were left out, so the
+ * set screen could say "We left out 12 cards: …". The owner asked for that
+ * line to go (NOTES §37): the pipeline now makes the count asked for, so there
+ * is no shortfall to explain. Plans stored before still hold the field, and
+ * nothing reads it.
  */
 export interface StoredPlan extends Plan {
   completedSectionIds: string[];
   requestedCount: number;
-  /** Why cards were left out, so "19 of 20" is explainable rather than a mystery. */
-  droppedSummary?: DropSummary;
 }
 
 async function currentUserId(): Promise<string> {
@@ -152,7 +156,7 @@ export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
   // Nomi's conversations (0016). Their messages cascade. A project without the
   // table has nothing to delete, which is not a failure.
   const chats = await supabase.from('nomi_conversations').delete().eq('user_id', id);
-  if (chats.error && !['PGRST205', '42P01'].includes(chats.error.code ?? '')) {
+  if (chats.error && !isMissingTable(chats.error)) {
     throw new Error(chats.error.message);
   }
 
@@ -167,7 +171,12 @@ export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
   const cleared = { gemini_api_key: null, display_name: null, avatar: null };
   let { error } = await supabase.from('profiles').update(cleared).eq('id', id);
   // Before 0016 there is no avatar column to clear; clear the rest.
-  if (error?.code === '42703') {
+  //
+  // This checked for 42703 alone, and an UPDATE naming a missing column is
+  // refused by PostgREST as PGRST204 before Postgres sees it — so before 0016,
+  // Delete my data removed every set and then reported "Something went wrong"
+  // at this line (found reproducing the avatar report, NOTES §37).
+  if (isMissingColumn(error)) {
     ({ error } = await supabase
       .from('profiles')
       .update({ gemini_api_key: null, display_name: null })

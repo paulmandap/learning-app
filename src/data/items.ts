@@ -156,20 +156,33 @@ export async function countItems(studySetId: string): Promise<number> {
   return count ?? 0;
 }
 
-/** Existing prompts, so dedup survives a resumed run across sections. */
-export async function existingPrompts(studySetId: string): Promise<string[]> {
+/** A card already in the set, as generation needs to see it. */
+export interface ExistingCardRow {
+  prompt: string;
+  answer: string;
+  page_index: number | null;
+  source_excerpt: string;
+  hidden: boolean;
+}
+
+/**
+ * Every card in the set, reported ones included.
+ *
+ * Dedup compares against the prompts AND answers (NOTES §37), so a resumed run
+ * or a fill pass cannot repeat a card; the fill passes also count the visible
+ * ones and see which lines of the notes they already come from.
+ */
+export async function existingCards(studySetId: string): Promise<ExistingCardRow[]> {
   const { data, error, count } = await supabase
     .from('study_items')
     // count: a short read here does not look broken, it silently WEAKENS
-    // dedup — prompts it never saw cannot be compared against, so generation
+    // dedup — cards it never saw cannot be compared against, so generation
     // writes duplicates of cards that already exist.
-    .select('prompt', { count: 'exact' })
+    .select('prompt, answer, page_index, source_excerpt, hidden', { count: 'exact' })
     .eq('study_set_id', studySetId);
 
   if (error) throw new Error(error.message);
-  return completeRows('existingPrompts', { data, count }).map(
-    (r: { prompt: string }) => r.prompt,
-  );
+  return completeRows('existingCards', { data, count }) as unknown as ExistingCardRow[];
 }
 
 /**

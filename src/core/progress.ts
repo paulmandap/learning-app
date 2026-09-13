@@ -239,6 +239,38 @@ export function forecastDayLabel(dayStart: number, _todayStart?: number): string
   return new Date(dayStart).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' });
 }
 
+/**
+ * The day under a column: "Mon".
+ *
+ * The forecast was rows because "Tomorrow" does not fit under a 40px column.
+ * The owner asked for columns — days along the bottom, the count up the side
+ * (NOTES §37) — and weekday names are what made that possible: they are the
+ * one vocabulary §18 settled on, and three letters fit under any column.
+ * Today is marked by weight on screen, not by a different word.
+ */
+export function forecastShortLabel(dayStart: number): string {
+  return new Date(dayStart).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+}
+
+/**
+ * The top of a count axis: the smallest round number at or above the largest
+ * value, so the tallest column nearly fills the chart and the labels are ones
+ * a person would write. Never zero — an empty week still has an axis.
+ */
+export function niceAxisTop(max: number): number {
+  if (!Number.isFinite(max) || max <= 0) return 4;
+  const pow = 10 ** Math.floor(Math.log10(max));
+  for (const step of [1, 2, 4, 5, 10]) {
+    if (step * pow >= max) return step * pow;
+  }
+  return 10 * pow;
+}
+
+/** The numbers up the side: 0, the middle when it is a whole number, and the top. */
+export function axisTicks(top: number): number[] {
+  return top % 2 === 0 && top >= 2 ? [0, top / 2, top] : [0, top];
+}
+
 /** Share of the week's cards a day must hold before it is worth naming. */
 const BUSY_DAY_SHARE = 0.4;
 

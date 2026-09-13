@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChatBubble, Composer, NomiWelcome, ThinkingBubble } from '../src/ui/nomi';
+import { ActionCard, ChatBubble, Composer, NomiWelcome, ThinkingBubble } from '../src/ui/nomi';
 import { LoadingState } from '../src/ui/components';
 import { HeaderActions } from '../src/ui/menu';
 import { GLYPH } from '../src/ui/glyphs';
@@ -46,6 +46,7 @@ export default function Nomi() {
   const chat = useNomiConversation(context);
   const scroll = useRef<ScrollView>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const router = useRouter();
 
   const empty = chat.turns.length === 0 && !chat.busy && !chat.loading;
 
@@ -98,6 +99,22 @@ export default function Nomi() {
             ))
           )}
           {chat.busy ? <ThinkingBubble /> : null}
+          {/* What Nomi offered to do, and the tap that does it (NOTES §37).
+              A set's cards are made on its own screen, so that is where a
+              confirmed set goes. */}
+          {chat.pending && !chat.busy ? (
+            <ActionCard
+              action={chat.pending}
+              busy={chat.acting}
+              onCount={chat.setCount}
+              onDismiss={chat.dismiss}
+              onConfirm={() =>
+                void chat.confirm().then((done) => {
+                  if (done?.openSetId) router.push(`/set/${done.openSetId}`);
+                })
+              }
+            />
+          ) : null}
           {chat.note ? (
             <Text style={[type.caption, { color: t.textMuted, textAlign: 'center' }]}>{chat.note}</Text>
           ) : null}

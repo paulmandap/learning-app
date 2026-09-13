@@ -239,6 +239,11 @@ export class GeminiBrowserProvider implements AIProvider {
       sectionTitle: input.sectionTitle,
       budget: input.budget,
       pagesText: input.sectionText,
+      bands: input.bands,
+      avoid: input.avoid,
+      flexibleLevels: input.flexibleLevels,
+      angles: input.angles,
+      onlyLines: input.onlyLines,
     });
 
     const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {

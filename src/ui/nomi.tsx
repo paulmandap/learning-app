@@ -1,60 +1,189 @@
-import { useState } from 'react';
-import { Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { useIsFocused } from 'expo-router';
 import { NomiCharacter } from './nomi-character';
 import { GLYPH } from './glyphs';
+import { useReducedMotion } from './motion';
 import { INPUT_FONT_SIZE, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
-import { isAskable, MAX_QUESTION_CHARS, type ChatTurn } from '../core/chat';
+import { Button } from './components';
+import { isSendable, MAX_PASTE_CHARS, type ChatTurn } from '../core/chat';
+import { actionCard, CARD_COUNTS, type NomiAction } from '../core/nomi-actions';
+import { revealedCount, revealSchedule, THINK_MS } from '../core/typing';
+import type { NomiState } from '../core/nomi-motion';
+
+const NATIVE = Platform.OS !== 'web';
 
 /**
- * Nomi's presence in the app: the card on Home, and the pieces of a chat.
+ * Nomi's presence in the app: Nomi on Home, and the pieces of a chat.
  *
- * ## Why Nomi is no longer a button in the heading
+ * ## Nomi on Home, twice redesigned by the owner
  *
- * The owner, on the pill with the owl's face: *"I don't like how Nomi is just
- * looking like a button that needs to be clicked"* — with a screenshot of
- * another app's companion standing on the edge of a card beside a line it was
- * saying (NOTES §36). A companion that is part of the page reads as someone
- * there with you; one inside a bordered pill reads as a feature to find.
+ * First (NOTES §36), on a pill with the owl's face: *"I don't like how Nomi is
+ * just looking like a button that needs to be clicked."* Nomi moved onto a card.
  *
- * So Nomi stands on a card on Home and says one true thing — the most useful
- * thing it knows right now, from `homeLine`. Tapping anywhere on it opens the
- * chat. The ✦ over a deck stays, because asking about the card in front of you
- * is an action, and an action is allowed to look like one.
+ * Then (§37), pointing at another app's companion: *"when Tarsi is saying
+ * something, it's on a text chat"* — the line sits in a speech bubble beside the
+ * character — and of Nomi's line, *"it is static, it's not changing … like Nomi
+ * is thinking for about 1 second and it will say that with the animation like it
+ * is typing, letter by letter."*
+ *
+ * So Nomi stands beside a bubble with a tail pointing at it. Each time Home
+ * comes into view, and each time the line changes, Nomi thinks — three dots,
+ * the owl in its thinking pose — then types the line (`src/core/typing.ts`).
+ * With reduce motion on, the line is simply there. Tapping opens the chat.
  */
+type Saying = 'thinking' | 'typing' | 'said';
+
 export function NomiCard({ line, onPress }: { line: string; onPress: () => void }) {
   const t = useTheme();
   const focused = useIsFocused();
+  const reduce = useReducedMotion();
+  const chars = useMemo(() => Array.from(line), [line]);
+  const schedule = useMemo(() => revealSchedule(line), [line]);
+  const [saying, setSaying] = useState<Saying>('thinking');
+  const [shown, setShown] = useState(0);
+
+  useEffect(() => {
+    // Nothing starts until the motion setting is known, and nothing runs while
+    // Home is not the screen in front. Coming back to it says the line again.
+    if (!focused || reduce === null) return;
+    if (reduce) {
+      setSaying('said');
+      setShown(chars.length);
+      return;
+    }
+    setSaying('thinking');
+    setShown(0);
+    let tick: ReturnType<typeof setInterval> | undefined;
+    const think = setTimeout(() => {
+      setSaying('typing');
+      const start = Date.now();
+      tick = setInterval(() => {
+        const n = revealedCount(schedule, Date.now() - start);
+        setShown(n);
+        if (n >= chars.length && tick) {
+          clearInterval(tick);
+          setSaying('said');
+        }
+      }, 32);
+    }, THINK_MS);
+    return () => {
+      clearTimeout(think);
+      if (tick) clearInterval(tick);
+    };
+  }, [line, focused, reduce, schedule, chars.length]);
+
+  const owl: NomiState = saying === 'thinking' ? 'thinking' : saying === 'typing' ? 'explaining' : 'idle';
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Talk to Nomi. ${line}`}
       onPress={onPress}
-      style={({ pressed }) => ({ marginTop: space.lg, opacity: pressed ? 0.85 : 1 })}
+      style={({ pressed }) => ({ marginTop: space.sm, opacity: pressed ? 0.85 : 1 })}
     >
       <View
         style={{
           flexDirection: 'row',
           alignItems: 'flex-end',
-          minHeight: 84,
+          gap: space.md,
           borderRadius: radius.lg,
           backgroundColor: t.infoBg,
-          paddingRight: space.lg,
+          paddingHorizontal: space.md,
+          paddingTop: space.md,
         }}
       >
-        {/* Standing ON the card: feet on its bottom edge, head above its top.
-            The negative margin is what makes it a character in the scene
-            rather than an icon in a box. */}
-        <View style={{ width: 96, marginTop: -30, alignItems: 'center' }}>
-          <NomiCharacter state="idle" size={104} active={focused} />
+        <View style={{ width: 84, alignItems: 'center' }}>
+          <NomiCharacter state={owl} settle="idle" size={92} active={focused} />
         </View>
-        <View style={{ flex: 1, gap: space.hair, alignSelf: 'center', paddingVertical: space.md }}>
-          <Text style={[type.bodyStrong, { color: t.infoText }]}>Nomi</Text>
-          <Text style={[type.body, { color: t.infoText }]}>{line}</Text>
+
+        <View style={{ flex: 1, marginBottom: space.lg }}>
+          {/* The tail, pointing at Nomi. A square turned 45° with two edges
+              drawn; the bubble covers its other half. */}
+          <View
+            style={{
+              position: 'absolute',
+              left: -6,
+              bottom: 22,
+              width: 14,
+              height: 14,
+              backgroundColor: t.card,
+              borderLeftWidth: 1,
+              borderBottomWidth: 1,
+              borderColor: t.border,
+              transform: [{ rotate: '45deg' }],
+            }}
+          />
+          <View
+            style={{
+              backgroundColor: t.card,
+              borderRadius: radius.lg,
+              borderWidth: 1,
+              borderColor: t.border,
+              paddingVertical: space.md,
+              paddingHorizontal: space.lg,
+              gap: space.hair,
+            }}
+          >
+            <Text style={[type.bodyStrong, { color: t.accent }]}>Nomi</Text>
+            <View>
+              {/* The whole line, invisible, holds the bubble at its finished
+                  size — so it does not grow a line at a time while Nomi types. */}
+              <Text style={[type.body, { color: t.text, opacity: 0 }]}>{line}</Text>
+              <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }}>
+                {saying === 'thinking' ? (
+                  <ThinkingDots />
+                ) : (
+                  <Text style={[type.body, { color: t.text }]}>{chars.slice(0, shown).join('')}</Text>
+                )}
+              </View>
+            </View>
+          </View>
         </View>
       </View>
     </Pressable>
+  );
+}
+
+/**
+ * Three dots rising in turn — Nomi thinking before it speaks.
+ *
+ * Opacity only, native-driven where there is a native driver. Still under
+ * reduced motion, where three dots still read as "one moment".
+ */
+export function ThinkingDots() {
+  const t = useTheme();
+  const reduce = useReducedMotion();
+  const dots = useRef([0, 1, 2].map(() => new Animated.Value(0.35))).current;
+
+  useEffect(() => {
+    if (reduce !== false) return;
+    const loops = dots.map((dot, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 150),
+          Animated.timing(dot, { toValue: 1, duration: 300, useNativeDriver: NATIVE }),
+          Animated.timing(dot, { toValue: 0.35, duration: 300, useNativeDriver: NATIVE }),
+          Animated.delay((2 - i) * 150),
+        ]),
+      ),
+    );
+    loops.forEach((loop) => loop.start());
+    return () => loops.forEach((loop) => loop.stop());
+  }, [reduce, dots]);
+
+  return (
+    <View
+      accessibilityLabel="Nomi is thinking"
+      style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, height: type.body.lineHeight }}
+    >
+      {dots.map((dot, i) => (
+        <Animated.View
+          key={i}
+          style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: t.textMuted, opacity: dot }}
+        />
+      ))}
+    </View>
   );
 }
 
@@ -113,7 +242,7 @@ export function ThinkingBubble() {
           borderColor: t.border,
         }}
       >
-        <Text style={[type.body, { color: t.textMuted }]}>Thinking…</Text>
+        <ThinkingDots />
       </View>
     </View>
   );
@@ -138,7 +267,8 @@ export function Composer({
 }) {
   const t = useTheme();
   const [draft, setDraft] = useState('');
-  const canSend = !busy && isAskable(draft);
+  // Up to a page of pasted notes: Nomi can make a set from them (NOTES §37).
+  const canSend = !busy && isSendable(draft);
 
   const submit = () => {
     if (!canSend) return;
@@ -158,7 +288,7 @@ export function Composer({
         // One line to start, growing as they type. Without it the web renders
         // a two-row box, which read as a form field rather than a chat input.
         numberOfLines={1}
-        maxLength={MAX_QUESTION_CHARS}
+        maxLength={MAX_PASTE_CHARS}
         autoFocus={autoFocus}
         onKeyPress={(e) => {
           const key = e.nativeEvent as { key: string; shiftKey?: boolean };
@@ -226,6 +356,95 @@ export function Suggestions({ items, onPick }: { items: string[]; onPick: (text:
           <Text style={[type.label, { color: t.text }]}>{item}</Text>
         </Pressable>
       ))}
+    </View>
+  );
+}
+
+/**
+ * Something Nomi offers to do, and the one tap that does it (NOTES §37).
+ *
+ * The owner chose to confirm first: nothing Nomi proposes is written until this
+ * button is pressed, so pasting notes only to ask about them never makes a set
+ * by accident. Sits in Nomi's column, under the question it asked. When the
+ * offer is a set, the count Nomi picked is shown as a choice — tap another
+ * before confirming.
+ */
+export function ActionCard({
+  action,
+  busy,
+  onConfirm,
+  onDismiss,
+  onCount,
+}: {
+  action: NomiAction;
+  busy: boolean;
+  onConfirm: () => void;
+  onDismiss: () => void;
+  onCount: (count: number) => void;
+}) {
+  const t = useTheme();
+  const card = actionCard(action);
+  const counted = action.kind === 'make_set' || action.kind === 'add_notes';
+
+  return (
+    <View style={{ flexDirection: 'row', gap: space.sm }}>
+      <View style={{ width: 30 }} />
+      <View
+        style={{
+          flex: 1,
+          maxWidth: 420,
+          gap: space.sm,
+          padding: space.md,
+          borderRadius: radius.lg,
+          borderBottomLeftRadius: space.xs,
+          borderWidth: 1,
+          borderColor: t.accent,
+          backgroundColor: t.card,
+        }}
+      >
+        <Text style={[type.label, { color: t.textMuted }]}>{card.heading}</Text>
+        <Text style={[type.bodyStrong, { color: t.text }]}>{card.detail}</Text>
+
+        {counted ? (
+          <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.xs }}>
+            {CARD_COUNTS.map((count) => {
+              const chosen = count === action.count;
+              return (
+                <Pressable
+                  key={count}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`${count} cards`}
+                  accessibilityState={{ selected: chosen, disabled: busy }}
+                  disabled={busy}
+                  onPress={() => onCount(count)}
+                  style={{
+                    minWidth: TOUCH_TARGET,
+                    minHeight: TOUCH_TARGET,
+                    paddingHorizontal: space.md,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: radius.pill,
+                    borderWidth: 1,
+                    borderColor: chosen ? t.accent : t.border,
+                    backgroundColor: chosen ? t.accent : 'transparent',
+                  }}
+                >
+                  <Text style={[type.label, { color: chosen ? t.accentText : t.text }]}>{count}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+
+        <View style={{ flexDirection: 'row', gap: space.sm }}>
+          <View style={{ flex: 1 }}>
+            <Button label={card.confirm} onPress={onConfirm} busy={busy} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button label="Not now" variant="secondary" onPress={onDismiss} disabled={busy} />
+          </View>
+        </View>
+      </View>
     </View>
   );
 }

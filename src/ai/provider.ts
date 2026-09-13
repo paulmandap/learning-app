@@ -35,6 +35,16 @@ export interface GenerateInput {
   sectionTitle: string;
   budget: { remember: number; understand: number; apply: number };
   pageRange: { from: number; to: number };
+  /** How many to take from each part of the notes — `src/core/coverage.ts`. */
+  bands?: readonly import('../core/coverage').Band[];
+  /** Cards already in the set, so a later request does not repeat one. */
+  avoid?: readonly { prompt: string; answer: string }[];
+  /** A fill pass: the levels are a guide and the total is the target. */
+  flexibleLevels?: boolean;
+  /** Ask about facts already used, from a new angle, with a different answer. */
+  angles?: boolean;
+  /** Only these lines may be cited: the ones with no card yet. */
+  onlyLines?: readonly import('../core/coverage').SentenceRef[];
 }
 
 export interface GeneratedItem {

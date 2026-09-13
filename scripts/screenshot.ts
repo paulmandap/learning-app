@@ -129,6 +129,15 @@ export async function openPage(options: {
    * was sampled (NOTES §35). Set it, and the result is about the app.
    */
   reducedMotion?: 'reduce' | 'no-preference';
+  /**
+   * Whether the one-time privacy notice (NOTES §37) has been read.
+   *
+   * 'accepted' by default: it covers every screen until it is, so a probe of
+   * Home would otherwise be a photograph of the notice. Marked on the device,
+   * the way the app itself remembers it before migration 0017. Pass 'unseen' to
+   * look at the notice.
+   */
+  privacyNotice?: 'accepted' | 'unseen';
 } = {}): Promise<Page> {
   const width = options.width ?? 430;
   const height = options.height ?? 900;
@@ -406,6 +415,9 @@ export async function openPage(options: {
         if (!s.access_token) return 'sign-in failed: ' + JSON.stringify(s).slice(0, 200);
         s.expires_at = Math.floor(Date.now() / 1000) + (s.expires_in ?? 3600);
         localStorage.setItem('sb-${ref}-auth-token', JSON.stringify(s));
+        // The same key as privacyDeviceKey() in src/data/profile.ts — pinned by
+        // tests/privacy.test.ts, so the two cannot drift apart.
+        ${options.privacyNotice === 'unseen' ? '' : `if (s.user && s.user.id) localStorage.setItem('privacy-notice-accepted:' + s.user.id, new Date().toISOString());`}
         return 'ok';
       })()`,
       true,

@@ -234,3 +234,48 @@ describe('sendToNomi', () => {
     warn.mockRestore();
   });
 });
+
+describe('sendToNomi — Nomi offers to act, and never acts on its own (NOTES §37)', () => {
+  const notes = `Photosynthesis\n${Array.from(
+    { length: 12 },
+    (_, i) => `Plants turn light into sugar in step ${i} of the process.`,
+  ).join(' ')}`;
+
+  it('offers to make a set from pasted notes, with no model call and no allowance spent', async () => {
+    const { db, calls } = fakeDb();
+    const gemini = provider();
+
+    const reply = await sendToNomi({ ...base, text: notes }, { db, provider: gemini, run: now });
+
+    expect(reply).toMatchObject({
+      ok: true,
+      source: 'brain',
+      proposal: { kind: 'make_set', title: 'Photosynthesis', count: 10 },
+    });
+    expect(gemini.chat).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.target === 'rpc/claim_chat_message')).toBe(false);
+    // Offering is not doing: no set, document or note was created.
+    for (const table of ['study_sets', 'documents', 'notes']) {
+      expect(calls.some((c) => c.target.startsWith(table)), table).toBe(false);
+    }
+  });
+
+  it('saves a paste as how much was pasted, not the whole page', async () => {
+    const { db, calls } = fakeDb();
+    const reply = await sendToNomi({ ...base, text: notes }, { db, provider: provider(), run: now });
+
+    const saved = insertsInto(calls, 'nomi_messages').map((c) => (c.body as { content: string }).content);
+    expect(saved[0]).toMatch(/^Pasted notes, \d+ words: "Photosynthesis/);
+    expect(saved[0]!.length).toBeLessThan(notes.length);
+    expect(reply.said).toBe(saved[0]);
+  });
+
+  it('an ordinary question carries no offer', async () => {
+    const { db } = fakeDb({ 'POST rpc/claim_chat_message': { value: 50 } });
+    const reply = await sendToNomi(
+      { ...base, text: 'what does xylem do?' },
+      { db, provider: provider(async () => 'It carries water.'), run: now },
+    );
+    expect(reply).toMatchObject({ ok: true, source: 'gemini', proposal: null, said: 'what does xylem do?' });
+  });
+});

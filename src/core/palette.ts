@@ -62,6 +62,13 @@ export interface Theme {
   accent: string;
   accentText: string;
   danger: string;
+  /**
+   * A panel saying something went wrong — "Couldn't make your cards" — tinted
+   * pale red as in the owner's reference (NOTES §37). `danger` is its sign and
+   * its one filled button; `onDanger` is that button's label.
+   */
+  dangerBg: string;
+  onDanger: string;
   ok: string;
   warnBg: string;
   warnText: string;
@@ -125,6 +132,8 @@ export const LIGHT: Theme = {
   accent: '#0b3c49',
   accentText: '#ffffff',
   danger: '#8a3d3d',
+  dangerBg: '#f7e4e2',
+  onDanger: '#ffffff',
   ok: '#1f5a3e',
   warnBg: '#fdf1dc',
   warnText: '#6b4a12',
@@ -151,6 +160,8 @@ export const DARK: Theme = {
   accent: '#6cb7c9',
   accentText: '#08222a',
   danger: '#f0b1ad',
+  dangerBg: '#3a2224',
+  onDanger: '#2a1010',
   ok: '#7fcb9f',
   warnBg: '#33280f',
   warnText: '#f2d3a0',

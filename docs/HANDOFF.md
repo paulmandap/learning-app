@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **768 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **886 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§36 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§37 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -56,7 +56,13 @@ under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 16; 0001–0015 applied and verified, **0016 NOT yet applied**
+### Migrations — 17; all applied and verified
+
+0016 and 0017 were applied by the owner on 2026-09-13 and verified the same day:
+isolation 24/24, `avatar-probe` OK on every save, `nomi-chat-probe` saves the
+conversation, `privacy_accepted_at` recorded on the account (NOTES §37.12).
+Before that, 0016 missing plus a missing-column code nothing recognised was the
+owner's "I can't change my picture" (§37.4).
 
 `0001` schema · `0002` RLS · `0003` views (`security_invoker`) · `0004` storage +
 `touch_heartbeat` · `0005` `review_state` · `0006` `attempts.mode` gains
@@ -67,8 +73,8 @@ unmarkable short answers · `0009` `byte_size` + `study_days` · `0010`
 and `study_items.form` (applied 2026-09-12 — and it took production down for
 hours, see NOTES §31 before applying anything like it) · `0016`
 `profiles.avatar`, the private `avatars` bucket, `nomi_conversations` and
-`nomi_messages` (written 2026-09-13, **not applied** — additive only, safe in
-either order; the app degrades without it. NOTES §36).
+`nomi_messages` (NOTES §36) · `0017` `profiles.privacy_accepted_at`, for the
+one-time privacy notice (NOTES §37). Both additive; applied 2026-09-13.
 
 ## Rules — these are not negotiable
 
@@ -98,7 +104,11 @@ either order; the app degrades without it. NOTES §36).
 
 Each was decided with evidence. Reversing one silently would undo a measurement.
 
-1. **Card-count cap removed** (D3). The requested count IS the target.
+1. **Card-count cap removed** (D3). The requested count IS the target — and
+   since NOTES §37 the pipeline fills to it: the prompt asks for exactly N, each
+   request says how many to take from each part of the text, and a repeated
+   answer is dropped. "We left out N cards…" is gone from the set screen, at the
+   owner's request.
 2. **Source grounding is by sentence INDEX**, not verbatim excerpt.
    `SOURCE_SUPPORT_THRESHOLD = 0.22`, widening ±1 sentence (NOTES §6.2).
 3. **`web.output: 'single'` uses `public/index.html`**, NOT `app/+html.tsx`
@@ -109,7 +119,12 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
    Quota is per model (NOTES §6.5).
 7. **Levels are EXCLUSIVE**, reversing D2. This is also why each level keeps its
    own position in a deck (NOTES §17.1).
-8. **Dropped cards are replaced** by one bounded top-up pass.
+8. **The count is filled, not topped up once.** Up to `MAX_FILL_PASSES` (3)
+   rounds ask for what is still owed, from the parts of the notes with fewest
+   cards (NOTES §37). Notes too thin for N different cards stop short rather
+   than repeat — measured, three sentences asked for 60 gave 6, and a 965-word
+   song with a four-times chorus gave 55–57 of 60. `SAME_LINE_OVERLAP` is the
+   lever if exactness should win over rewordings.
 9. **A partial counts as NEITHER right nor wrong** in `sectionSplit` and
     `sectionTrends` (NOTES §32, 2026-09-12). Measured before it was changed:
     2 partials in 312 answers, 2 of 17 sections moved, no section changed which
@@ -123,6 +138,16 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 12. **The upload cap is set by storage, not by the reader** (NOTES §15.2) —
     the inverse of what §12.2 originally recorded. 25 MB per file, 45 MB reader
     ceiling, measured against Google's real 50 MB.
+13. **D13's privacy copy is a notice shown once after signing in, not a card
+    on Settings** (NOTES §37, the owner's decision). Same words, pinned in
+    `src/ui/privacy.tsx`; Settings has a Privacy link to reread them. He asked
+    about a long terms page instead and chose the short notice.
+14. **Nomi can write — on one tap, from a closed list** (NOTES §37): make a set
+    from pasted notes, add notes to a set, rename a set, save a note, change
+    name, pet or face. Never delete, sign out or touch the key. `NomiAction` in
+    `src/core/nomi-actions.ts` is the allow-list, requests are recognised there
+    by patterns (not by the model), and a guard reads `src/data/nomi-agent.ts`
+    for any destructive import.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -135,10 +160,18 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 - `Retry-After` is unreadable from browser JS; the 10/20/40 s ladder is the real
   mechanism.
 - `maxOutputTokens` budgets thinking **and** answer together (NOTES §13.1).
+- **A prompt that tells the model to "return fewer" gets fewer.** On a pasted
+  song it wrote 2 of 10 and nothing was dropped (NOTES §37). And numbering the
+  notes by line invites "according to line 93" into the card itself —
+  `mentionsPosition` drops those.
 
 **Postgres, PostgREST and migrations**
 - **A missing table reports `PGRST205`, not `42P01`.** PostgREST rejects against
   its schema cache before Postgres sees the query (NOTES §19.4).
+- **A missing column is `42703` on a read and `PGRST204` on a write.** The app
+  checked 42703 only, so before 0016 a face pick said "try again in a moment"
+  for ever, and Delete my data failed at its last step. Use `isMissingColumn` /
+  `isMissingTable` from `src/core/db-errors.ts` (NOTES §37).
 - **Adding a column to a table that already has rows is half a migration.** 0009
   added `byte_size` and never backfilled it; the space figure was wrong for a
   month (NOTES §20.1).
@@ -193,6 +226,12 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   as an invalid key. For a live model call, use `GEMINI_API_KEY` from `.env`
   (`scripts/nomi-chat-probe.ts` does) — never mistake the refusal for an outage
   (NOTES §36).
+- **The privacy notice covers every screen until it is read** (NOTES §37).
+  `openPage` marks it read for the test user by default; pass
+  `privacyNotice: 'unseen'` to photograph it.
+- **`code()` in `tests/screens.test.ts` strips `/* … */` even inside a string.**
+  `app/new.tsx` holds `'.pdf,.txt,image/*'`, so a guard over `code(new.tsx)` lost
+  half the file and failed on text that was there. Read that file raw.
 - Cloudflare needs a few seconds to propagate; a bundle-hash mismatch
   immediately after a deploy is worth re-reading before investigating.
 - Vitest uses `pool: 'forks'` (Windows). It flakes right after edits — re-run.
@@ -235,7 +274,7 @@ npm test                    447 tests, no network
 npm run typecheck
 npm run export:web
 npm run screenshot -- /progress out.png --width 393 --dark
-npm run test:isolation      19/19 cross-user RLS assertions (needs TEST_USER_* env vars)
+npx tsx --env-file=.env scripts/isolation-test.ts   24/24 cross-user RLS assertions (needs TEST_USER_A/B_* env vars; `npm run test:isolation` does not load .env)
 npm run backup
 npx tsx --env-file=.env scripts/deploy-status.ts   what is live, and is it behind a migration
 npx tsx --env-file=.env scripts/notes-probe.ts [--generate]
@@ -244,6 +283,8 @@ npx tsx --env-file=.env scripts/seed-progress.ts [--days 30] [--clear]
 npx tsx scripts/make-pet-assets.ts            # cuts every assets/*-stages.*
 npx tsx scripts/make-nomi-assets.ts [--debug <dir>]   # Nomi's layers + src/ui/nomi-rig.ts, from design-reference/ (gitignored)
 npx tsx --env-file=.env scripts/nomi-chat-probe.ts    # Nomi's brain + one real Gemini reply + what was saved
+npx tsx --env-file=.env scripts/generation-probe.ts --file notes.txt --count 60   # model output vs dropped vs stored, and which lines
+npx tsx --env-file=.env scripts/avatar-probe.ts       # save faces and photos twice, print the real errors, restore
 npx tsx scripts/palette-check.ts              # contrast + colour-blindness gate, both modes
 npx tsx --env-file=.env scripts/verify-phase2.ts --pdf <file>
 ```
@@ -273,8 +314,9 @@ npx tsx --env-file=.env scripts/verify-phase2.ts --pdf <file>
    **Still open:** the app has never been run against a restored database
    (needs Docker and ~30 GB; C: has 6.2 GB free), and no restore into a real
    Supabase project has been attempted.
-2. **The generation prompt's "every card must stand on its own" rule has no
-   validator**, while the rephrase path has one. Adding it would start dropping
+2. **The generation prompt's "every card must stand on its own" rule has only a
+   partial validator** — since §37 a card naming a line, sentence or page number
+   is dropped — while the rephrase path has a full one. Adding it would start dropping
    cards on the main path, so it needs measuring first (NOTES §10.1).
 3. **Rubric verification is measured on four items.** Two flags, both defensible,
    is encouraging and is not a false-positive rate.
