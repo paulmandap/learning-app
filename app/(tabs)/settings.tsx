@@ -111,10 +111,16 @@ export default function Settings() {
       {/* ------------------------------------------------ privacy notice -- */}
       {/* Visible immediately, next to the key field — never behind a tap or a
           link. The "a real person at Google may read them" sentence is the one
-          users are least likely to assume; it must not be trimmed away. */}
+          users are least likely to assume; it must not be trimmed away.
+
+          INFO, not warn. It is information the student needs, not an alarm
+          about something going wrong, and three paragraphs of warning amber
+          as the first thing on the screen outshouted the real warnings below
+          it (NOTES §35). Re-toned only: D13's wording is untouched, and
+          tests/screens.test.ts still pins it. */}
       <Card>
         <Body>Where your notes go</Body>
-        <Notice tone="warn">
+        <Notice tone="info">
           When you make cards, your notes are sent to Google using your own free key. The key is
           free, so Google may keep your notes to help improve its products — and a real person at
           Google may read them.{'\n\n'}

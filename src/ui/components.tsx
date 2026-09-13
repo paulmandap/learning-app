@@ -19,14 +19,33 @@ import {
   type,
   useTheme,
 } from './theme';
+import { GLYPH } from './glyphs';
 
-/** Centred ≤720px column on desktop, full width on mobile. */
-export function Screen({ children }: { children: ReactNode }) {
+/**
+ * Centred CONTENT_MAX_WIDTH column on desktop, full width on mobile.
+ *
+ * ## `centered`, for screens that are one short thing
+ *
+ * Sign-in and not-found are each a single card. Anchored to the top of a phone
+ * they left most of the screen empty beneath them, and a lone card over a dark
+ * void reads as a page that has not finished loading — on sign-in, the first
+ * screen anyone sees (NOTES §35). Centred, the same card is plainly the whole
+ * page.
+ *
+ * Deliberately NOT for content screens. A list starts at the top because that
+ * is where the eye looks for its first item, and the space under a short list
+ * is not a defect — it fills as sets and notes are added. It is also not for
+ * anything inside the tabs, whose scroll area `TabSlot` bounds (NOTES §33).
+ *
+ * `flexGrow` rather than `flex`, so content taller than the window still
+ * scrolls exactly as before.
+ */
+export function Screen({ children, centered }: { children: ReactNode; centered?: boolean }) {
   const t = useTheme();
   return (
     <ScrollView
       style={{ backgroundColor: t.bg }}
-      contentContainerStyle={styles.screenContent}
+      contentContainerStyle={[styles.screenContent, centered ? styles.screenCentered : null]}
       keyboardShouldPersistTaps="handled"
     >
       <View style={{ width: '100%', maxWidth: CONTENT_MAX_WIDTH, gap: space.lg }}>{children}</View>
@@ -90,9 +109,157 @@ export function Display({ children }: { children: ReactNode }) {
   return <Text style={[type.display, { color: t.text }]}>{children}</Text>;
 }
 
-export function Body({ children, muted }: { children: ReactNode; muted?: boolean }) {
+export function Body({
+  children,
+  muted,
+  strong,
+}: {
+  children: ReactNode;
+  muted?: boolean;
+  /** List-row weight, for a name that has to be picked out of the lines around it. */
+  strong?: boolean;
+}) {
   const t = useTheme();
-  return <Text style={[styles.body, { color: muted ? t.textMuted : t.text }]}>{children}</Text>;
+  return (
+    <Text style={[strong ? type.bodyStrong : styles.body, { color: muted ? t.textMuted : t.text }]}>
+      {children}
+    </Text>
+  );
+}
+
+/**
+ * A small muted line that says what the block below it is.
+ *
+ * "Continue where you left off", "Your sets". Smaller than the thing it
+ * labels, which is the point: a label as loud as its content is a second
+ * heading, and the Continue card used to be all heading — "Continue: <set>" in
+ * one body-sized line, with no way to tell the verb from the name.
+ */
+export function Label({ children }: { children: ReactNode }) {
+  const t = useTheme();
+  return (
+    <Text style={[type.label, { color: t.textMuted }]} accessibilityRole="header">
+      {children}
+    </Text>
+  );
+}
+
+/**
+ * A compact control that sits in a heading row, beside a title or a label.
+ *
+ * The same shape as the Nomi entry point, deliberately: both are "there is
+ * something here if you want it", neither is the thing you came to do. A
+ * full-width `Button` is reserved for that, one per screen.
+ */
+export function PillButton({
+  label,
+  onPress,
+  leading,
+  accessibilityLabel,
+}: {
+  label: string;
+  onPress: () => void;
+  /** Drawn before the label — Nomi's face, on the Nomi pill. */
+  leading?: ReactNode;
+  accessibilityLabel?: string;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      onPress={onPress}
+      hitSlop={8}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.tight,
+        minHeight: TOUCH_TARGET,
+        paddingHorizontal: space.md,
+        borderRadius: radius.pill,
+        borderWidth: 1,
+        borderColor: t.border,
+        backgroundColor: t.card,
+        opacity: pressed ? 0.7 : 1,
+      })}
+    >
+      {leading ?? null}
+      <Text style={[type.label, { color: t.text }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/** A `Label` with an optional control at the far end — a section's heading. */
+export function SectionRow({ title, action }: { title: string; action?: ReactNode }) {
+  return (
+    <View style={[styles.titleRow, action ? null : { minHeight: 0 }]}>
+      <Label>{title}</Label>
+      {action ?? null}
+    </View>
+  );
+}
+
+export interface Option {
+  key: string;
+  title: string;
+  /** One line saying what choosing it is like. */
+  detail: string;
+  /** A count worth seeing before choosing, as a chip beside the title. */
+  badge?: string;
+  onPress: () => void;
+}
+
+/**
+ * Peers to choose between, as one grouped list.
+ *
+ * Built for the set screen's study modes. They were three stacked buttons —
+ * one filled, two outlined — which said "one action and two lesser ones" about
+ * three ways of studying the same cards. A grouped list says "pick one", and
+ * each row has room to say what that mode is actually like, which a button
+ * label never did.
+ */
+export function OptionList({ options }: { options: Option[] }) {
+  const t = useTheme();
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: t.border,
+        borderRadius: radius.md,
+        backgroundColor: t.card,
+        overflow: 'hidden',
+      }}
+    >
+      {options.map((o, i) => (
+        <Pressable
+          key={o.key}
+          accessibilityRole="button"
+          accessibilityLabel={`${o.title}. ${o.detail}${o.badge ? `. ${o.badge}` : ''}`}
+          onPress={o.onPress}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: space.md,
+            minHeight: TOUCH_TARGET,
+            paddingVertical: space.md,
+            paddingHorizontal: space.lg,
+            borderTopWidth: i === 0 ? 0 : 1,
+            borderTopColor: t.border,
+            backgroundColor: pressed ? t.bg : 'transparent',
+          })}
+        >
+          <View style={{ flex: 1, gap: space.hair }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: space.sm }}>
+              <Text style={[type.bodyStrong, { color: t.text }]}>{o.title}</Text>
+              {o.badge ? <Chip tone="accent">{o.badge}</Chip> : null}
+            </View>
+            <Text style={[type.caption, { color: t.textMuted }]}>{o.detail}</Text>
+          </View>
+          <Text style={{ color: t.textMuted, fontSize: 22 }}>{GLYPH.forward}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
 }
 
 /**
@@ -189,9 +356,8 @@ export function ListRow({
         </Text>
         {meta ? <Text style={[type.caption, { color: t.textMuted }]}>{meta}</Text> : null}
       </View>
-      {/* U+203A. A glyph rather than an icon set: @expo/vector-icons is not
-          installed and three chevrons is not a reason to add it. */}
-      <Text style={{ color: t.textMuted, fontSize: 22, marginLeft: space.md }}>›</Text>
+      {/* A glyph rather than an icon set — see src/ui/glyphs.tsx. */}
+      <Text style={{ color: t.textMuted, fontSize: 22, marginLeft: space.md }}>{GLYPH.forward}</Text>
     </Pressable>
   );
 }
@@ -328,6 +494,7 @@ const styles = StyleSheet.create({
     // the thing it is avoiding (NOTES §35).
     paddingBottom: FLOAT_CLEARANCE,
   },
+  screenCentered: { flexGrow: 1, justifyContent: 'center' },
   card: { borderWidth: 1, borderRadius: radius.md, padding: space.lg, gap: space.md },
   row: {
     borderWidth: 1,

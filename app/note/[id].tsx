@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, Field, Notice, Screen } from '../../src/ui/components';
+import { Body, Button, Card, Field, LoadingState, Notice, Screen } from '../../src/ui/components';
 import { INPUT_FONT_SIZE, space, useTheme } from '../../src/ui/theme';
 import { deleteNote, fetchNote, saveNote } from '../../src/data/notes';
 import {
@@ -129,7 +129,7 @@ export default function NoteEditor() {
   if (isLoading) {
     return (
       <Screen>
-        <Body muted>Loading…</Body>
+        <LoadingState />
       </Screen>
     );
   }

@@ -1,7 +1,18 @@
 import { useRouter } from 'expo-router';
-import { Pressable } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { Body, Button, Card, ListRow, Notice, Screen, TitleRow } from '../../src/ui/components';
+import {
+  Body,
+  Button,
+  Card,
+  Label,
+  ListRow,
+  LoadingState,
+  Notice,
+  PillButton,
+  Screen,
+  SectionRow,
+  TitleRow,
+} from '../../src/ui/components';
 import { NomiButton } from '../../src/ui/nomi';
 import { fetchProfile } from '../../src/data/profile';
 import { listSets, type StudySet } from '../../src/data/sets';
@@ -10,6 +21,25 @@ import { dueCountsBySet } from '../../src/data/review';
 import { useSessionStore } from '../../src/data/session';
 import { formatSetTitle } from '../../src/core/title';
 
+/**
+ * Study — the tab you open to study.
+ *
+ * ## Continuing outranks creating
+ *
+ * This screen used to give its one filled button to "+ New set", with
+ * "Continue" above it as a bordered card that was tappable but did not look it
+ * — no chevron, no button, while every set row beneath it had a ›. So the
+ * loudest thing on the screen you open every day was the thing you do once a
+ * week, and the thing you came to do was the quietest (NOTES §35).
+ *
+ * Now Continue carries the one primary button, and "+ New set" is a compact
+ * control beside the list it adds to. With nothing to continue — a new account
+ * — making a set IS the thing to do, and it gets the primary button back.
+ *
+ * What Continue points at did not change: `continueTarget` is still "where you
+ * left off", which §23.1 separated from Progress's "where the work is", and
+ * §34 declined to replace with a recommendation.
+ */
 export default function Home() {
   const router = useRouter();
   const session = useSessionStore((s) => s.session);
@@ -44,6 +74,7 @@ export default function Home() {
 
   const hasKey = !!profile?.gemini_api_key;
   const continueSet = continueTo ? sets.find((s) => s.id === continueTo.studySetId) : undefined;
+  const newSet = () => router.push('/new');
 
   return (
     <Screen>
@@ -62,41 +93,45 @@ export default function Home() {
       ) : null}
 
       {/* Continue where you left off — one tap, no digging (D8). The retry
-          count is what makes coming back feel worth it. */}
-      {continueSet ? (
-        <Pressable
-          onPress={() =>
-            router.push(
-              continueTo!.missed > 0
-                ? `/set/${continueTo!.studySetId}/flashcards?retry=1`
-                : `/set/${continueTo!.studySetId}`,
-            )
-          }
-        >
-          <Card>
-            <Body>Continue: {formatSetTitle(continueSet.title)}</Body>
-            <Body muted>{describeContinue(continueTo!, dueBySet)}</Body>
-          </Card>
-        </Pressable>
+          count is what makes coming back feel worth it, so when there IS a
+          missed pile the button says so and goes straight to it. */}
+      {continueSet && continueTo ? (
+        <Card>
+          <Label>Continue where you left off</Label>
+          <Body strong>{formatSetTitle(continueSet.title)}</Body>
+          <Body muted>{describeContinue(continueTo, dueBySet)}</Body>
+          <Button
+            label={continueTo.missed > 0 ? 'Retry what you missed' : 'Continue'}
+            onPress={() =>
+              router.push(
+                continueTo.missed > 0
+                  ? `/set/${continueTo.studySetId}/flashcards?retry=1`
+                  : `/set/${continueTo.studySetId}`,
+              )
+            }
+          />
+        </Card>
       ) : null}
 
-      <Button label="+ New set" onPress={() => router.push('/new')} />
-
       {setsLoading ? (
-        <Body muted>Loading…</Body>
+        <LoadingState />
       ) : sets.length === 0 ? (
         <Card>
           <Body muted>No sets yet. Add some notes and we'll make cards from them.</Body>
+          <Button label="+ New set" onPress={newSet} />
         </Card>
       ) : (
-        sets.map((set) => (
-          <ListRow
-            key={set.id}
-            title={formatSetTitle(set.title)}
-            meta={describeSet(set, dueBySet?.get(set.id) ?? 0)}
-            onPress={() => router.push(`/set/${set.id}`)}
-          />
-        ))
+        <>
+          <SectionRow title="Your sets" action={<PillButton label="+ New set" onPress={newSet} />} />
+          {sets.map((set) => (
+            <ListRow
+              key={set.id}
+              title={formatSetTitle(set.title)}
+              meta={describeSet(set, dueBySet?.get(set.id) ?? 0)}
+              onPress={() => router.push(`/set/${set.id}`)}
+            />
+          ))}
+        </>
       )}
       {/* Settings and Sign out used to sit here as full-width buttons, then as
           a header gear. Both are now the Settings tab. Sign out stays inside
@@ -107,7 +142,7 @@ export default function Home() {
 }
 
 /**
- * What to say under "Continue: <set>".
+ * What to say under the set's name in the Continue card.
  *
  * Due and missed are different things and both matter: due is the schedule
  * saying it is time, missed is the pile of things you got wrong. They are shown

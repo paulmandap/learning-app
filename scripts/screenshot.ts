@@ -120,6 +120,15 @@ export async function openPage(options: {
    * A screen can only be checked in the colours someone actually sees it in.
    */
   dark?: boolean;
+  /**
+   * The system reduce-motion setting to emulate.
+   *
+   * Left alone, headless Chrome's answer decides for you, and an animation
+   * probe that silently runs under reduced motion reports "nothing moves" about
+   * code that moves fine — which is what happened the first time Nomi's wave
+   * was sampled (NOTES §35). Set it, and the result is about the app.
+   */
+  reducedMotion?: 'reduce' | 'no-preference';
 } = {}): Promise<Page> {
   const width = options.width ?? 430;
   const height = options.height ?? 900;
@@ -206,11 +215,13 @@ export async function openPage(options: {
     deviceScaleFactor: 2,
     mobile: width < 700,
   });
-  if (options.dark) {
-    await on('Emulation.setEmulatedMedia', {
-      features: [{ name: 'prefers-color-scheme', value: 'dark' }],
-    });
-  }
+  // One call for every emulated feature: each setEmulatedMedia replaces the
+  // whole list, so two calls would quietly undo the first.
+  const features = [
+    ...(options.dark ? [{ name: 'prefers-color-scheme', value: 'dark' }] : []),
+    ...(options.reducedMotion ? [{ name: 'prefers-reduced-motion', value: options.reducedMotion }] : []),
+  ];
+  if (features.length > 0) await on('Emulation.setEmulatedMedia', { features });
 
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

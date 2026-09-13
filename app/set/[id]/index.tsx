@@ -2,7 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, Display, Field, Notice, Screen } from '../../../src/ui/components';
+import {
+  Body,
+  Button,
+  Card,
+  Display,
+  Field,
+  Label,
+  LoadingState,
+  Notice,
+  OptionList,
+  Screen,
+} from '../../../src/ui/components';
 import { OverflowMenu } from '../../../src/ui/menu';
 import { space } from '../../../src/ui/theme';
 import { formatSetTitle } from '../../../src/core/title';
@@ -184,7 +195,7 @@ export default function SetScreen() {
   if (!set) {
     return (
       <Screen>
-        <Body muted>Loading…</Body>
+        <LoadingState />
       </Screen>
     );
   }
@@ -321,27 +332,44 @@ export default function SetScreen() {
         </View>
       )}
 
-      {/* One primary action. Flashcards is the main flow, so the others are
-          outlined alternatives rather than more equal-weight blue blocks.
-          "Add notes" moved into the ••• menu.
+      {/* Three ways to study the same cards, as a choice between peers.
+
+          They were three stacked buttons, one filled and two outlined, which
+          ranked them — "Flashcards, and two lesser things" — and gave none of
+          them room to say what it is like. As rows, each one says it, and the
+          due count sits on Flashcards because that deck deals due cards first
+          (NOTES §35). "Add notes" moved into the ••• menu.
 
           "Fill in the blanks" is listed unconditionally alongside them. Knowing
           whether a set HAS any blanks means reading every item and running the
           cloze rules over it, which is a query and a pass this screen does not
           otherwise need — and the screen it opens explains an empty level
-          better than a missing button would. */}
+          better than a missing row would. */}
       {itemCount > 0 ? (
-        <View style={{ gap: 8 }}>
-          <Button label="Flashcards" onPress={() => router.push(`/set/${setId}/flashcards`)} />
-          <Button
-            label="Quiz"
-            variant="outline"
-            onPress={() => router.push(`/set/${setId}/quiz`)}
-          />
-          <Button
-            label="Fill in the blanks"
-            variant="outline"
-            onPress={() => router.push(`/set/${setId}/blanks`)}
+        <View style={{ gap: space.sm }}>
+          <Label>Study this set</Label>
+          <OptionList
+            options={[
+              {
+                key: 'flashcards',
+                title: 'Flashcards',
+                detail: 'Turn each card over and say whether you knew it.',
+                badge: dueCount > 0 ? `${dueCount} due` : undefined,
+                onPress: () => router.push(`/set/${setId}/flashcards`),
+              },
+              {
+                key: 'quiz',
+                title: 'Quiz',
+                detail: 'Choose or write the answer, and it gets marked.',
+                onPress: () => router.push(`/set/${setId}/quiz`),
+              },
+              {
+                key: 'blanks',
+                title: 'Fill in the blanks',
+                detail: 'Type the missing words back into a line of your notes.',
+                onPress: () => router.push(`/set/${setId}/blanks`),
+              },
+            ]}
           />
         </View>
       ) : null}

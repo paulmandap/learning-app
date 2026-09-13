@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   Field,
+  LoadingState,
   Notice,
   ProgressBar,
   Screen,
@@ -248,7 +249,7 @@ export default function Blanks() {
   if (isLoading) {
     return (
       <Screen>
-        <Body muted>Loading…</Body>
+        <LoadingState />
       </Screen>
     );
   }

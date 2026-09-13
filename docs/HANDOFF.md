@@ -33,8 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **608 tests pass**, 2 skipped (live Gemini, behind `LIVE_GEMINI=1`). Typecheck clean.
-  (447 when this was written on 2026-09-06; Phases A-G added the rest.)
+- **677 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+  CI-only build check). Typecheck clean. (447 when this was written on
+  2026-09-06; Phases A-G and the NOTES §35 UI work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -47,7 +48,8 @@ roadmap item.
 ### Screens
 
 Study (home) · Add notes · Set (Preparing / Ready) · Flashcards · Quiz · Fill in
-the blanks · **Notes list** · **Note editor** · Progress · Settings · Sign in.
+the blanks · **Notes list** · **Note editor** · Progress · Settings · **Nomi** ·
+Sign in.
 
 Navigation is four tabs — Study · Notes · Progress · Settings — as a bottom bar
 under 800px and a rail beside the content above it. Everything that is a *place*
@@ -173,6 +175,16 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   not do it and `expo typegen` is not a command (NOTES §19.5).
 - **Git Bash rewrites a lone `/` argument into a Windows path.** Run
   `scripts/screenshot.ts /` from PowerShell, or set `MSYS_NO_PATHCONV=1`.
+- **`npx` on Windows runs through a `.cmd` shim, and cmd.exe eats `>`.** Any
+  `--eval` containing an arrow function arrives truncated and prints
+  `undefined`. Import `openPage` from `scripts/screenshot.ts` in a small script
+  instead of passing JavaScript on the command line (NOTES §35).
+- **Probing animation: use `String.raw` for any regex in page code, and pin
+  reduce-motion.** In a plain template literal `\(` and `\d` lose their
+  backslashes, so a transform-sampling regex matched nothing and reported a
+  still owl twice. `openPage({ reducedMotion })` makes the motion setting part
+  of the result rather than the browser's default — which, measured, is
+  `no-preference` in headless Chrome (NOTES §35).
 - Cloudflare needs a few seconds to propagate; a bundle-hash mismatch
   immediately after a deploy is worth re-reading before investigating.
 - Vitest uses `pool: 'forks'` (Windows). It flakes right after edits — re-run.
@@ -222,6 +234,8 @@ npx tsx --env-file=.env scripts/notes-probe.ts [--generate]
 npx tsx --env-file=.env scripts/study-probe.ts <set-id>
 npx tsx --env-file=.env scripts/seed-progress.ts [--days 30] [--clear]
 npx tsx scripts/make-pet-assets.ts            # cuts every assets/*-stages.*
+npx tsx scripts/make-nomi-assets.ts [--debug <dir>]   # Nomi's layers + src/ui/nomi-rig.ts, from design-reference/ (gitignored)
+npx tsx scripts/palette-check.ts              # contrast + colour-blindness gate, both modes
 npx tsx --env-file=.env scripts/verify-phase2.ts --pdf <file>
 ```
 

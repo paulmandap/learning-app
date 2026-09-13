@@ -1,6 +1,9 @@
-import { Pressable, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
-import { radius, space, TOUCH_TARGET, type, useTheme } from './theme';
+import { Text, View } from 'react-native';
+import { useIsFocused, useRouter } from 'expo-router';
+import { PillButton } from './components';
+import { NomiCharacter } from './nomi-character';
+import { space, type, useTheme } from './theme';
+import type { NomiState } from '../core/nomi-motion';
 
 /**
  * The way in to Nomi from a screen's heading.
@@ -10,60 +13,65 @@ import { radius, space, TOUCH_TARGET, type, useTheme } from './theme';
  * The four tabs are the learning loop — Study, Notes, Progress, Settings — and a
  * fifth for a companion would say Nomi is a place you go instead of studying.
  * It is the opposite: something that sits beside whatever you are already
- * looking at. The bottom-right corner is also already taken by the floating ✦,
- * which is Nomi in its in-context form (ask about the card in front of you).
+ * looking at.
  *
- * ## The same ✦, deliberately
+ * ## Two surfaces, one companion, different jobs
  *
- * The floating button has always drawn ✦ (see `assistant.tsx`). Giving this a
- * different mark would make one companion look like two features. Same glyph,
- * same thing, now with a name on it.
+ * This pill and the floating ✦ both used to wear ✦, which made one companion's
+ * two surfaces impossible to tell apart: nothing said that one opens a screen
+ * and the other asks about the card in front of you (NOTES §35).
  *
- * Kept plain on purpose: this is a working entry point, not a finished design,
- * and it is expected to be restyled once the visual treatment is decided.
+ * Now they differ by ROLE and share an IDENTITY. The pill carries Nomi's face
+ * and name, because it goes to Nomi's own screen. The ✦ stays on the floating
+ * button, because it is an action — ask — and the owl appears inside the panel
+ * it opens. Same owl in both places, so it is still plainly one companion.
+ *
+ * The owl here only blinks: at 26 points a bob is a third of a pixel, and it
+ * stops altogether while the tab is not the one showing.
  */
 export function NomiButton() {
   const router = useRouter();
-  const t = useTheme();
+  const focused = useIsFocused();
 
   return (
-    <Pressable
-      accessibilityRole="button"
+    <PillButton
+      label="Nomi"
       accessibilityLabel="Open Nomi"
       onPress={() => router.push('/nomi')}
-      hitSlop={8}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: space.xs,
-        minHeight: TOUCH_TARGET,
-        paddingHorizontal: space.md,
-        borderRadius: radius.pill,
-        borderWidth: 1,
-        borderColor: t.border,
-        backgroundColor: t.card,
-      }}
-    >
-      <Text style={{ fontSize: 15, color: t.accent }}>✦</Text>
-      <Text style={[type.label, { color: t.text }]}>Nomi</Text>
-    </Pressable>
+      leading={<NomiCharacter state="idle" size={26} active={focused} />}
+    />
   );
 }
 
 /**
- * A labelled area of the Nomi screen that has nothing in it yet.
+ * Nomi, large, with a name and one line — the top of Nomi's own screen.
  *
- * Nomi's screen is a set of boundaries waiting to be filled, and an empty one
- * has to read as "not built yet" rather than as "broken" or, worse, as a
- * feature that silently does nothing. Naming each one keeps the screen honest
- * about what it is: a place held open.
+ * Lives here rather than in `app/nomi.tsx` so that screen stays built from
+ * primitives with no inline styles, which it always has been.
  */
-export function NomiSlot({ heading, children }: { heading: string; children: string }) {
+export function NomiHero({
+  state,
+  onDone,
+  active,
+}: {
+  state: NomiState;
+  onDone?: (finished: NomiState) => void;
+  active?: boolean;
+}) {
   const t = useTheme();
   return (
-    <View style={{ gap: space.xs }}>
-      <Text style={[type.label, { color: t.textMuted }]}>{heading}</Text>
-      <Text style={[type.body, { color: t.textMuted }]}>{children}</Text>
+    <View style={{ alignItems: 'center', gap: space.sm, paddingVertical: space.sm }}>
+      <NomiCharacter
+        state={state}
+        size={132}
+        onDone={onDone}
+        active={active}
+        accessibilityLabel="Nomi, a small brown owl"
+      />
+      <Text style={[type.display, { color: t.text }]}>Nomi</Text>
+      <Text style={[type.body, { color: t.textMuted, textAlign: 'center' }]}>
+        Your study companion. Ask it about the notes you are studying.
+      </Text>
     </View>
   );
 }

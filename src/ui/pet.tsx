@@ -1,5 +1,6 @@
 import { Image, Pressable, Text, View, type ImageSourcePropType } from 'react-native';
 import { radius, space, useTheme } from './theme';
+import { GLYPH } from './glyphs';
 import { daysToNextStage, petStage, PET_SPECIES, type PetSpecies } from '../core/pet';
 
 import potato1 from '../../assets/potato-1.webp';
@@ -139,7 +140,7 @@ export function PetChooser({
             {/* A mark as well as a border, for the same reason the quiz marks
                 its options with ✓ and ✗ rather than colour alone. */}
             <Text style={{ color: t.text, fontSize: 15, fontWeight: selected ? '700' : '400' }}>
-              {selected ? `✓ ${PET_LABELS[species]}` : PET_LABELS[species]}
+              {selected ? `${GLYPH.right} ${PET_LABELS[species]}` : PET_LABELS[species]}
             </Text>
           </Pressable>
         );

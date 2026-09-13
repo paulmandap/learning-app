@@ -1,6 +1,15 @@
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, ListRow, Notice, Screen, Title } from '../../src/ui/components';
+import {
+  Body,
+  Button,
+  Card,
+  ListRow,
+  LoadingState,
+  Notice,
+  Screen,
+  Title,
+} from '../../src/ui/components';
 import { listNotes, createNote, NotesUnavailableError } from '../../src/data/notes';
 import { noteTitle, notePreview } from '../../src/core/notes';
 
@@ -43,7 +52,7 @@ export default function Notes() {
     return (
       <Screen>
         <Title>Notes</Title>
-        <Body muted>Loading…</Body>
+        <LoadingState />
       </Screen>
     );
   }

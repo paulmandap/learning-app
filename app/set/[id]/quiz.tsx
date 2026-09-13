@@ -8,11 +8,13 @@ import {
   Button,
   Card,
   Field,
+  LoadingState,
   Notice,
   ProgressBar,
   Screen,
   Title,
 } from '../../../src/ui/components';
+import { GLYPH } from '../../../src/ui/glyphs';
 import { radius, space, useTheme } from '../../../src/ui/theme';
 import { SourcePanel } from '../../../src/ui/source';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
@@ -250,7 +252,7 @@ export default function Quiz() {
   if (isLoading) {
     return (
       <Screen>
-        <Body muted>Loading…</Body>
+        <LoadingState />
       </Screen>
     );
   }
@@ -415,7 +417,7 @@ export default function Quiz() {
                               fontWeight: '700',
                             }}
                           >
-                            {showRight ? '✓' : '✗'}
+                            {showRight ? GLYPH.right : GLYPH.wrong}
                           </Text>
                         ) : null}
                       </View>

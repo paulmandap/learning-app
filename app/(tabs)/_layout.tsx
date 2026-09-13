@@ -3,6 +3,7 @@ import { Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { TabList, TabSlot, TabTrigger, Tabs, type TabTriggerSlotProps } from 'expo-router/ui';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, space, useTheme } from '../../src/ui/theme';
+import { TabIcon, type TabIconName } from '../../src/ui/glyphs';
 
 /**
  * Global navigation (spec §2).
@@ -37,10 +38,10 @@ import { radius, space, useTheme } from '../../src/ui/theme';
 const SIDEBAR_MIN_WIDTH = 800;
 
 const TABS = [
-  { name: 'index', href: '/', label: 'Study', glyph: '✎' },
-  { name: 'notes', href: '/notes', label: 'Notes', glyph: '❏' },
-  { name: 'progress', href: '/progress', label: 'Progress', glyph: '◕' },
-  { name: 'settings', href: '/settings', label: 'Settings', glyph: '⚙︎' },
+  { name: 'index', href: '/', label: 'Study', icon: 'study' },
+  { name: 'notes', href: '/notes', label: 'Notes', icon: 'notes' },
+  { name: 'progress', href: '/progress', label: 'Progress', icon: 'progress' },
+  { name: 'settings', href: '/settings', label: 'Settings', icon: 'settings' },
 ] as const;
 
 /**
@@ -49,12 +50,13 @@ const TABS = [
  * `TabTrigger asChild` hands us `isFocused` and the press handling, so this is
  * only appearance. A ref is required because the trigger forwards one.
  *
- * Label AND glyph, always. The glyphs are decorative — a pencil, a part-filled
- * circle and a gear are not self-evident, and an icon-only bar would be a
- * guessing game. The words are what makes it navigable.
+ * Label AND icon, always. The icons are decorative — two cards, a page, three
+ * bars and two sliders are not self-evident, and an icon-only bar would be a
+ * guessing game. The words are what makes it navigable. The icons are drawn
+ * in `src/ui/glyphs.tsx`; they used to be four unrelated Unicode characters.
  */
-const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; glyph: string }>(
-  ({ label, glyph, isFocused, children, ...props }, ref) => {
+const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; icon: TabIconName }>(
+  ({ label, icon, isFocused, children, ...props }, ref) => {
     const t = useTheme();
     const { width } = useWindowDimensions();
     const sidebar = width >= SIDEBAR_MIN_WIDTH;
@@ -82,7 +84,7 @@ const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; glyph:
           minHeight: 44,
         }}
       >
-        <Text style={{ fontSize: sidebar ? 15 : 17, color: tint }}>{glyph}</Text>
+        <TabIcon name={icon} color={tint} ground={sidebar && isFocused ? t.bg : t.card} />
         <Text
           style={{
             fontSize: sidebar ? 15 : 11,
@@ -156,7 +158,7 @@ export default function TabsLayout() {
       >
         {TABS.map((tab) => (
           <TabTrigger key={tab.name} name={tab.name} href={tab.href} asChild>
-            <TabButton label={tab.label} glyph={tab.glyph} />
+            <TabButton label={tab.label} icon={tab.icon} />
           </TabTrigger>
         ))}
       </TabList>

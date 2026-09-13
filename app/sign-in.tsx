@@ -58,7 +58,7 @@ export default function SignIn() {
   }
 
   return (
-    <Screen>
+    <Screen centered>
       <Title>Study</Title>
       <Card>
         {stage === 'email' ? (

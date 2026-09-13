@@ -1,7 +1,7 @@
 import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { Body, Button, Card, Screen, TitleRow } from '../../src/ui/components';
+import { Body, Button, Card, LoadingState, Screen, TitleRow } from '../../src/ui/components';
 import { NomiButton } from '../../src/ui/nomi';
 import { radius, space, useTheme } from '../../src/ui/theme';
 import { useSessionStore } from '../../src/data/session';
@@ -76,7 +76,7 @@ export default function Progress() {
     return (
       <Screen>
         <TitleRow title="Progress" action={<NomiButton />} />
-        <Body muted>Loading…</Body>
+        <LoadingState />
       </Screen>
     );
   }

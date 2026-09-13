@@ -7,6 +7,7 @@ import {
   Body,
   Button,
   Card,
+  LoadingState,
   Notice,
   ProgressBar,
   Screen,
@@ -274,7 +275,7 @@ export default function Flashcards() {
   if (isLoading) {
     return (
       <Screen>
-        <Body muted>Loading…</Body>
+        <LoadingState />
       </Screen>
     );
   }

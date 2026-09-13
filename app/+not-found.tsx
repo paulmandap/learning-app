@@ -26,7 +26,7 @@ export default function NotFound() {
   const router = useRouter();
 
   return (
-    <Screen>
+    <Screen centered>
       <Title>We couldn't find that page</Title>
       <Card>
         <Body>

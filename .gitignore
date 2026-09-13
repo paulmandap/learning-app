@@ -21,6 +21,13 @@ expo-env.d.ts
 supabase/.temp/
 supabase/.branches/
 
+# Design references — generated mock-ups and the Nomi character sheet.
+#
+# Reference material for building the UI, NOT app assets: nothing under here is
+# imported or shipped. `scripts/make-nomi-assets.ts` reads the character sheet
+# from here to cut the owl's parts, and what it writes to assets/ is what ships.
+design-reference/
+
 # Logs / OS cruft
 npm-debug.log*
 yarn-error.log*

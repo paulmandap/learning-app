@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -307,10 +307,17 @@ describe('the existing assistant still works, and is now called Nomi', () => {
     expect(ui).toContain('askAssistant');
   });
 
-  it('wears the same ✦ as the header entry point', () => {
-    // Two different marks would make one companion look like two features.
-    expect(read('src', 'ui', 'assistant.tsx')).toContain('✦');
-    expect(read('src', 'ui', 'nomi.tsx')).toContain('✦');
+  it('shows the same owl on both surfaces, and keeps ✦ on the floating button', () => {
+    // This guard used to demand ✦ in both files: two different marks would make
+    // one companion look like two features. It MOVED rather than weakened
+    // (NOTES §35). The two surfaces now differ by role — the pill goes to
+    // Nomi's screen, the ✦ asks about what is in front of you — and share an
+    // identity, which is the owl. So the question splits the same way: is the
+    // owl in both, and is the ✦ still drawn (in code, not in a comment).
+    expect(code(read('src', 'ui', 'assistant.tsx'))).toContain('<NomiCharacter');
+    expect(code(read('src', 'ui', 'nomi.tsx'))).toContain('<NomiCharacter');
+    expect(code(read('src', 'ui', 'assistant.tsx'))).toContain('{GLYPH.nomi}');
+    expect(read('src', 'ui', 'glyphs.tsx')).toContain("nomi: '✦'");
   });
 
   it('names Nomi in the copy the student reads', () => {
@@ -392,6 +399,125 @@ describe('adaptive order reaches the two modes that ask for it, and no others', 
   });
 });
 
+/** Every .tsx file under a directory, as paths relative to the repo root. */
+function tsxUnder(dir: string): string[] {
+  return (readdirSync(dir, { recursive: true }) as string[])
+    .filter((f) => f.endsWith('.tsx'))
+    .map((f) => join(dir, f));
+}
+
+describe('symbols and waiting are each said one way', () => {
+  const surfaces = () => [...tsxUnder('app'), ...tsxUnder(join('src', 'ui'))];
+
+  it('no screen types a symbol in directly — they come from GLYPH', () => {
+    // Seven symbols were typed inline across six files, which is how two
+    // chevrons become two different characters (NOTES §35). Comments are
+    // stripped first: explaining a glyph in prose is fine.
+    for (const file of surfaces().filter((f) => !f.endsWith('glyphs.tsx'))) {
+      expect(code(readFileSync(file, 'utf8')), file).not.toMatch(/[›‹⋯✕✓✗✦✎❏◕⚙]/);
+    }
+  });
+
+  it('no screen hand-writes "Loading…" — it is LoadingState', () => {
+    // It was eight copies of bare muted text.
+    for (const file of surfaces().filter((f) => !f.endsWith('components.tsx'))) {
+      expect(code(readFileSync(file, 'utf8')), file).not.toContain('Loading…');
+    }
+  });
+});
+
+describe('Nomi guides, the pet celebrates', () => {
+  it('no screen asks Nomi to encourage or celebrate', () => {
+    // `encouraging` and `success` are built into src/core/nomi-motion.ts and
+    // deliberately unused. The streak pet owns encouragement; two animals
+    // cheering the same answer would make them the same thing. Using either
+    // is a decision to take on purpose, and this is where it gets noticed.
+    const surfaces = [...tsxUnder('app'), ...tsxUnder(join('src', 'ui'))].filter(
+      (f) => !f.endsWith('nomi-character.tsx'),
+    );
+    for (const file of surfaces) {
+      expect(code(readFileSync(file, 'utf8')), file).not.toMatch(/['"](encouraging|success)['"]/);
+    }
+  });
+});
+
+describe('Nomi moves without getting in the way', () => {
+  const renderer = code(read('src', 'ui', 'nomi-character.tsx'));
+
+  it('honours the reduce-motion setting, and follows it when it changes', () => {
+    expect(renderer).toContain('isReduceMotionEnabled');
+    expect(renderer).toContain("'reduceMotionChanged'");
+  });
+
+  it('stops every animation and timer it starts', () => {
+    expect(renderer).toContain('animation.stop()');
+    expect(renderer).toContain('clearTimeout(timer)');
+  });
+
+  it('pauses while the app is in the background', () => {
+    expect(renderer).toContain('AppState.addEventListener');
+  });
+
+  it('never listens to a value per frame, which would mean a render per frame', () => {
+    expect(renderer).not.toMatch(/\.addListener\(/);
+  });
+
+  it('is the only file that knows the owl is made of pictures', () => {
+    const others = [...tsxUnder('app'), ...tsxUnder(join('src', 'ui'))].filter(
+      (f) => !f.endsWith('nomi-character.tsx'),
+    );
+    for (const file of others) {
+      expect(readFileSync(file, 'utf8'), file).not.toMatch(/nomi-(body|wing|eyes)/);
+    }
+  });
+});
+
+describe("Nomi's screen describes the present", () => {
+  const screen = read('app', 'nomi.tsx');
+
+  it('makes no promises in the future tense', () => {
+    // It was a roadmap — "Nomi will become…", "Soon Nomi will also know…" —
+    // and a screen describing a product that does not exist yet reads as a
+    // product that does not work.
+    //
+    // BOTH files. The screen's opening line is drawn by NomiHero in
+    // src/ui/nomi.tsx, and the first version of this guard read only the
+    // route file — a mutation putting "will become" back into the hero
+    // sailed straight past it.
+    for (const source of [screen, read('src', 'ui', 'nomi.tsx')]) {
+      expect(code(source)).not.toMatch(/\bwill become\b|\bSoon\b|\bwill also\b/);
+    }
+  });
+
+  it('bounds how long the goodbye can hold up leaving', () => {
+    // The back control awaits the wave. A promise that only the animation can
+    // resolve is a way out that can stop working.
+    expect(code(screen)).toMatch(/setTimeout\(resolve, GOODBYE_CEILING_MS\)/);
+    expect(screen).toMatch(/GOODBYE_CEILING_MS = \d{3};/);
+  });
+
+  it('states the daily allowance from the constant, not a copy of it', () => {
+    expect(code(screen)).toContain('{DAILY_MESSAGE_LIMIT}');
+  });
+});
+
+describe('each screen gives its weight to the thing you came to do', () => {
+  it('Home gives Continue the filled button, and + New set a compact one', () => {
+    // "+ New set" was the only filled button on the screen you open every day,
+    // outweighing Continue — the daily action (NOTES §35).
+    const home = code(read('app', '(tabs)', 'index.tsx'));
+    expect(home).toContain('action={<PillButton label="+ New set"');
+    expect(home).toMatch(/<Card>\s*<Label>Continue where you left off<\/Label>[\s\S]*?<Button/);
+  });
+
+  it('the set screen offers its three modes as peers, not as one button and two lesser ones', () => {
+    const set = code(read('app', 'set', '[id]', 'index.tsx'));
+    expect(set).toContain('<OptionList');
+    expect(set).not.toMatch(/label="Quiz"\s+variant="outline"/);
+    for (const route of ['/flashcards`', '/quiz`', '/blanks`']) expect(set).toContain(route);
+  });
+});
+
 describe('the tab layout bounds its content area', () => {
   /**
    * A phone-only scroll bug that nothing in this suite could have caught.
@@ -427,5 +553,23 @@ describe('the tab layout bounds its content area', () => {
     // as a superstition.
     const slot = /<TabSlot([^/]*)\/>/.exec(layout)?.[1] ?? '';
     expect(slot).not.toMatch(/minHeight/);
+  });
+});
+
+describe('only the one-card screens are centred', () => {
+  /**
+   * Measured at 393x852 before the change: sign-in left 65% of the phone empty
+   * under its single card, not-found 68%. Centring is for exactly that shape of
+   * screen and no other (NOTES §35).
+   */
+  it('sign-in and not-found centre their single card', () => {
+    expect(read('app', 'sign-in.tsx')).toContain('<Screen centered>');
+    expect(read('app', '+not-found.tsx')).toContain('<Screen centered>');
+  });
+
+  it('no tab screen is centred — a list starts at the top, and TabSlot bounds the scroll', () => {
+    for (const file of tsxUnder(join('app', '(tabs)'))) {
+      expect(code(readFileSync(file, 'utf8')), file).not.toContain('<Screen centered');
+    }
   });
 });

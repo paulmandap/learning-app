@@ -18,9 +18,9 @@
  * building test PDFs. An image library would be a large addition for one
  * command that runs about twice in the life of the project.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
+import { openCanvasPage } from './chrome-canvas';
 
 const STAGES = 5;
 
@@ -76,17 +76,6 @@ const MAX_FRAME_PX = 280;
  */
 const FRAME_QUALITY = 0.92;
 
-const CHROME_CANDIDATES = [
-  process.env.CHROME_PATH,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  `${process.env.LOCALAPPDATA}/Google/Chrome/Application/chrome.exe`,
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-].filter((p): p is string => typeof p === 'string');
-
 const SHEET_EXTENSIONS = ['png', 'jpg', 'jpeg', 'jfif', 'webp'];
 
 /**
@@ -138,68 +127,15 @@ function findSheets(explicit?: string, explicitName?: string): { path: string; n
 async function main() {
   const sheets = findSheets(process.argv[2], process.argv[3]);
 
-  const chrome: ChildProcess = spawn(
-    CHROME_CANDIDATES.find((p) => existsSync(p)) ?? 'chrome',
-    [
-      '--headless=new',
-      '--disable-gpu',
-      '--no-first-run',
-      '--remote-debugging-port=0',
-      `--user-data-dir=${join(process.env.TEMP ?? '/tmp', `cdp-pet-${Date.now()}`)}`,
-      'about:blank',
-    ],
-  );
-
-  const wsUrl = await new Promise<string>((resolve, reject) => {
-    let buffered = '';
-    const timer = setTimeout(() => reject(new Error('Chrome never reported a debug port')), 20_000);
-    chrome.stderr?.on('data', (chunk: Buffer) => {
-      buffered += chunk.toString();
-      const match = buffered.match(/ws:\/\/\S+/);
-      if (match) {
-        clearTimeout(timer);
-        resolve(match[0]);
-      }
-    });
-  });
-
-  const ws = new WebSocket(wsUrl);
-  await new Promise((resolve) => (ws.onopen = resolve));
-
-  let nextId = 1;
-  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
-  ws.onmessage = (event: MessageEvent) => {
-    const msg = JSON.parse(String(event.data));
-    if (msg.id && pending.has(msg.id)) {
-      const { resolve, reject } = pending.get(msg.id)!;
-      pending.delete(msg.id);
-      if (msg.error) reject(new Error(JSON.stringify(msg.error)));
-      else resolve(msg.result);
-    }
-  };
-  const raw = (method: string, params: unknown = {}, sessionId?: string) =>
-    new Promise<Record<string, unknown>>((resolve, reject) => {
-      const id = nextId++;
-      pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      ws.send(JSON.stringify({ id, method, params, sessionId }));
-    });
-
-  const { targetId } = (await raw('Target.createTarget', { url: 'about:blank' })) as {
-    targetId: string;
-  };
-  const { sessionId } = (await raw('Target.attachToTarget', { targetId, flatten: true })) as {
-    sessionId: string;
-  };
+  const page = await openCanvasPage('pet');
 
   for (const sheet of sheets) {
     const mime = mimeOf(sheet.path);
     const dataUri = `data:${mime};base64,${readFileSync(sheet.path).toString('base64')}`;
     console.log(`\n${sheet.path} (${mime}) -> ${sheet.name}-1..${STAGES}.webp`);
 
-    const { result } = (await raw(
-      'Runtime.evaluate',
-      {
-        expression: `(async () => {
+    const frames = await page.evaluate<{ png?: string; w?: number; h?: number; error?: string }[]>(
+      `(async () => {
         const img = new Image();
         img.src = ${JSON.stringify(dataUri)};
         await img.decode();
@@ -315,13 +251,9 @@ async function main() {
         }
         return out;
       })()`,
-        awaitPromise: true,
-        returnByValue: true,
-      },
-      sessionId,
-    )) as { result: { value: { png?: string; w?: number; h?: number; error?: string }[] } };
+    );
 
-    for (const [i, stage] of result.value.entries()) {
+    for (const [i, stage] of frames.entries()) {
       if (stage.error) throw new Error(`${sheet.path}: ${stage.error}`);
       const file = join('assets', `${sheet.name}-${i + 1}.webp`);
       writeFileSync(file, Buffer.from(stage.png!.split(',')[1]!, 'base64'));
@@ -329,7 +261,7 @@ async function main() {
     }
   }
 
-  chrome.kill();
+  page.close();
   process.exit(0);
 }
 

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Modal, Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { useNavigation, useRouter } from 'expo-router';
 import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
+import { GLYPH } from './glyphs';
 
 /**
  * Where the content column's left edge sits, in px from the window edge.
@@ -80,8 +81,7 @@ export function OverflowMenu({ items, accessibilityLabel = 'More actions' }: {
           marginRight: gutter,
         }}
       >
-        {/* U+22EF. Renders as text everywhere, unlike an emoji ellipsis. */}
-        <Text style={{ color: t.accent, fontSize: 24, lineHeight: 28 }}>⋯</Text>
+        <Text style={{ color: t.accent, fontSize: 24, lineHeight: 28 }}>{GLYPH.more}</Text>
       </Pressable>
 
       <Modal
@@ -164,7 +164,19 @@ export function OverflowMenu({ items, accessibilityLabel = 'More actions' }: {
  * rather than rendering nothing, which is the difference between a tidy header
  * and a dead end.
  */
-export function HeaderBackButton({ label = 'Back' }: { label?: string }) {
+export function HeaderBackButton({
+  label = 'Back',
+  onBeforeLeave,
+}: {
+  label?: string;
+  /**
+   * Awaited before navigating. Nomi's screen uses it to wave goodbye; the
+   * caller is responsible for keeping it short and for it always settling,
+   * because a back button that waits on something that never finishes is a
+   * dead end with extra steps.
+   */
+  onBeforeLeave?: () => Promise<void>;
+}) {
   const t = useTheme();
   const router = useRouter();
   const navigation = useNavigation();
@@ -174,7 +186,8 @@ export function HeaderBackButton({ label = 'Back' }: { label?: string }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      onPress={() => {
+      onPress={async () => {
+        if (onBeforeLeave) await onBeforeLeave();
         if (navigation.canGoBack()) router.back();
         else router.replace('/');
       }}
@@ -191,8 +204,8 @@ export function HeaderBackButton({ label = 'Back' }: { label?: string }) {
         marginLeft: gutter,
       }}
     >
-      {/* U+2039, sized to read as a chevron rather than a stray character. */}
-      <Text style={{ color: t.accent, fontSize: 32, lineHeight: 36, marginTop: -4 }}>‹</Text>
+      {/* Sized to read as a chevron rather than a stray character. */}
+      <Text style={{ color: t.accent, fontSize: 32, lineHeight: 36, marginTop: -4 }}>{GLYPH.back}</Text>
     </Pressable>
   );
 }

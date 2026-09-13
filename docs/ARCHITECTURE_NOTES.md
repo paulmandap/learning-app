@@ -4525,6 +4525,237 @@ before this was declined.
 backup, plaintext deleted · no production code changed.
 
 
+## 35. The UI audit, carried through — palette, hierarchy, Nomi (2026-09-12 → 13)
+
+An audit of every screen, measured rather than eyeballed, found one control
+covered by another, four screens that said their own name twice, three copies
+of the same picker already drifting, and a companion whose two ways in were
+indistinguishable. This section is what was changed, what was measured, and
+what was deliberately left alone.
+
+The direction was agreed before any code: **a calm study instrument**, the
+teal/amber palette **behind a gate**, **one column on desktop**, **Nomi guides
+and the pet celebrates**, and the owl **built from layered parts**.
+
+### 35.1 The palette ships behind a gate
+
+§14.1 is the reason: a re-colour once shipped a chart segment at 1.27:1 that
+was there and could not be seen. So the new palette went in only after
+`scripts/palette-check.ts` passed it, reading the SHIPPED values from
+`src/core/palette.ts` (kept free of react-native for exactly that), with the
+maths in `src/core/color.ts` under 19 anchored tests.
+
+Thresholds: **≥4.5:1** for text, **≥3:1** for fills, **ΔE ≥ 16** between chart
+fills under deuteranopia and protanopia simulation. Both modes pass. The
+closest margins, which are where a future tweak will break first:
+
+```
+                                   light      dark     floor
+textMuted on card                  5.99:1    7.00:1    4.5
+chart.tricky on card               4.30:1    9.41:1    3
+chart.neutral on card              3.27:1    4.05:1    3
+border on bg (hairline)            1.27:1    2.35:1    1.25 by design
+known/neutral, deuteranopia        27.6 ΔE   16.3 ΔE   16      <- tightest pair
+known/tricky, protanopia           20.2 ΔE   18.4 ΔE   16
+```
+
+**Not yet seen populated:** the test account has no answered history, so
+Progress renders its empty state and the chart fills have been validated as
+numbers but never photographed as bars.
+
+### 35.2 Tokens, and the two P0 defects
+
+- **The ✦ covered "Test connection".** `Screen` padded its bottom by 48 while
+  the button takes its own 56 plus a gap. `FLOAT_CLEARANCE` is now derived from
+  `FLOAT_SIZE`, so the padding cannot drift from the thing it avoids.
+  `TAB_BAR_HEIGHT` moved into `theme.ts`; `assistant.tsx` had been rebuilding
+  it from a layout it does not own.
+- **Elevation is written down**: flat with hairlines, and exactly one floating
+  layer, `elevation.float`.
+- **"Quiz" appeared twice** — stack title and body heading. `title: ''` on new,
+  flashcards, quiz and blanks, the fix `set/[id]` already used.
+- **`Notice` gained an `info` tone**, and the Settings privacy note now wears
+  it. It is information, not an alarm, and three paragraphs of warning amber as
+  the first thing on the screen outshouted the real warnings below. Re-toned
+  only: D13's wording is untouched and still pinned.
+
+### 35.3 One of each: the picker, the empty sentence, waiting, symbols
+
+- **`LevelSegment`** replaces three hand-rolled pickers. The §23.2 count guards
+  failed when the counts moved into the shared control, correctly; they were
+  **repointed, not deleted** — each screen hands over its counts, the control
+  draws them. The first version shipped labels truncated to "Remem…" because
+  an old row wrapper content-sized it. **Caught by a screenshot while typecheck
+  and all 638 tests were green.**
+- **Seven empty-state strings became one** (`emptyLevelCopy`), including three
+  phrasings of the same sentence about the retry pile.
+- **`LoadingState` had been added and never adopted.** All eight bare
+  "Loading…" now use it, and a guard fails a screen that writes one by hand.
+- **Symbols live in `src/ui/glyphs.tsx`.** Seven were typed inline across six
+  files. A guard strips comments and fails any screen that types one directly.
+- **The tab icons are drawn, not typed.** ✎ ❏ ◕ ⚙︎ come from four corners of
+  Unicode, so the font drew them at four unrelated weights, and each device
+  falls back to its own font — the gear is an emoji on some. Four Views
+  compositions share one 22pt box and one 1.75pt stroke, and look the same on an
+  iPhone as in the harness.
+
+### 35.4 Hierarchy: the daily action gets the weight
+
+**Home** gave its only filled button to "+ New set" while "Continue" — the
+reason to open the tab — was a bordered card that was tappable without looking
+it. Continue now carries the screen's one primary button ("Retry what you
+missed" when there is a missed pile, straight to it), and "+ New set" is a
+compact `PillButton` beside the "Your sets" label. With nothing to continue, a
+new account gets the primary "+ New set" back. What Continue points at is
+unchanged: §23.1's "where you left off", which §34 declined to replace.
+
+**Set detail** stacked Flashcards (filled) over Quiz and Fill in the blanks
+(outlined), which ranked three ways of studying the same cards and let none of
+them say what it is. They are now an `OptionList` of peers, each with one line
+on what it is like, and a due chip on Flashcards because that deck deals due
+cards first.
+
+New primitives: `Label`, `PillButton`, `SectionRow`, `OptionList`,
+`Body strong`. Guards pin both hierarchies.
+
+### 35.5 Nomi: an owl cut into parts
+
+**The art.** The reference sheet draws eight poses as eight illustrations, and
+they do not line up — a different size and position in every cell — so
+cross-fading between them ghosts, for the same reason the pet's stages had to
+come from one image (§17.5). Instead `scripts/make-nomi-assets.ts` cuts the
+canonical pose into **four same-size layers**: body, two wings that rotate at
+the shoulder, and the irises, which squash to blink and shift to look. 26 KB
+in all. It shares its Chrome plumbing with the pet cutter through
+`scripts/chrome-canvas.ts`; after that refactor the pet cutter's fifteen frames
+came out **byte-identical**.
+
+**The hard part is behind a wing**, where flat art has no body. Two facts make
+it fillable: the owl is one egg whose edge shows above and below each wing, and
+under the wing the body is nearly one colour (sampled: body 166,108,71, wing
+150,96,61). So the silhouette is an ellipse fitted to both sides at once, and
+each row is filled with the body colour just inside the wing's inner edge.
+
+**Four things were wrong on the way, and each is kept in the script:**
+
+1. **A quadratic per side, fitted mostly to the head**, curved the body inward
+   below the shoulder, and the owl under its wings came out as a box.
+2. **The first ellipse fit was degenerate.** `dx²·P + y²·Q + y·S + T = 1` has
+   the trivial solution T = 1, which fits every row and describes nothing. It
+   returned NaN for every row — and **NaN fails every comparison, so the at-rest
+   check passed over the pixels it silently skipped.** The script now throws on
+   any non-finite value, and fits `dx² = a0 + a1·y + a2·y²` (worst residual
+   5.8px).
+3. **Blending at the polygon's antialiased edge** mixed the wing's dark inner
+   shadow into the fill. Those pixels are now split exactly — the wing takes
+   whatever colour makes it composite back to the original. Pixels more than 8
+   off at rest, per run: **57 → 47 → 23 → 0**; worst channel **63.5 → 2.5**.
+4. **Hand-measured irises** were a pixel or so out and left a faint brown
+   circle on the face behind each eye. The script now measures them from the
+   pixels.
+
+The rig — pivots and the eye line — is **generated into `src/ui/nomi-rig.ts` in
+the same run**, so the numbers can never describe a different cut. The
+reference images live in `design-reference/`, gitignored: reference material,
+not app assets.
+
+**The motion** is pure data in `src/core/nomi-motion.ts`: eight states, each a
+set of keyframe tracks over channels that do not know the size (offsets are
+fractions of height). 24 tests; **4 of 4 mutations caught**. The renderer,
+`src/ui/nomi-character.tsx`, is the only file that knows the owl is pictures:
+transform and opacity only, native driver off on the web as `flashcard.tsx`
+does, stopped on unmount, when its screen is not focused and while the app is
+backgrounded, and reduced motion honoured live.
+
+**The wave goes to 135°, not the planned 12°.** Twelve degrees is about four
+pixels at the size the screen draws. Rendered from the layers at 60°, the wing
+stuck out sideways and read as pointing; at 140° it sits up beside the head,
+which is what the sheet's own greeting draws.
+
+**Two surfaces, differentiated by role.** Both used to wear ✦. The heading
+pill now shows the owl and the name, and goes to Nomi's screen; the ✦ stays on
+the floating button, because it is an action — ask — and the owl appears inside
+the panel it opens: a hello, thinking while the answer is on its way, a small
+settle as it lands, and reading rather than idling on a card. Pure
+presentation; nothing about what is asked or sent changed. The ✦ guard **moved
+rather than weakened**: same owl in both, ✦ still drawn.
+
+**Nomi guides, the pet celebrates.** `encouraging` and `success` are built and
+unused; a guard fails any screen that asks for them.
+
+**`/nomi` describes the present.** It was a roadmap in the future tense. It
+now says how to ask, what Nomi reads, what it does not do, and states the daily
+allowance from `DAILY_MESSAGE_LIMIT` rather than a copy. Still no queries.
+Leaving waits for a goodbye wave through `HeaderBackButton`'s new
+`onBeforeLeave`, **with an 800ms ceiling** so the way out cannot depend on an
+animation reporting back.
+
+**Verified in the running app** (393×852, dark, headless Chrome, sampling the
+live transforms):
+
+```
+reduce-motion off   greeting wing peaks 135° at ~560ms, back to 0 by ~1.2s
+                    a blink closed the eyes (scaleY 0.1) 5.4s in
+                    goodbye wing 125°, left /nomi after 581ms
+reduce-motion on    no wing, no blink; faded and left after 573ms
+console             0 warnings in either
+```
+
+### 35.6 The vertical void and the desktop measure, measured
+
+Empty share of the usable screen below the content, 393×852, dark:
+
+```
+sign-in        65%      not-found     68%
+notes (empty)  71%      progress (empty) 46%
+home (2 sets)  42%      set detail    37%
+```
+
+**Sign-in and not-found are centred** (`<Screen centered>`): each is one card,
+and a lone card over a dark void reads as a page that has not finished loading —
+on sign-in, the first screen anyone sees. The email field lands around 435pt,
+above where an iPhone keyboard begins. **Content screens stay top-anchored**:
+a list starts where the eye looks for its first item, the space under a short
+list fills with use, and centring inside the tabs would fight the bounded
+scroll area §33 depends on. A guard pins both halves.
+
+**Desktop measure: declined.** At 1100px the longest lines run **78–79
+characters** (Nomi, Settings); phones peak at 49. That is a few past the usual
+75 ceiling, and the only fix is narrowing paragraph text inside the 560 column,
+which leaves every card ragged on the right. If it is ever wanted, the lever is a
+text `maxWidth` — **never `CONTENT_MAX_WIDTH`**, which was raised to 720 once
+and reverted because full-width buttons became banners (see `theme.ts`).
+
+### 35.7 Three instruments that were wrong before they were right
+
+1. **The at-rest check passed on NaN** — §35.5, item 2.
+2. **`--eval` through `npx` printed `undefined`.** On Windows `npx` is a `.cmd`
+   shim, and cmd.exe treats the `>` in `=>` as a redirect, so every arrow
+   function arrived cut. A bare `innerWidth` worked, which is what gave it
+   away. Measurements now import `openPage` in a small script instead.
+3. **The animation probe twice reported a still owl.** Its sampling regex was
+   in a template literal, where `\(` and `\d` lose their backslashes, so it
+   matched nothing. Reduced motion was suspected first and ruled out by
+   measurement — headless Chrome reports `no-preference` by default — but
+   `openPage({ reducedMotion })` was added anyway, because an animation
+   result should state the motion setting it was taken under.
+
+### 35.8 What is not done
+
+- **The 32 off-scale type values** (13, 15, 14, 17, 24… passed as raw numbers)
+  were found by the audit and never scheduled. They remain.
+- **Not deployed.** Everything here is verified locally against `dist/`.
+- **Not seen on an iPhone.** The owl's motion, the drawn tab icons and the
+  centred sign-in were checked in headless Chrome only.
+
+**Verified:** typecheck clean · **677 tests**, 3 skipped (+58 since §33) · every
+new guard mutation-tested, the source restored each time · `expo export` · boot
+5/5 · `scroll-probe --height 420`: all four tabs · `palette-check`: both modes
+pass · screenshots at 393 dark of Home, Set detail, Nomi, the open panel,
+Progress, Settings, Notes, Quiz, Blanks, New, sign-in and not-found, Home at 393
+light, Home and Set detail at 1100 dark.
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

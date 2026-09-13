@@ -16,6 +16,9 @@ import { fetchProfile } from '../data/profile';
 import { askAssistant } from '../data/assistant';
 import { useAssistantContext } from '../data/assistant-context';
 import { describeRemaining, isAskable, MAX_QUESTION_CHARS } from '../core/chat';
+import type { NomiState } from '../core/nomi-motion';
+import { NomiCharacter } from './nomi-character';
+import { GLYPH } from './glyphs';
 
 /**
  * The study assistant (Phase 9c, D14) — this is Nomi.
@@ -66,20 +69,6 @@ const CLOSED_SIZE = 52;
 const PANEL_WIDTH = 380;
 /** Below this the panel goes nearly full width, as a sheet. */
 const NARROW_MAX_WIDTH = 520;
-
-/**
- * Height of the bottom tab bar, cleared so the button does not sit on it.
- *
- * The assistant is mounted once above the navigator, so it floats over screens
- * that have a tab bar and screens that do not. Without this it landed squarely
- * on top of the Settings tab — visible the moment the screen was screenshotted,
- * and invisible to typecheck and 398 tests.
- *
- * Matches app/(tabs)/_layout.tsx: space.xs of top padding plus a 44px minimum
- * touch target. The safe-area inset is added separately by both, so it is not
- * counted twice.
- */
-
 
 /** Sidebar layouts put navigation on the left, so nothing to clear at the bottom. */
 const SIDEBAR_MIN_WIDTH = 800;
@@ -180,12 +169,20 @@ export function StudyAssistant() {
           elevation: 5,
         }}
       >
-        <Text style={{ fontSize: 22, color: t.accentText }}>✦</Text>
+        <Text style={{ fontSize: 22, color: t.accentText }}>{GLYPH.nomi}</Text>
       </Pressable>
     );
   }
 
   // --------------------------------------------------------------- open --
+  //
+  // Nomi, in the panel's heading, doing what the panel is doing: a hello as it
+  // opens, thinking while the answer is on its way, a small "here it is" when
+  // it lands. On a card it settles into reading rather than idling, so an
+  // answer does not look like it woke the owl up. Pure presentation — nothing
+  // about what is asked, sent or shown depends on it.
+  const rest: NomiState = context.kind === 'card' ? 'studying' : 'idle';
+  const nomiState: NomiState = busy ? 'thinking' : answer ? 'explaining' : note ? rest : 'greeting';
   //
   // A dimmed overlay, not a card sitting in the page. The owner, on an iPhone:
   // "when I click on chatbot it's kinda hard to focus, there's too much
@@ -254,7 +251,8 @@ export function StudyAssistant() {
           elevation: 8,
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <NomiCharacter state={nomiState} settle={rest} size={40} />
           <Text style={{ flex: 1, fontSize: 16, fontWeight: '700', color: t.text }}>
             Ask Nomi
           </Text>
@@ -264,7 +262,7 @@ export function StudyAssistant() {
             onPress={() => setOpen(false)}
             hitSlop={10}
           >
-            <Text style={{ fontSize: 20, color: t.textMuted }}>✕</Text>
+            <Text style={{ fontSize: 20, color: t.textMuted }}>{GLYPH.close}</Text>
           </Pressable>
         </View>
 
