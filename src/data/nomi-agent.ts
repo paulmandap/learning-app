@@ -1,7 +1,8 @@
 import { faceValue } from '../core/avatar';
 import { doneLine, type NomiAction } from '../core/nomi-actions';
-import { createNote, saveNote } from './notes';
+import { createNote, linkNoteToSet, saveNote } from './notes';
 import { saveAvatar, saveDisplayName, savePetChoice } from './profile';
+import { writeReviewer } from './reviewer';
 import { updateSet } from './sets';
 import { startSet } from './start-set';
 
@@ -48,6 +49,24 @@ export async function carryOut(action: NomiAction, input: { apiKey: string }): P
         apiKey: input.apiKey,
       });
       return { text: doneLine(action), openSetId: setId };
+    }
+    case 'write_reviewer': {
+      if (!input.apiKey) throw new NeedsKeyError();
+      // Written before anything is saved: if Gemini cannot write it, there is
+      // no empty note and no set with nothing to make cards from.
+      const body = await writeReviewer({ topic: action.topic, count: action.count, apiKey: input.apiKey });
+      // In Notes as well as in the set: these facts are Gemini's, not the
+      // student's, and Notes is where they can read them and put them right.
+      const note = await createNote();
+      await saveNote({ id: note.id, title: action.title, body });
+      const { setId } = await startSet({
+        title: action.title,
+        source: { text: body },
+        count: action.count,
+        apiKey: input.apiKey,
+      });
+      await linkNoteToSet(note.id, setId);
+      return { text: doneLine(action), openSetId: setId, openNoteId: note.id };
     }
     case 'rename_set':
       await updateSet(action.setId, { title: action.to });

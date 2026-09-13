@@ -17,6 +17,7 @@ import {
 } from '../core/coverage';
 import type { TierBudget } from '../core/planner';
 import type { AssistantContext } from '../core/chat';
+import { askLine, type NomiAction } from '../core/nomi-actions';
 
 export const READ_SYSTEM_PROMPT = `You extract text from study notes, page by page.
 
@@ -392,6 +393,40 @@ export function buildRubricCheckPrompt(input: {
 }
 
 /**
+ * A reviewer on a topic the student named, for Nomi to make cards from (NOTES
+ * §39). The owner: *"i want nomi to be the one to do it, not me handing things."*
+ *
+ * These facts are the model's, so the rules are about keeping them sure rather
+ * than many. The format is what the rest of the app already reads: "# "
+ * headings, which reading a paste turns into sections, and one fact per "- "
+ * line, which the planner counts as a card's worth each. `checkReviewer` in
+ * `src/core/reviewer.ts` is the check behind the shape and the length.
+ */
+export function buildReviewerPrompt(input: { topic: string; facts: number }): string {
+  return [
+    'A student asked for a reviewer — study notes they will learn from and be quizzed on — about this topic:',
+    input.topic,
+    '',
+    `Write about ${input.facts} facts, grouped under 3 to 8 short headings.`,
+    '',
+    'Format, as plain text in "notes":',
+    '- Each heading on a line of its own, starting with "# ".',
+    '- Under each heading, one fact per line, starting with "- ".',
+    '- Each fact is one complete sentence that makes sense on its own: a term and what it means, a part',
+    '  and what it does, a cause and its effect, a name and why it matters, a step and what it is for.',
+    '- No introduction, no conclusion, no bold, no tables, no numbering.',
+    '',
+    'Rules:',
+    '1. Cover what a class on this topic would teach and test, from the basics up.',
+    '2. Only well-established facts you are sure of. Leave out a date, number or name you are not sure of',
+    '   rather than guess.',
+    '3. Every fact different. Never the same fact twice in other words.',
+    '4. Write in the language the topic is written in.',
+    '5. If the topic could mean more than one thing, take the meaning a student is most likely studying.',
+  ].join('\n');
+}
+
+/**
  * Nomi's system instruction (Phase 9c, D14 — reversed by the owner, NOTES §36).
  *
  * It used to be a one-shot prompt that ended "if the question is not about
@@ -410,7 +445,12 @@ export function buildRubricCheckPrompt(input: {
  * The conversation itself goes in `contents`, turn by turn; this is only the
  * standing instruction, so it is sent as `systemInstruction`.
  */
-export function buildNomiSystemPrompt(input: { brief: string; context: AssistantContext }): string {
+export function buildNomiSystemPrompt(input: {
+  brief: string;
+  context: AssistantContext;
+  /** What the app has offered to do and is waiting on a tap for (NOTES §39). */
+  pending?: NomiAction | null;
+}): string {
   const lines = [
     "You are Nomi, a friendly owl who is the student's study companion inside their flashcard app.",
     "You're chatting with them like a friend in a messenger app.",
@@ -425,16 +465,38 @@ export function buildNomiSystemPrompt(input: { brief: string; context: Assistant
     '   what they missed, their progress — use ONLY the facts below. Never guess or estimate',
     "   a number that is not there. If it isn't in the facts, say you can't see that.",
     '4. Plain language. No headings, no bullet lists, no markdown.',
-    '5. The app itself can do a few things when the student says so plainly, and asks them to confirm:',
-    '   make a study set from notes they paste ("make flashcards from this", then the notes), add pasted',
-    '   notes to a set ("add these to Biology", then the notes), rename a set ("rename Biology to Bio 101"),',
-    '   save text as a note ("save this as a note", then the text), and change their name ("call me Sam"),',
-    '   study pet ("switch my pet to the cat") or picture ("use face 3"). If they ask for one of these in',
-    '   other words, tell them the words to use. Nothing can delete anything, sign them out, or change',
-    '   their key from this chat — say so if asked.',
+    '5. The app itself can do a few things for the student, each only after they tap to confirm: make a',
+    '   study set from notes they paste, add pasted notes to a set ("add these to Biology", then the notes),',
+    '   rename a set ("rename Biology to Bio 101"), save text as a note ("save this as a note", then the',
+    '   text), change their name ("call me Sam"), study pet ("switch my pet to the cat") or picture ("use',
+    '   face 3") — and write a reviewer on any topic and make cards from it. If they ask for one of the',
+    '   others in words the app did not catch, tell them the words to use. Nothing can delete anything,',
+    '   sign them out, or change their key from this chat — say so if asked.',
+    '6. A reviewer on a topic is yours to set going. When they want you to make or write a reviewer,',
+    '   notes, flashcards or a quiz ABOUT A TOPIC and have not pasted notes — in any language, Filipino',
+    '   and Taglish included, or as a follow-up such as "you write the notes" or "ikaw na bahala" — put',
+    '   the topic in "reviewer_topic", in a few words ("computer parts"), and keep "answer" to one short',
+    '   sentence. The app writes the reviewer: never write it in "answer", and never tell them to paste',
+    '   notes for it. Leave "reviewer_topic" out when they only ask a question about a topic.',
     '',
     input.brief,
   ];
+
+  if (input.pending) {
+    const titled = input.pending.kind === 'make_set' || input.pending.kind === 'write_reviewer';
+    lines.push(
+      '',
+      'Waiting on their tap right now, the app offered:',
+      `  ${askLine(input.pending)}`,
+      ...(titled
+        ? [
+            'If they want it called something else, in any words or language, put the title they want in',
+            '"set_title" — the WHOLE title, every word, exactly as they typed it — and keep "answer" short.',
+            'They change the number of cards with the buttons.',
+          ]
+        : []),
+    );
+  }
 
   if (input.context.kind === 'card') {
     lines.push(

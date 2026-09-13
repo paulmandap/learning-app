@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { describe, expect, it, vi } from 'vitest';
 import { sendToNomi } from '../src/data/nomi-chat';
 import { GeminiCallError } from '../src/ai/gemini';
+import type { ChatReply } from '../src/ai/provider';
 import { reasonToMessage } from '../src/core/ai-errors';
 import { EMPTY_SNAPSHOT, type AppSnapshot } from '../src/core/nomi-brain';
 import type { ChatTurn } from '../src/core/chat';
@@ -81,9 +82,19 @@ function fakeDb(replies: Record<string, Reply> = {}): { db: Db; calls: Call[] } 
 
 type ChatInput = { system: string; turns: ChatTurn[] };
 
-/** A provider whose reply the test chooses; records what it was sent. */
-function provider(reply: (input: ChatInput) => Promise<string | null> = async () => 'ok') {
-  return { chat: vi.fn(reply) };
+/**
+ * A provider whose reply the test chooses; records what it was sent. A string
+ * is a plain answer; an object can name a topic or a title as well (NOTES §39).
+ */
+function provider(reply: (input: ChatInput) => Promise<string | Partial<ChatReply> | null> = async () => 'ok') {
+  return {
+    chat: vi.fn(async (input: ChatInput): Promise<ChatReply | null> => {
+      const r = await reply(input);
+      if (r === null) return null;
+      const blank: ChatReply = { answer: '', reviewerTopic: null, setTitle: null };
+      return typeof r === 'string' ? { ...blank, answer: r } : { ...blank, ...r };
+    }),
+  };
 }
 
 /** The model call, run immediately — the real queue paces and retries for tens of seconds. */
@@ -277,5 +288,86 @@ describe('sendToNomi — Nomi offers to act, and never acts on its own (NOTES §
       { db, provider: provider(async () => 'It carries water.'), run: now },
     );
     expect(reply).toMatchObject({ ok: true, source: 'gemini', proposal: null, said: 'what does xylem do?' });
+  });
+});
+
+describe('sendToNomi — a title Nomi missed, and a reviewer Nomi writes (NOTES §39)', () => {
+  const offer = {
+    kind: 'make_set' as const,
+    title: 'nomi gawan mo nga ako reviewer,',
+    notes: 'I drove up north with the windows down in late October.',
+    count: 10,
+    countPicked: true,
+  };
+
+  it("changes the offer on screen from the owner's follow-up, with no model call", async () => {
+    const { db, calls } = fakeDb();
+    const gemini = provider();
+    const reply = await sendToNomi(
+      { ...base, pending: offer, text: 'make the title "All Too Well by Taylor Swift"' },
+      { db, provider: gemini, run: now },
+    );
+    expect(reply).toMatchObject({ ok: true, source: 'brain', proposal: { ...offer, title: 'All Too Well by Taylor Swift' } });
+    expect(gemini.chat).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.target === 'rpc/claim_chat_message')).toBe(false);
+  });
+
+  it('offers to write the reviewer the owner asked for, instead of asking for notes', async () => {
+    const { db } = fakeDb();
+    const gemini = provider();
+    const reply = await sendToNomi(
+      { ...base, text: 'pwede mo ba ako gawan ng reviewer about computer parts?' },
+      { db, provider: gemini, run: now },
+    );
+    expect(reply).toMatchObject({ ok: true, source: 'brain', proposal: { kind: 'write_reviewer', topic: 'computer parts', count: 20 } });
+    expect(gemini.chat).not.toHaveBeenCalled();
+  });
+
+  it('takes a topic Gemini read from a follow-up the patterns missed, and says the offer in its own words', async () => {
+    const { db } = fakeDb({ 'POST rpc/claim_chat_message': { value: 50 } });
+    const history: ChatTurn[] = [
+      { role: 'user', text: 'can you help me study computer parts?' },
+      { role: 'nomi', text: 'Sure! Just paste your notes here.' },
+    ];
+    const gemini = provider(async () => ({ answer: "Okay, I'll write it!", reviewerTopic: 'computer parts' }));
+
+    const reply = await sendToNomi({ ...base, history, text: 'ikaw na bahala sa notes pls' }, { db, provider: gemini, run: now });
+
+    expect(reply).toMatchObject({
+      ok: true,
+      source: 'gemini',
+      proposal: { kind: 'write_reviewer', topic: 'computer parts', title: 'Computer Parts' },
+    });
+    expect(reply.ok && reply.text).toMatch(/^Want me to write a reviewer on computer parts/);
+    expect(gemini.chat.mock.calls[0]![0].system).toContain('reviewer_topic');
+  });
+
+  it('takes a title Gemini read for the offer on screen, and ignores one when nothing is waiting', async () => {
+    const { db } = fakeDb({ 'POST rpc/claim_chat_message': { value: 50 } });
+    const gemini = provider(async () => ({ answer: 'Sige!', setTitle: 'All Too Well by Taylor Swift' }));
+
+    const renamed = await sendToNomi(
+      { ...base, pending: offer, text: 'pangalanan itong All Too Well by Taylor Swift' },
+      { db, provider: gemini, run: now },
+    );
+    expect(renamed).toMatchObject({
+      ok: true,
+      proposal: { ...offer, title: 'All Too Well by Taylor Swift' },
+      text: `Okay, I'll call it "All Too Well by Taylor Swift".`,
+    });
+    expect(gemini.chat.mock.calls[0]![0].system).toContain('Waiting on their tap');
+
+    const alone = await sendToNomi(
+      { ...base, text: 'pangalanan itong All Too Well by Taylor Swift' },
+      { db, provider: gemini, run: now },
+    );
+    expect(alone).toMatchObject({ ok: true, proposal: null, text: 'Sige!' });
+  });
+
+  it("keeps Gemini's own answer when what it named does not pass the checks", async () => {
+    const { db } = fakeDb({ 'POST rpc/claim_chat_message': { value: 50 } });
+    const gemini = provider(async () => ({ answer: 'Paste them here and I can help.', reviewerTopic: 'these notes' }));
+    const reply = await sendToNomi({ ...base, text: 'can you help with my notes' }, { db, provider: gemini, run: now });
+    expect(reply).toMatchObject({ ok: true, proposal: null, text: 'Paste them here and I can help.' });
   });
 });

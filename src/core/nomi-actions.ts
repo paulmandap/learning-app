@@ -1,5 +1,5 @@
 /**
- * What Nomi can do in the app, not just say (NOTES §37).
+ * What Nomi can do in the app, not just say (NOTES §37, §39).
  *
  * Pure. A message and what Nomi knows go in; a proposed action — or nothing —
  * comes out. Nothing here writes anything: `src/data/nomi-agent.ts` carries an
@@ -14,7 +14,8 @@
  * *"give Nomi write access to the app but don't give to critical writes such as
  * deleting user's account or signing out."* Asked whether Nomi should act at
  * once or check first, he chose one tap to confirm; asked which writes, all four
- * that were offered.
+ * that were offered. Then, of a topic with no notes: *"i want nomi to be the one
+ * to do it, not me handing things"* — so Nomi can write the reviewer too.
  *
  * ## The allow-list is the type
  *
@@ -23,20 +24,25 @@
  * and the executor imports none of the functions that do those things —
  * `tests/screens.test.ts` reads it to make sure.
  *
- * ## Recognised here, not by the model
+ * ## Recognised here first, and by the model only where these miss
  *
  * Like the brain's questions, each request is matched by narrow patterns: free,
  * instant and testable, with near-misses in the tests that must NOT become an
- * action ("call me later", "is a cat a pet?", "explain this: …"). Words these
- * miss go to Gemini as ordinary chat, and Nomi's instruction tells it to say the
- * words that work. A write the model proposed would need these same checks,
- * after a call that spends the daily allowance.
+ * action ("call me later", "is a cat a pet?", "explain this: …", "quiz me on …").
+ *
+ * The owner types Taglish, and the patterns missed him twice running (NOTES
+ * §38, §39). So when a message they miss goes to Gemini anyway, the reply may
+ * name two things — a topic to write a reviewer on, and a new title for the
+ * offer on screen — and `proposeReviewer` and `retitle` put those through the
+ * same checks a typed request gets. The model names a topic or a title; it
+ * never proposes a write of its own, and nothing is written without the tap.
  */
 
 import { supportedFor } from './planner';
 import { normalize, splitSentences, wordCount } from './text';
 import { FACE_COUNT } from './avatar';
 import { MAX_QUESTION_CHARS } from './chat';
+import { TOPIC_CARD_COUNT, topicTitle } from './reviewer';
 import type { PetSpecies } from './pet';
 import type { AppSnapshot, BrainSet } from './nomi-brain';
 
@@ -49,9 +55,13 @@ export const MAX_CARDS = 60;
 /** Below this many words, a message is a message rather than notes. */
 export const NOTES_MIN_WORDS = 50;
 
+/** The longest name Nomi gives a set or a note. */
+export const MAX_TITLE_CHARS = 80;
+
 export type NomiAction =
   | { kind: 'make_set'; title: string; notes: string; count: number; countPicked: boolean }
   | { kind: 'add_notes'; setId: string; setTitle: string; notes: string; count: number; countPicked: boolean }
+  | { kind: 'write_reviewer'; topic: string; title: string; count: number; countPicked: boolean }
   | { kind: 'rename_set'; setId: string; from: string; to: string }
   | { kind: 'save_note'; title: string; body: string }
   | { kind: 'set_name'; name: string }
@@ -101,19 +111,31 @@ const NUMBER_WORDS: Readonly<Record<string, number>> = {
   sixty: 60,
 };
 
+const clampCount = (n: number) => Math.max(1, Math.min(MAX_CARDS, n));
+
+function countFromWord(raw: string): number {
+  const word = raw.toLowerCase();
+  return clampCount(/^\d+$/.test(word) ? Number(word) : NUMBER_WORDS[word]!);
+}
+
 /** "make 20 flashcards", "twenty cards" — the number they asked for, or null. */
 export function statedCount(instruction: string): number | null {
   const match = instruction.match(
     /\b(\d{1,3}|five|ten|fifteen|twenty|thirty|forty|fifty|sixty)\s+(?:flash\s*cards?|cards?|questions?|items?)\b/i,
   );
-  if (!match) return null;
-  const raw = match[1]!.toLowerCase();
-  const n = /^\d+$/.test(raw) ? Number(raw) : NUMBER_WORDS[raw]!;
-  return Math.max(1, Math.min(MAX_CARDS, n));
+  return match ? countFromWord(match[1]!) : null;
 }
 
-/** Asks to make cards: a verb, then something cards come in. */
-const MAKE = /\b(?:make|create|turn|generate|build)\b[\s\S]*?\b(?:flash\s*cards?|cards?|quiz(?:zes)?|set|deck)\b/i;
+/**
+ * Asks to make cards: a verb, then something cards come in.
+ *
+ * "reviewer" is what the owner calls a set of study notes, and Filipino's
+ * "gawa" (make) — "gawan", "gumawa" — is a verb here too (NOTES §39). "write"
+ * and "gawa" need a card-ish word, not "set": "Write the set of real numbers
+ * as…" opens a page of maths notes.
+ */
+const MAKE =
+  /\b(?:(?:make|create|turn|generate|build)\b[\s\S]*?\b(?:flash\s*cards?|cards?|quiz(?:zes)?|set|deck|reviewers?)|(?:write|prepare|g(?:um)?awa(?:an|in|n)?|magawa|gagawa|ginawa(?:an)?)\b[\s\S]*?\b(?:flash\s*cards?|cards?|quiz(?:zes)?|reviewers?))\b/i;
 /** "add these to my Biology set". */
 const ADD_TO =
   /\badd\s+(?:this|these|them|it|these notes|this note|the notes)\s+(?:to|into)\s+(?:my\s+|the\s+)?["“']?(.+?)["”']?(?:\s+(?:set|deck))?\s*[:.!]*$/i;
@@ -122,19 +144,78 @@ const SAVE = /\b(?:save|keep|put|store)\b[\s\S]*?\bnotes?\b/i;
 /** A paste that comes with a question about it, which is Gemini's, not an action. */
 const ASK =
   /^(?:(?:can|could) you\s+|please\s+)?(?:explain|summari[sz]e|what does|what do|what is this|tell me about|help me understand|quiz me)\b/i;
+/** "can you …", "please …", "pwede …" — the way a request starts. */
+const REQUESTING =
+  /^(?:(?:can|could|would|will) you|please|pls|i want|i need|i'?d like|help me|nomi|pwede|puwede|sana)\b/i;
+
 /**
- * "…, call it Cell Biology", "title is All Too Well", "title: Bio 3.1".
+ * Where a title starts, in every way the owner has given one.
  *
- * The name ends at punctuation followed by a space or the end, so "Bio 3.1"
- * keeps its decimal. "title is" is the phrasing the owner used and the first
- * version did not know (NOTES §38).
+ * "call it", "titled", "title is", "title:", "the title should be" (NOTES §38);
+ * then "yung title ay" inside a paste and "make the title" as a message of its
+ * own, which the first two versions did not know (NOTES §39). Filipino's "ay"
+ * is "is"; "palitan ang title ng" is "change the title to".
  */
-const NAMED =
-  /\b(?:called|named|titled|(?:call|name|title) it|(?:the\s+)?(?:title|name)\s*(?:is|:|should be|will be))\s*["“']?(.+?)["”']?\s*(?:[.,!?:;](?=\s|$)|$)/i;
+const TITLE_MARKER = new RegExp(
+  [
+    String.raw`\b(?:make|change|set|update|switch|use|palitan|ibahin)\s+(?:(?:the|its|ang|yung)\s+)?(?:set'?s?\s+|reviewer'?s?\s+)?(?:title|name|pamagat|pangalan)\b(?:\s+(?:to|into|as|ng|sa|ay|is)\b)?(?:\s*[:=])?`,
+    String.raw`\b(?:call|name|title|rename|retitle)\s+it\b(?:\s+(?:to|as|into)\b)?(?:\s*[:=])?`,
+    String.raw`\b(?:called|named|titled)\b(?:\s*[:=])?`,
+    String.raw`\b(?:(?:the|its|ang|yung)\s+)?(?:title|name|pamagat|pangalan)\s*(?:(?:is|ay|should be|will be|must be)\b|[:=])`,
+  ].join('|'),
+  'gi',
+);
 /** A sentence that gives a title. */
-const TITLE_GIVEN = /\b(?:called|named|titled|(?:call|name|title) it)\b|\b(?:title|name)\s*(?:is\b|:|should be\b|will be\b)/i;
-/** "can you …", "please …" — the way a request starts. */
-const REQUESTING = /^(?:(?:can|could|would|will) you|please|pls|i want|i need|i'?d like|help me)\b/i;
+const TITLE_GIVEN = new RegExp(TITLE_MARKER.source, 'i');
+/** "my name is Sam" is about the student, not the set. */
+const POSSESSIVE = /\b(?:my|your|his|her|their|our|aking|iyong)\s*$/i;
+
+/**
+ * A title that opens with a quote ends at its closing quote — so
+ * `"All Too Well by Taylor Swift" tapos ito yung contents` is the song's name
+ * and nothing after it. Curly quotes too: an iPhone types them.
+ */
+const QUOTED: Readonly<Record<string, RegExp>> = {
+  '"': /^"([^"“”]+)["”]/,
+  '“': /^“([^"“”]+)["”]/,
+  "'": /^'(.+?)['’](?![\p{L}\p{N}])/u,
+  '‘': /^‘(.+?)['’](?![\p{L}\p{N}])/u,
+};
+
+/**
+ * Where an unquoted title ends: punctuation before a space or the end ("Bio
+ * 3.1" keeps its decimal), the next part of the request ("tapos", "then",
+ * "with 20 cards"), or a "please" at the very end.
+ */
+const TITLE_END =
+  /[.,!?;:](?=\s|$)|\s+(?:tapos|then|and then|and make|at ito|ito ang|ito yung|here are|here is|here's)\b|\s+(?:with|and)\s+\d+\s+(?:flash\s*cards?|cards?|questions?|items?)\b|\s+(?:please|pls|po|thanks|thank you|instead|nomi)\s*[.!]*$/i;
+
+const NOT_A_TITLE = /^(?:a day|later|this|that|it|something|anything|whatever)$/i;
+
+function takeTitle(rest: string): string {
+  const text = rest.trimStart();
+  const quoted = QUOTED[text.charAt(0)]?.exec(text)?.[1];
+  let title: string;
+  if (quoted !== undefined) {
+    title = quoted;
+  } else {
+    const bare = text.replace(/^["“'‘]/, '');
+    const end = TITLE_END.exec(bare);
+    title = (end ? bare.slice(0, end.index) : bare).replace(/["”'’]+$/, '');
+  }
+  return title.replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE_CHARS).trim();
+}
+
+/** The title a request gives — "call it Bio 3.1", `yung title ay "…"` — or null. */
+export function readTitle(text: string): string | null {
+  for (const match of text.matchAll(TITLE_MARKER)) {
+    const at = match.index ?? 0;
+    if (POSSESSIVE.test(text.slice(0, at))) continue;
+    const title = takeTitle(text.slice(at + match[0].length));
+    if (title && !NOT_A_TITLE.test(title)) return title;
+  }
+  return null;
+}
 
 const RENAME =
   /^(?:(?:please|pls|can you|could you)[\s,]+)*(?:rename|change the name of)\s+(?:my\s+|the\s+)?["“']?(.+?)["”']?\s+(?:set\s+|deck\s+)?(?:to|as|into)\s+["“']?(.+?)["”']?\s*[.!]*$/i;
@@ -159,10 +240,11 @@ function isRequestSentence(sentence: string): boolean {
 /**
  * Separate an instruction from the notes it is about.
  *
- * Three shapes, and the third is the one the owner actually typed (NOTES §38):
+ * Three shapes, the third being the one the owner typed in NOTES §38:
  *
  *  - "Turn this into a set: <notes>", or an instruction ending in a colon on a
- *    line of its own;
+ *    line of its own — `nomi gawan mo nga ako reviewer, yung title ay "…" tapos
+ *    ito yung contents: I walked…` is this shape (NOTES §39);
  *  - an instruction on its own first line;
  *  - requests typed straight into the paste, on the same line as the first line
  *    of the notes — "can you make me a notes of this? make 10 flash cards.
@@ -177,8 +259,13 @@ export function splitMessage(message: string): { instruction: string; notes: str
   const text = message.trim();
   const [first = '', ...rest] = text.split(/\r?\n/);
 
-  const colon = first.match(/^([^:]{3,160}):\s*(.*)$/);
-  if (colon && !/\b(?:title|name)\s*$/i.test(colon[1]!) && wordCount(colon[1]!) <= 25 && hasIntent(colon[1]!)) {
+  const colon = first.match(/^([^:]{3,200}):\s*(.*)$/);
+  if (
+    colon &&
+    !/\b(?:title|name|pamagat|pangalan)(?:\s+(?:is|ay))?\s*$/i.test(colon[1]!) &&
+    wordCount(colon[1]!) <= 30 &&
+    hasIntent(colon[1]!)
+  ) {
     const sameLine = colon[2]!.trim();
     return {
       instruction: sameLine ? colon[1]!.trim() : first.trim(),
@@ -211,6 +298,115 @@ export function suggestTitle(notes: string): string {
   const short = words.length <= 8 ? first : words.slice(0, 6).join(' ');
   const clipped = short.length > 60 ? short.slice(0, 60).replace(/\s+\S*$/, '') : short;
   return clipped || 'My notes';
+}
+
+// --- a topic, with no notes: Nomi writes the reviewer (NOTES §39) ----------
+
+/** Verbs that ask for something to be made, English and Filipino. */
+const TOPIC_VERB = String.raw`(?:make|create|generate|build|write|prepare|draft|give|g(?:um)?awa(?:an|in|n)?|magawa|gagawa|ginawa(?:an)?|maghanda|ihanda)`;
+/** Words that may stand between the verb and the thing: "make me 20 …", "gawan mo ba ako ng …". */
+const FILLER_WORDS = ['me', 'us', 'ako', 'akin', 'mo', 'ba', 'nga', 'ng', 'na', 'a', 'an', 'some', 'more', 'new', 'quick', 'short', 'simple', 'good', 'few', 'po', 'please', 'pls', 'study', 'another', 'set', 'of'];
+const FILLER = String.raw`(?:${FILLER_WORDS.join('|')}|\d{1,3}|five|ten|fifteen|twenty|thirty|forty|fifty|sixty)`;
+/** What a reviewer comes as. "note" alone is left out: "write a note about my day" is a note. */
+const MATERIAL = String.raw`(?:reviewers?|flash\s*cards?|cards?|quiz(?:zes)?|(?:study\s+)?notes|study\s+note|set|deck|questions?)`;
+const ABOUT = String.raw`(?:about|on|regarding|covering|tungkol\s+sa|ukol\s+sa|para\s+sa|sa|ng|for|of)`;
+
+/** "make me a reviewer about computer parts", "gawan ako ng reviewer tungkol sa …". */
+const TOPIC_AFTER = new RegExp(
+  String.raw`\b${TOPIC_VERB}(?:\s+${FILLER}){0,6}?\s+${MATERIAL}(?:\s+(?:for\s+me|para\s+(?:sa\s+)?akin|po))?\s+${ABOUT}\s+(.+)$`,
+  'i',
+);
+/** "gawan ako ng computer parts reviewer", "make me biology flashcards". */
+const TOPIC_BEFORE = new RegExp(
+  String.raw`\b${TOPIC_VERB}\s+((?:[\p{L}\p{N}'’-]+\s+){1,8}?)(?:reviewers?|flash\s*cards?)\s*(?:please|pls|po|nomi)?\s*[?.!]*$`,
+  'iu',
+);
+/** "flashcards about the heart" left over from "a set of flashcards about the heart". */
+const MATERIAL_ABOUT = new RegExp(String.raw`^${MATERIAL}\s+${ABOUT}\s+`, 'i');
+/** Where a topic ends and the rest of the request starts. */
+const TOPIC_END = new RegExp(
+  [
+    String.raw`[?.!;:](?=\s|$)`,
+    // A comma ends a topic only where the rest of the request follows it:
+    // "about cells, tissues and organs" is one topic; "about cells, call it
+    // Bio" and "about cells, thanks" are not.
+    String.raw`,\s*(?=(?:call|name|title|make|with|please|pls|po|nomi|thanks|thank you|tapos|then|and\s+(?:call|name|title|make))\b|\d|$)`,
+    String.raw`\s+(?:please|pls|po|nomi|thanks|thank you)\b`,
+    String.raw`\s+(?:with|and|at)\s+\d`,
+    String.raw`\s+(?:tapos|then|and\s+(?:call|name|title|make)|call\s+it|name\s+it|title\s+it|titled|named|called)\b`,
+    String.raw`\s+for\s+(?:my|our|the|an?|tomorrow'?s?)\s+(?:exam|test|quiz|class|finals?|midterms?|quarterly)\b`,
+  ].join('|'),
+  'i',
+);
+/** A question about making cards is not a request for them: "how do I make flashcards about …?" */
+const QUESTION = /^(?:how|what|why|when|where|which|who|whose|is|are|was|were|do|does|did|should|shall|am)\b/i;
+/** Words that point at notes rather than name a topic: "this", "these", "ito". */
+const DEICTIC =
+  /^(?:me|us|you|here|now|later|today|tomorrow|tonight|what i|my notes|the notes)\b|\b(?:this|these|those|them|that|ito|nito|iyan|iyon|dito|ko|akin|aking)\b/i;
+const LEADING_FILLER = new Set(['me', 'us', 'ako', 'akin', 'mo', 'ba', 'nga', 'ng', 'na', 'a', 'an', 'some', 'more', 'po', 'please', 'pls', 'of']);
+/** A "topic" made only of these is no topic: "make me a new reviewer". */
+const GENERIC_WORDS = new Set([
+  'new', 'good', 'short', 'quick', 'simple', 'big', 'small', 'another', 'sample', 'practice', 'some', 'more',
+  'few', 'study', 'own', 'easy', 'hard', 'long', 'full', 'whole', 'the', 'my', 'reviewer', 'reviewers', 'flashcard',
+  'flashcards', 'card', 'cards', 'quiz', 'notes', 'note', 'set', 'deck', 'question', 'questions',
+]);
+
+/**
+ * A topic fit to write a reviewer on, tidied, or null.
+ *
+ * The check a typed topic and a topic Gemini named both go through: under nine
+ * words, not pointing at notes ("this", "ito", "it" — but not "IT"), not a
+ * count ("20 cards"), and not only generic words.
+ */
+export function cleanTopic(raw: string): string | null {
+  let topic = raw.replace(/\s+/g, ' ').trim();
+  const end = TOPIC_END.exec(topic);
+  if (end) topic = topic.slice(0, end.index);
+  topic = topic.replace(MATERIAL_ABOUT, '').replace(/^["“'‘]+|["”'’]+$/g, '').trim();
+
+  const words = topic.split(' ').filter(Boolean);
+  while (words.length > 0 && LEADING_FILLER.has(words[0]!.toLowerCase())) words.shift();
+  topic = words.join(' ');
+
+  if (topic.length < 2 || topic.length > 60 || words.length > 8) return null;
+  if (DEICTIC.test(topic) || /\bit\b/.test(topic)) return null;
+  if (statedCount(topic) !== null && /^\S+\s+\S+$/.test(topic)) return null;
+  if (words.every((w) => GENERIC_WORDS.has(w.toLowerCase()) || /^\d+$/.test(w))) return null;
+  return topic;
+}
+
+/** The topic a message asks Nomi to write a reviewer on, or null. */
+export function topicOf(message: string): string | null {
+  const text = message.replace(/\s+/g, ' ').trim();
+  if (wordCount(text) > 30 || QUESTION.test(text) || ASK.test(text)) return null;
+  for (const shape of [TOPIC_AFTER, TOPIC_BEFORE]) {
+    const raw = shape.exec(text)?.[1];
+    const topic = raw ? cleanTopic(raw) : null;
+    if (topic) return topic;
+  }
+  return null;
+}
+
+/**
+ * Offer to write a reviewer on a topic and make cards from it.
+ *
+ * Shared by a request Nomi recognised and a topic Gemini named: either way the
+ * topic is checked here, the title and count are read from the student's own
+ * message, and nothing happens until the tap.
+ */
+export function proposeReviewer(topic: string, message: string): Proposal | null {
+  const clean = cleanTopic(topic);
+  if (!clean) return null;
+  const title = readTitle(message);
+  // Read the count with the title taken out: "call it 20 Questions" is a name.
+  const stated = statedCount(title ? message.replace(title, ' ') : message);
+  return propose({
+    kind: 'write_reviewer',
+    topic: clean,
+    title: title ?? topicTitle(clean),
+    count: stated ?? TOPIC_CARD_COUNT,
+    countPicked: stated === null,
+  });
 }
 
 function simplify(title: string): string {
@@ -284,7 +480,7 @@ export function proposeAction(message: string, snapshot: AppSnapshot): Proposal 
     const rename = RENAME.exec(text);
     if (rename) {
       const set = findSet(rename[1]!, snapshot.sets);
-      const to = rename[2]!.trim().slice(0, 80);
+      const to = rename[2]!.trim().slice(0, MAX_TITLE_CHARS);
       if (!set) return { action: null, say: couldNotFind(rename[1]!, snapshot.sets) };
       if (to.length > 0) return propose({ kind: 'rename_set', setId: set.id, from: set.title, to });
     }
@@ -313,14 +509,21 @@ export function proposeAction(message: string, snapshot: AppSnapshot): Proposal 
 
   // --- notes --------------------------------------------------------------
   const { instruction, notes } = splitMessage(text);
+  const long = text.length > MAX_QUESTION_CHARS;
+
+  // A topic with no notes to go with it: Nomi writes them.
+  if (!long && (notes.length === 0 || !instruction)) {
+    const topic = topicOf(text);
+    const reviewer = topic ? proposeReviewer(topic, text) : null;
+    if (reviewer) return reviewer;
+  }
+
   if (notes.length === 0) return null;
 
   if (instruction && SAVE.test(instruction) && !MAKE.test(instruction)) {
-    const named = NAMED.exec(instruction)?.[1]?.trim();
-    return propose({ kind: 'save_note', title: named || suggestTitle(notes), body: notes });
+    return propose({ kind: 'save_note', title: readTitle(instruction) ?? suggestTitle(notes), body: notes });
   }
 
-  const long = text.length > MAX_QUESTION_CHARS;
   if (!long && wordCount(notes) < NOTES_MIN_WORDS) return null;
   if (!instruction && ASK.test(text)) return null;
 
@@ -341,14 +544,93 @@ export function proposeAction(message: string, snapshot: AppSnapshot): Proposal 
     });
   }
 
-  const named = instruction ? NAMED.exec(instruction)?.[1]?.trim() : undefined;
   return propose({
     kind: 'make_set',
-    title: named || suggestTitle(notes),
+    title: (instruction ? readTitle(instruction) : null) ?? suggestTitle(notes),
     notes,
     count,
     countPicked: stated === null,
   });
+}
+
+// --- changing an offer before the tap (NOTES §39) ---------------------------
+
+/** "make it 20", "use 40", "40 instead", or only "40". */
+const COUNT_ONLY =
+  /^(?:(?:ok(?:ay)?|and|also|actually|sige)[\s,]+)?(?:(?:make it|change it to|use|go with|switch to)\s+)?(\d{1,3}|ten|twenty|forty|sixty)(?:\s+(?:instead|please|pls|po))?\s*[.!]*$/i;
+
+function withChanges(pending: NomiAction, title: string | null, count: number | null): NomiAction {
+  switch (pending.kind) {
+    case 'make_set':
+    case 'write_reviewer':
+      return {
+        ...pending,
+        ...(title ? { title } : {}),
+        ...(count !== null ? { count, countPicked: false } : {}),
+      };
+    case 'add_notes':
+      return count !== null ? { ...pending, count, countPicked: false } : pending;
+    default:
+      return pending;
+  }
+}
+
+/** Nomi saying it has changed the offer. Short: the card under it already shows the rest. */
+function amendLine(action: NomiAction, changed: { title: boolean; count: boolean }): string {
+  const title = 'title' in action ? action.title : '';
+  const count = 'count' in action ? plural(action.count, 'card') : '';
+  if (changed.title && changed.count) return `Okay, "${title}" with ${count}.`;
+  if (changed.title) return `Okay, I'll call it "${title}".`;
+  return `Okay, ${count}.`;
+}
+
+/**
+ * A message that changes the offer waiting on a tap, or null.
+ *
+ * *"make the title "All Too Well by Taylor Swift""*, sent under an offer of a
+ * set named after the first line of his paste, went to Gemini as chat — which
+ * told him to paste the notes again, and the offer was gone (NOTES §39). A new
+ * title or a new count now changes the offer in place, notes and all.
+ */
+export function amendProposal(message: string, pending: NomiAction): Proposal | null {
+  const text = message.trim();
+  if (text.length === 0 || /\n/.test(text) || wordCount(text) > 25) return null;
+  const titled = pending.kind === 'make_set' || pending.kind === 'write_reviewer';
+  if (!titled && pending.kind !== 'add_notes') return null;
+
+  const title = titled ? readTitle(text) : null;
+  const rest = title ? text.replace(title, ' ') : text;
+  const onlyCount = COUNT_ONLY.exec(text)?.[1];
+  // A count inside a longer message only when it is short and not a question:
+  // "what are 20 questions I could ask?" is not a new count.
+  const count =
+    onlyCount !== undefined
+      ? countFromWord(onlyCount)
+      : wordCount(rest) <= 8 && !rest.includes('?')
+        ? statedCount(rest)
+        : null;
+  if (title === null && count === null) return null;
+
+  const action = withChanges(pending, title, count);
+  return { action, say: amendLine(action, { title: title !== null, count: count !== null }) };
+}
+
+/**
+ * The offer with a title Gemini read from a message the patterns missed.
+ * Null when the offer has no title to change, or the title is not one.
+ */
+export function retitle(pending: NomiAction, raw: string): Proposal | null {
+  if (pending.kind !== 'make_set' && pending.kind !== 'write_reviewer') return null;
+  const title = raw
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["“'‘]+|["”'’]+$/g, '')
+    .trim()
+    .slice(0, MAX_TITLE_CHARS)
+    .trim();
+  if (!title || NOT_A_TITLE.test(title)) return null;
+  const action = withChanges(pending, title, null);
+  return { action, say: amendLine(action, { title: true, count: false }) };
 }
 
 /** Nomi asking whether to go ahead. */
@@ -363,6 +645,11 @@ export function askLine(action: NomiAction): string {
       return (
         `Want me to add these notes to "${action.setTitle}" and make ${plural(action.count, 'card')} from them?` +
         (action.countPicked ? ` I picked ${action.count} for notes this long.` : '')
+      );
+    case 'write_reviewer':
+      return (
+        `Want me to write a reviewer on ${action.topic}, save it in Notes as "${action.title}", and make ${plural(action.count, 'card')} from it?` +
+        (action.countPicked ? ` I picked ${action.count} to start.` : '')
       );
     case 'rename_set':
       return `Rename "${action.from}" to "${action.to}"?`;
@@ -384,6 +671,8 @@ export function doneLine(action: NomiAction): string {
       return `Done. I'm making ${plural(action.count, 'card')} for "${action.title}" now.`;
     case 'add_notes':
       return `Done. I'm adding ${plural(action.count, 'card')} to "${action.setTitle}" now.`;
+    case 'write_reviewer':
+      return `Done. Your reviewer is in Notes as "${action.title}", and I'm making ${plural(action.count, 'card')} from it now.`;
     case 'rename_set':
       return `Done. It's called "${action.to}" now.`;
     case 'save_note':
@@ -404,6 +693,8 @@ export function actionCard(action: NomiAction): { heading: string; detail: strin
       return { heading: 'New set', detail: `${action.title} · ${plural(action.count, 'card')}`, confirm: 'Make it' };
     case 'add_notes':
       return { heading: 'Add to a set', detail: `${action.setTitle} · ${plural(action.count, 'card')}`, confirm: 'Add them' };
+    case 'write_reviewer':
+      return { heading: 'New reviewer', detail: `${action.title} · ${plural(action.count, 'card')}`, confirm: 'Write it' };
     case 'rename_set':
       return { heading: 'Rename a set', detail: `${action.from} to ${action.to}`, confirm: 'Rename it' };
     case 'save_note':

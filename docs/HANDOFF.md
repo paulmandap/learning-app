@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **904 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **941 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§38 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§39 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -146,17 +146,29 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     on Settings** (NOTES §37, the owner's decision). Same words, pinned in
     `src/ui/privacy.tsx`; Settings has a Privacy link to reread them. He asked
     about a long terms page instead and chose the short notice.
-14. **Nomi can write — on one tap, from a closed list** (NOTES §37): make a set
-    from pasted notes, add notes to a set, rename a set, save a note, change
-    name, pet or face. Never delete, sign out or touch the key. `NomiAction` in
-    `src/core/nomi-actions.ts` is the allow-list, requests are recognised there
-    by patterns (not by the model), and a guard reads `src/data/nomi-agent.ts`
-    for any destructive import.
+14. **Nomi can write — on one tap, from a closed list** (NOTES §37, §39): make a
+    set from pasted notes, add notes to a set, **write a reviewer on a topic
+    and make a set from it**, rename a set, save a note, change name, pet or
+    face. Never delete, sign out or touch the key. `NomiAction` in
+    `src/core/nomi-actions.ts` is the allow-list, and a guard reads
+    `src/data/nomi-agent.ts` for any destructive import. Requests are
+    recognised there by patterns first; **where they miss and Gemini is called
+    anyway, its reply may name a topic (`reviewer_topic`) or a new title for
+    the offer (`set_title`)**, which go through the same checks
+    (`proposeReviewer`, `retitle`). The model names; it never proposes a write.
+    An offer now lasts until tapped, turned down, or replaced — not until the
+    next message.
 15. **The quiz asks every card** (NOTES §38). A flashcard is asked as a choice:
     Gemini writes three wrong answers from the notes (`addQuizChoices`, checked
     by `choicesFrom`), saved on the card's `options` with its kind unchanged —
     so it is still a flashcard and still a blank. Until then the other cards'
     answers stand in (`choicesFromSet`). Marked written questions stay written.
+16. **A reviewer's facts are Gemini's, not the student's** (NOTES §39, at the
+    owner's request). The one place cards do not come from the student's own
+    notes. So the reviewer is saved in Notes as well as made into a set, where
+    it can be read and corrected, and the cards cite it through the same
+    grounded pipeline as a paste. `checkReviewer` refuses a refusal or a
+    one-liner before anything is saved.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -292,6 +304,8 @@ npx tsx --env-file=.env scripts/seed-progress.ts [--days 30] [--clear]
 npx tsx scripts/make-pet-assets.ts            # cuts every assets/*-stages.*
 npx tsx scripts/make-nomi-assets.ts [--debug <dir>]   # Nomi's layers + src/ui/nomi-rig.ts, from design-reference/ (gitignored)
 npx tsx --env-file=.env scripts/nomi-chat-probe.ts    # Nomi's brain + one real Gemini reply + what was saved
+npx tsx --env-file=.env scripts/reviewer-probe.ts [--runs 3] [--only rename] [--counts 20,60] [--out r.txt]   # patterns vs Gemini's topic/title, and written reviewers
+npx tsx --env-file=.env scripts/nomi-offer-probe.ts --out <dir>   # Nomi's offers in the built app, photographed; checks a refused reviewer saved nothing
 npx tsx --env-file=.env scripts/generation-probe.ts --file notes.txt --count 60   # model output vs dropped vs stored, and which lines
 npx tsx --env-file=.env scripts/avatar-probe.ts       # save faces and photos twice, print the real errors, restore
 npx tsx scripts/palette-check.ts              # contrast + colour-blindness gate, both modes

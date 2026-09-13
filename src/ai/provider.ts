@@ -89,6 +89,19 @@ export interface VariantResult {
 }
 
 /**
+ * Nomi's reply, and what it read from a message Nomi's own patterns missed
+ * (NOTES §39): a topic the student wants a reviewer on, or a new title for the
+ * offer on screen. Both are names only — `proposeReviewer` and `retitle` in
+ * `src/core/nomi-actions.ts` check them, and nothing happens without a tap.
+ */
+export interface ChatReply {
+  /** Empty only when one of the other two is set. */
+  answer: string;
+  reviewerTopic: string | null;
+  setTitle: string | null;
+}
+
+/**
  * A second opinion on an Apply-tier marking checklist (D7).
  *
  * The model NAMES the points it cannot support; src/core/rubric.ts decides the
@@ -123,7 +136,12 @@ export interface AIProvider {
     system: string;
     /** The conversation so far, ending with the student's new message. */
     turns: import('../core/chat').ChatTurn[];
-  }): Promise<string | null>;
+  }): Promise<ChatReply | null>;
+  /**
+   * A reviewer on a topic, as plain-text notes, for Nomi to make cards from
+   * (NOTES §39). Null when nothing usable came back.
+   */
+  writeReviewer(input: { topic: string; facts: number }): Promise<string | null>;
   /** Three wrong answers per card, from the notes, for the quiz (NOTES §38). */
   writeWrongOptions(input: {
     notes: string;

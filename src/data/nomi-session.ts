@@ -5,6 +5,10 @@ import { fetchProfile } from './profile';
 import { getAppSnapshot } from './nomi';
 import { addNomiMessage, listMessages, sendToNomi, type Message, type NomiReply } from './nomi-chat';
 import { carryOut, NeedsKeyError, type Done } from './nomi-agent';
+import { ReviewerUnusableError } from './reviewer';
+import { GeminiCallError } from '../ai/gemini';
+import { reasonToMessage } from '../core/ai-errors';
+import { GeminiBusyError } from '../core/queue';
 import { EMPTY_SNAPSHOT } from '../core/nomi-brain';
 import { compactForChat, type NomiAction } from '../core/nomi-actions';
 import type { AssistantContext, ChatTurn } from '../core/chat';
@@ -43,6 +47,19 @@ export const useNomiSession = create<NomiSessionStore>((set) => ({
   pending: null,
   set: (patch) => set(patch),
 }));
+
+/** Why an offer could not be carried out, in words the student can act on. */
+function couldNotDo(err: unknown): string {
+  if (err instanceof NeedsKeyError) return 'Add your Gemini key in Settings and I can make cards for you.';
+  // Say what Google refused, as the chat does: an invalid key is fixed in
+  // Settings, and "try again" would send the student round in a circle (NOTES §36).
+  if (err instanceof GeminiCallError) return reasonToMessage(err.reason);
+  if (err instanceof GeminiBusyError) return err.message;
+  if (err instanceof ReviewerUnusableError) {
+    return "I couldn't write a reviewer on that. Try naming the topic a little differently.";
+  }
+  return "I couldn't do that just now. Try again in a moment.";
+}
 
 /**
  * Everything a chat window needs: the turns to show, a way to send, and what to
@@ -97,6 +114,7 @@ export function useNomiConversation(context: AssistantContext) {
           snapshot,
           context,
           apiKey: profile?.gemini_api_key ?? '',
+          pending: useNomiSession.getState().pending,
         });
 
         const said: ChatTurn = { role: 'user', text: reply.said };
@@ -128,9 +146,11 @@ export function useNomiConversation(context: AssistantContext) {
           setSession({ unsaved: [...turns, said, ...answered] });
         }
 
-        // An offer lasts until it is taken, turned down, or overtaken by the
-        // next message.
-        setSession({ pending: reply.ok ? reply.proposal : null });
+        // An offer lasts until it is taken or turned down, or another offer
+        // replaces it. It used to end with the next message of any kind, so a
+        // "make the title …" Nomi did not follow took away the offer with it,
+        // and a 985-word paste had to be sent again (NOTES §39).
+        if (reply.ok && reply.proposal) setSession({ pending: reply.proposal });
         setNote(reply.ok ? reply.note : reply.message);
         return reply;
       } finally {
@@ -166,10 +186,13 @@ export function useNomiConversation(context: AssistantContext) {
     if (!action || inFlight.current) return null;
     inFlight.current = true;
     setActing(true);
-    setNote(null);
+    // A reviewer is a Gemini call before anything is saved. Say so, rather
+    // than leave a spinner on a button for twenty seconds with no reason given.
+    setNote(action.kind === 'write_reviewer' ? 'Writing your reviewer — this can take a little while.' : null);
     try {
       const done = await carryOut(action, { apiKey: profile?.gemini_api_key ?? '' });
       setSession({ pending: null });
+      setNote(null);
       await nomiSays(done.text);
       await Promise.all(
         [['sets'], ['nomi-brain'], ['profile'], ['notes'], ['dashboard']].map((queryKey) =>
@@ -179,11 +202,7 @@ export function useNomiConversation(context: AssistantContext) {
       return done;
     } catch (err) {
       console.warn(`[nomi] could not do that: ${err instanceof Error ? err.message : String(err)}`);
-      setNote(
-        err instanceof NeedsKeyError
-          ? 'Add your Gemini key in Settings and I can make cards from these.'
-          : "I couldn't do that just now. Try again in a moment.",
-      );
+      setNote(couldNotDo(err));
       return null;
     } finally {
       setActing(false);
@@ -202,7 +221,7 @@ export function useNomiConversation(context: AssistantContext) {
   const setCount = useCallback(
     (count: number) => {
       const action = useNomiSession.getState().pending;
-      if (action && (action.kind === 'make_set' || action.kind === 'add_notes')) {
+      if (action && (action.kind === 'make_set' || action.kind === 'add_notes' || action.kind === 'write_reviewer')) {
         setSession({ pending: { ...action, count, countPicked: false } });
       }
     },

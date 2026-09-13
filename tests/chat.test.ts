@@ -213,4 +213,24 @@ describe('buildNomiSystemPrompt', () => {
     expect(p).toMatch(/simple and direct/i);
     expect(p).toMatch(/no headings|no bullet|no markdown/i);
   });
+
+  it('says Nomi writes reviewers, and never to send them off to paste notes for one (NOTES §39)', () => {
+    // Asked for a reviewer on computer parts, the owner was told twice to paste
+    // notes — because this instruction said pasted notes were all the app took.
+    const p = buildNomiSystemPrompt({ brief, context: { kind: 'none' } });
+    expect(p).toContain('reviewer_topic');
+    expect(p).toMatch(/Taglish/);
+    expect(p).toMatch(/never tell them to paste/i);
+    expect(p).not.toContain('set_title');
+  });
+
+  it('describes the offer waiting on a tap, and how to rename it', () => {
+    const p = buildNomiSystemPrompt({
+      brief,
+      context: { kind: 'none' },
+      pending: { kind: 'make_set', title: 'nomi gawan mo nga ako reviewer,', notes: 'n', count: 10, countPicked: true },
+    });
+    expect(p).toContain('Want me to make a new set, "nomi gawan mo nga ako reviewer,", with 10 cards?');
+    expect(p).toContain('set_title');
+  });
 });

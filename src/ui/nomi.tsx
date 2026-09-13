@@ -384,7 +384,7 @@ export function ActionCard({
 }) {
   const t = useTheme();
   const card = actionCard(action);
-  const counted = action.kind === 'make_set' || action.kind === 'add_notes';
+  const counted = action.kind === 'make_set' || action.kind === 'add_notes' || action.kind === 'write_reviewer';
 
   return (
     <View style={{ flexDirection: 'row', gap: space.sm }}>

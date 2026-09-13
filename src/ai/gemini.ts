@@ -23,6 +23,7 @@ import { MAX_REPLY_TOKENS, type AssistantContext } from '../core/chat';
 import {
   buildGeneratePrompt,
   buildGradePrompt,
+  buildReviewerPrompt,
   buildRubricCheckPrompt,
   buildVariantPrompt,
   buildWrongOptionsPrompt,
@@ -35,10 +36,12 @@ import {
   parseItemsLoose,
   parseReadResult,
   parseChatResult,
+  parseReviewerResult,
   parseRubricCheck,
   parseVariantResult,
   parseWrongOptions,
   READ_RESPONSE_SCHEMA,
+  REVIEWER_RESPONSE_SCHEMA,
   WRONG_OPTIONS_RESPONSE_SCHEMA,
   CHAT_RESPONSE_SCHEMA,
   RUBRIC_CHECK_RESPONSE_SCHEMA,
@@ -46,6 +49,7 @@ import {
 } from './schemas';
 import {
   type AIProvider,
+  type ChatReply,
   type GenerateInput,
   type GeneratedItem,
   type GradeResult,
@@ -466,7 +470,7 @@ export class GeminiBrowserProvider implements AIProvider {
   async chat(input: {
     system: string;
     turns: import('../core/chat').ChatTurn[];
-  }): Promise<string | null> {
+  }): Promise<ChatReply | null> {
     // A conversation now (NOTES §36): the standing instruction as the system
     // instruction, and the thread as alternating turns, so the model sees what
     // was said rather than one pasted block. Nomi's replies are "model" turns.
@@ -487,6 +491,27 @@ export class GeminiBrowserProvider implements AIProvider {
     });
 
     return parseChatResult(payload);
+  }
+
+  /**
+   * A reviewer on a topic, for Nomi to make cards from (NOTES §39).
+   *
+   * The one call in this file whose facts are the model's own rather than the
+   * student's notes. So what comes back is checked by `checkReviewer`, saved in
+   * Notes where the student can read it, and made into cards through the same
+   * grounded pipeline as a paste. Cool, because these are facts: a reviewer
+   * that says something different each time it is asked is not one to learn from.
+   */
+  async writeReviewer(input: { topic: string; facts: number }): Promise<string | null> {
+    const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
+      contents: [{ role: 'user', parts: [{ text: buildReviewerPrompt(input) }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: REVIEWER_RESPONSE_SCHEMA,
+        temperature: 0.3,
+      },
+    });
+    return parseReviewerResult(payload);
   }
 
   /**

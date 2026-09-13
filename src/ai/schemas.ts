@@ -353,10 +353,19 @@ export function parseRubricCheck(payload: unknown): { unsupported: string[]; not
 
 // ------------------------------------------------------------------ chat --
 
-export const chatResultSchema = z.object({ answer: z.string().min(1) });
+export const chatResultSchema = z.object({
+  answer: z.string().default(''),
+  reviewer_topic: z.string().optional(),
+  set_title: z.string().optional(),
+});
 
 /**
  * Shape requested for a study-assistant reply (D14).
+ *
+ * Two optional fields since NOTES §39. `reviewer_topic` names a topic the
+ * student wants a reviewer written on; `set_title` a new name for the offer
+ * waiting on their tap. Both for wordings Nomi's patterns missed — Taglish,
+ * mostly — and both only names: the checks and the tap stay in the app.
  *
  * An answer is prose, so wrapping it in JSON looks like waste — and the first
  * version of this file did exactly that reasoning and asked for plain text.
@@ -370,12 +379,40 @@ export const chatResultSchema = z.object({ answer: z.string().min(1) });
  */
 export const CHAT_RESPONSE_SCHEMA = {
   type: 'object',
-  properties: { answer: { type: 'string' } },
+  properties: {
+    answer: { type: 'string' },
+    reviewer_topic: { type: 'string' },
+    set_title: { type: 'string' },
+  },
   required: ['answer'],
 } as const;
 
 /** Parse an assistant reply. Null when unusable, so the screen can say so. */
-export function parseChatResult(payload: unknown): string | null {
+export function parseChatResult(payload: unknown): import('./provider').ChatReply | null {
   const parsed = chatResultSchema.safeParse(payload);
-  return parsed.success ? parsed.data.answer.trim() : null;
+  if (!parsed.success) return null;
+  const named = (value: string | undefined) => (value && value.trim() ? value.trim() : null);
+  const reply = {
+    answer: parsed.data.answer.trim(),
+    reviewerTopic: named(parsed.data.reviewer_topic),
+    setTitle: named(parsed.data.set_title),
+  };
+  return reply.answer || reply.reviewerTopic || reply.setTitle ? reply : null;
+}
+
+// -------------------------------------------------------------- reviewer --
+
+/** A reviewer on a topic (NOTES §39): the notes, as one plain-text field. */
+export const REVIEWER_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: { notes: { type: 'string' } },
+  required: ['notes'],
+} as const;
+
+const reviewerResultSchema = z.object({ notes: z.string() });
+
+/** The reviewer's text, or null. Whether it is a reviewer is `checkReviewer`'s call. */
+export function parseReviewerResult(payload: unknown): string | null {
+  const parsed = reviewerResultSchema.safeParse(payload);
+  return parsed.success && parsed.data.notes.trim() ? parsed.data.notes : null;
 }

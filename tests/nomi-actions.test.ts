@@ -242,12 +242,22 @@ describe('proposeAction — the small writes', () => {
 
 describe('the allow-list', () => {
   it('holds exactly the writes the owner approved, and nothing destructive', () => {
-    const kinds: NomiAction['kind'][] = ['make_set', 'add_notes', 'rename_set', 'save_note', 'set_name', 'set_pet', 'set_face'];
+    const kinds: NomiAction['kind'][] = [
+      'make_set',
+      'add_notes',
+      'write_reviewer',
+      'rename_set',
+      'save_note',
+      'set_name',
+      'set_pet',
+      'set_face',
+    ];
     // A compile-time list checked at run time: every kind has words for all
     // three places Nomi speaks about it.
     const samples: NomiAction[] = [
       { kind: 'make_set', title: 'T', notes: 'n', count: 10, countPicked: true },
       { kind: 'add_notes', setId: 's', setTitle: 'T', notes: 'n', count: 10, countPicked: false },
+      { kind: 'write_reviewer', topic: 'computer parts', title: 'Computer Parts', count: 20, countPicked: true },
       { kind: 'rename_set', setId: 's', from: 'A', to: 'B' },
       { kind: 'save_note', title: 'T', body: 'b' },
       { kind: 'set_name', name: 'Sam' },

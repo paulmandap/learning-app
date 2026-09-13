@@ -16,7 +16,15 @@ import {
   type ChatTurn,
 } from '../core/chat';
 import { answerLocally, modelBrief, type AppSnapshot } from '../core/nomi-brain';
-import { compactForChat, proposeAction, type NomiAction } from '../core/nomi-actions';
+import {
+  amendProposal,
+  compactForChat,
+  proposeAction,
+  proposeReviewer,
+  retitle,
+  type NomiAction,
+  type Proposal,
+} from '../core/nomi-actions';
 
 /**
  * Nomi's conversations: saved, listed, and answered.
@@ -30,13 +38,15 @@ import { compactForChat, proposeAction, type NomiAction } from '../core/nomi-act
  *
  *  1. **The student's message is saved first.** It is theirs; nothing that
  *     fails afterwards may lose it.
- *  2. **Nomi's own brain gets the first look** (`src/core/nomi-brain.ts`). A
+ *  2. **Something Nomi can do**, recognised by Nomi itself — including a change
+ *     to the offer already on screen (NOTES §37, §39). Offered, never done.
+ *  3. **Nomi's own brain gets the next look** (`src/core/nomi-brain.ts`). A
  *     greeting, "what's my streak", "what's due" are answered from the app
  *     instantly, and spend none of the daily allowance.
- *  3. **Otherwise Gemini**, with the recent thread, the facts about the student,
- *     and whatever card or notes the screen has open — after claiming one
- *     message against the daily cap, before the call, exactly as the old
- *     assistant did.
+ *  4. **Otherwise Gemini**, with the recent thread, the facts about the student,
+ *     whatever card or notes the screen has open, and the offer waiting on a
+ *     tap — after claiming one message against the daily cap, before the call,
+ *     exactly as the old assistant did.
  *
  * ## Before migration 0016
  *
@@ -210,6 +220,8 @@ export async function sendToNomi(
     /** The card or notes the current screen has open. */
     context: AssistantContext;
     apiKey: string;
+    /** What Nomi has offered and is waiting on a tap for — a message may change it (NOTES §39). */
+    pending?: NomiAction | null;
   },
   deps: {
     db?: Db;
@@ -225,6 +237,7 @@ export async function sendToNomi(
   const db = deps.db ?? supabase;
   const run = deps.run ?? (<T>(task: () => Promise<T>) => queue.run(task));
   const text = input.text.trim();
+  const pending = input.pending ?? null;
   let conversationId = input.conversationId;
   // A pasted page of notes is shown, saved and titled as how much was pasted.
   const said = compactForChat(text);
@@ -256,8 +269,9 @@ export async function sendToNomi(
 
   // 2. Something Nomi can DO (NOTES §37) — offered, never done, until the
   //    student taps. No model call and no allowance: the offer is recognised
-  //    here, and nothing is written by this function either way.
-  const proposal = proposeAction(text, input.snapshot);
+  //    here, and nothing is written by this function either way. A message
+  //    that changes the offer already on screen comes first (NOTES §39).
+  const proposal = (pending ? amendProposal(text, pending) : null) ?? proposeAction(text, input.snapshot);
   if (proposal) {
     await keep(proposal.say);
     return { ok: true, text: proposal.say, source: 'brain', conversationId, note: null, proposal: proposal.action, said };
@@ -298,10 +312,20 @@ export async function sendToNomi(
   try {
     const provider = deps.provider ?? new GeminiBrowserProvider(input.apiKey);
     const turns = historyWindow([...input.history, { role: 'user', text }]);
-    const system = buildNomiSystemPrompt({ brief: modelBrief(input.snapshot), context: input.context });
-    const answer = await run(() => provider.chat({ system, turns }));
+    const system = buildNomiSystemPrompt({ brief: modelBrief(input.snapshot), context: input.context, pending });
+    const reply = await run(() => provider.chat({ system, turns }));
+
+    // What Gemini read from a message Nomi's patterns missed (NOTES §39) — a
+    // new title for the offer on screen, or a topic to write a reviewer on —
+    // goes through the same checks as a typed request, and Nomi says the
+    // offer's own words rather than the model's promise of one.
+    let offer: Proposal | null = null;
+    if (reply?.setTitle && pending) offer = retitle(pending, reply.setTitle);
+    if (!offer && reply?.reviewerTopic) offer = proposeReviewer(reply.reviewerTopic, text);
+    const answer = offer?.say ?? reply?.answer ?? '';
 
     if (!answer) {
+      if (reply) console.warn(`[nomi] Gemini named something that did not pass: ${JSON.stringify(reply)}`);
       return {
         ok: false,
         reason: 'busy',
@@ -317,7 +341,7 @@ export async function sendToNomi(
       source: 'gemini',
       conversationId,
       note: describeRemaining(remaining ?? DAILY_MESSAGE_LIMIT),
-      proposal: null,
+      proposal: offer?.action ?? null,
       said,
     };
   } catch (err) {

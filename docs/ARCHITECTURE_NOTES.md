@@ -5329,6 +5329,166 @@ Too Well", Home and Progress under the new "known". **Not deployed**: production
 is `934b624`, which is §37.
 
 
+## 39. Round five: a Taglish title, a title sent on its own, and a reviewer Nomi writes (2026-09-14)
+
+The owner pushed and deployed §38 (`fc89809`, by their report; the bundle hash
+was not compared this session) and reported two things.
+
+### 39.1 "It still couldn't make the title All Too Well by Taylor Swift"
+
+The paste, as the chat kept it: *Pasted notes, 985 words: "nomi gawan mo nga
+ako reviewer, yung title ay "All Too Well by Taylor Swift" tapos ito yung
+contents: I walked through the door with you,…"*. Nomi offered a set called
+**"nomi gawan mo nga ako reviewer,"**. The owner replied *make the title "All
+Too Well by Taylor Swift"*, and Nomi said "To have me make flashcards from those
+notes, just say make flashcards from this and then paste your notes" — so 966
+words went in again, and came back as "I walked through the door with".
+
+Three causes, all reproduced as tests first:
+
+- **The request was not recognised as one.** `splitMessage` takes the part
+  before a colon only when it asks for cards, and "asks" meant an English verb
+  and a card word. "gawan … reviewer" is neither, so the whole message was
+  notes and the title was their first six words.
+- **"title ay" was not a title, and a quoted title had no end.** The unquoted
+  rule would have read `All Too Well by Taylor Swift" tapos ito yung contents`.
+- **A message could not change the offer.** "make the title …" matched nothing,
+  went to Gemini as chat, and the offer ended with that message — by design
+  since §37, "overtaken by the next message".
+
+What changed, in `src/core/nomi-actions.ts` unless named:
+
+- `MAKE` knows "reviewer" and Filipino's "gawa" forms (gawan, gumawa). "write"
+  and "gawa" need a card word, not "set": "Write the set of real numbers as…"
+  opens maths notes.
+- **`readTitle`**: one list of where a title starts — call it, titled, title
+  is / ay / :, the title should be, make or change the title (to), palitan ang
+  title ng, rename it to — skipping "my name is". A quoted title (straight or
+  curly; an iPhone types curly) ends at its closing quote. An unquoted one ends
+  at punctuation before a space, "tapos" or "then", "with 20 cards", or a
+  trailing "please".
+- **`amendProposal`**: a short message under an offer that gives a title or a
+  count changes the offer in place, notes and all — *Okay, I'll call it "…".*
+  It runs first in `sendToNomi`. A number inside a title is not a count
+  (`call it "20 Questions"`), and "what are 20 questions I could ask?" is not one.
+- **An offer lasts until it is tapped, turned down or replaced**
+  (`src/data/nomi-session.ts`), not until the next message. A reworded request
+  Nomi misses no longer costs the paste.
+
+### 39.2 "I want nomi to be the one to do it, not me handing things"
+
+*"pwede mo ba ako gawan ng reviewer about computer parts?"* got "Sure! Just
+paste your notes here…", and *"ikaw na bahala sa notes pls"* ("you handle the
+notes") got "I cannot write the notes for you myself". Gemini was being
+accurate: its instruction said the app makes sets only from pasted notes.
+
+- **A new action, `write_reviewer`** (topic, title, count), recognised by
+  `topicOf`: a making verb in English or Filipino, a card word, then about / on
+  / tungkol sa / ng and the topic — or "gawan ako ng computer parts reviewer".
+  Near-misses are tested: "Quiz me on something" (a suggestion chip), "how do I
+  make flashcards about history?", "i need help with my notes on cells", "make
+  me a new reviewer", "make 20 flashcards about this". 20 cards unless a number
+  is given — the 20 Add notes starts at, since there are no notes to measure.
+- **On the tap** (`carryOut`): Gemini writes the reviewer (`buildReviewerPrompt`,
+  `src/data/reviewer.ts`) → `checkReviewer` → saved in Notes → `startSet` from
+  the same text → the note linked to the set. Written before anything is saved,
+  so a refusal leaves no empty note and no set. The chat says "Writing your
+  reviewer — this can take a little while." during the call, and a refused key
+  says what Google refused rather than "try again".
+- **These facts are Gemini's.** It is the one place cards do not come from the
+  student's own notes, and it is there because the owner asked for it. The
+  prompt asks for well-established facts and to leave out a number or name it
+  is unsure of; the reviewer is kept in Notes where it can be read and put
+  right; the cards go through the normal grounded pipeline against it. Nothing
+  here can tell a wrong fact from a right one — that is the trade, written down
+  so that nobody later takes these cards for ones drawn from a student's own
+  material.
+
+### 39.3 Where the patterns miss: Gemini names, the app checks
+
+§37 recognised requests by patterns alone, and noted: *"A model-proposed write
+would need the same checks after a call that spends the allowance; not built."*
+After two rounds of Taglish misses it is built, narrowly. When a message the
+patterns miss goes to Gemini anyway — no extra call, no extra allowance — the
+reply schema has two optional fields, `reviewer_topic` and `set_title`.
+`proposeReviewer` and `retitle` put them through the checks a typed request
+gets (`cleanTopic`: under nine words, not "this" / "ito" / "it" though "IT"
+passes, not a count, not only generic words), and Nomi then says the offer's own
+words, never the model's. The model names a topic or a title. It cannot propose
+a write, and nothing is written without the tap. Nomi's instruction now says it
+writes reviewers, never to send a student off to paste notes for one, and — when
+an offer is waiting — what the offer is.
+
+### 39.4 Measured
+
+`scripts/reviewer-probe.ts`, 2026-09-14, on `GEMINI_API_KEY`. gemini-3.6-flash
+was unavailable throughout; most calls were served by gemini-3.5-flash-lite
+(rung 4 of the ladder).
+
+```
+patterns, no network
+  "pwede mo ba ako gawan ng reviewer about computer parts?"   write_reviewer "computer parts", 20
+  make the title "All Too Well by Taylor Swift", under an offer  title changed
+  "ikaw na bahala sa notes pls" / "nomi reviewer pls, computer parts" /
+  "pangalanan itong All Too Well by Taylor Swift"              missed, to Gemini
+
+Gemini where they miss, 3 runs each
+  "ikaw na bahala sa notes pls", after asking      3/3 topic "computer parts"
+  "nomi reviewer pls, computer parts"               3/3 topic "computer parts"
+  "pangalanan itong All Too Well by Taylor Swift"   3/3 a title, but 1 of 3 was "All Too Well"
+  "what are the main parts of a computer?"          3/3 neither — answered the question
+  "hello musta k"                                    3/3 neither — answered in Taglish
+  "how long will the cards take?", offer waiting    3/3 neither
+after "the WHOLE title, every word" went into the instruction
+  the rename, 5 runs                                 5/5 "All Too Well by Taylor Swift"
+```
+
+**The first reviewer was refused, and the check was what was wrong.** Asked for
+30 facts (20 cards), Gemini wrote 28 good sentences under 7 headings, one per
+line, with no "- ". `checkReviewer` counted no facts. A full sentence on a line
+of its own is now a fact. After:
+
+```
+20 cards, 30 facts asked   30 facts, 30 bulleted by Gemini, 551 words, ~30 cards,  9.8 s
+                           30 facts, 30 bulleted,           565 words, ~30 cards,  7.3 s
+                           30 facts,  0 bulleted,           498 words, ~30 cards,  6.1 s   kept only by the fix
+60 cards, 90 facts asked   78 facts,                      1,559 words, ~78 cards, 11.2 s
+```
+
+2 of the 4 twenty-card reviewers came back with no bullets. Cards from the
+first kept one, through the real pipeline (`scripts/generation-probe.ts --count
+20`, test account): **20 of 20 stored**, 4 requests, 41.4 s, one fill pass (owed
+4, made 4), 4 dropped as over budget, no repeated answers, citations across
+lines 1–35 of 36, quiz choices written for 12. The set was deleted.
+
+**In the built app** (`scripts/nomi-offer-probe.ts`, test account, 393 dark):
+the reviewer request → "New reviewer · Computer Parts · 20 cards"; *make the
+title "PC Hardware Basics"* → "Okay, I'll call it "PC Hardware Basics"." and the
+card changed; Write it, on the account's placeholder key → "That key didn't
+work. Check you copied all of it, then try again." with **notes 0→0 and sets
+2→2**; the Taglish paste with §37's stand-in ballad → "New set · All Too Well by
+Taylor Swift · 10 cards". The two chats were deleted.
+
+### 39.5 Found, not fixed
+
+- **A retry after a partial failure saves a second note.** If the reviewer is
+  written and saved but `startSet` then fails, the offer stays, and a second tap
+  writes and saves another.
+- **A title Gemini reads can still come back short**: 1 of 3 before the
+  instruction was tightened, 0 of 5 after. The card shows it before the tap.
+- **The quality of a written reviewer is unmeasured** beyond its shape and one
+  read-through of two: the computer-parts facts read as correct textbook
+  statements. There is no check that could say otherwise.
+- **Not seen on an iPhone.**
+
+### 39.6 Verified
+
+typecheck clean · **941 tests**, 3 skipped (+37) · `expo export` · boot 5/5 ·
+the probes above against Google and the live database · screenshots at 393 dark
+of the reviewer offer, the renamed offer, the refused key, and the Taglish
+paste. **Not deployed.**
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)
