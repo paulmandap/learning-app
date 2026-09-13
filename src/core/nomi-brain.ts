@@ -175,7 +175,7 @@ const INTENTS: Intent[] = [
       const known = s.sets.reduce((n, x) => n + x.known, 0);
       if (s.totalAnswers === 0) return "You haven't answered any cards yet, so there's nothing to judge. Start a set and I'll keep track.";
       const streak = s.streak > 0 ? ` You're on a ${s.streak}-day streak.` : '';
-      return `You know ${known} of your ${plural(cards, 'card')} (right three times in a row).${streak}`;
+      return `You know ${known} of your ${plural(cards, 'card')} (your last answer to them was right).${streak}`;
     },
   },
   {

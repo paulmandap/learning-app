@@ -554,6 +554,35 @@ describe("the owner's third round (NOTES §37)", () => {
   });
 });
 
+describe("the owner's fourth round (NOTES §38)", () => {
+  const quiz = code(read('app', 'set', '[id]', 'quiz.tsx'));
+
+  it('the quiz asks every card, not only multiple choice and written ones', () => {
+    // A set of flashcards had no quiz at all.
+    expect(quiz).not.toMatch(/i\.kind === 'mcq' \|\| i\.kind === 'short_answer'/);
+    expect(quiz).toContain('choicesFor(');
+  });
+
+  it('a level with nothing to ask shows the level picker, not "0 of 0 right"', () => {
+    expect(quiz).toContain('const finished = items.length > 0 &&');
+  });
+
+  it('writes answer choices when the quiz opens and when a set finishes', () => {
+    expect(quiz).toContain('addQuizChoices(');
+    expect(code(read('src', 'data', 'pipeline.ts'))).toContain('addQuizChoices(');
+  });
+
+  it('"known" is the last answer, everywhere it is counted', () => {
+    for (const file of [
+      ['src', 'data', 'dashboard.ts'],
+      ['app', '(tabs)', 'progress.tsx'],
+    ]) {
+      expect(code(read(...file)), file.join('/')).not.toContain('KNOWN_REPS');
+    }
+    expect(code(read('src', 'data', 'dashboard.ts'))).toMatch(/masteryOf\(\{ reps: r\.reps, lastResult: r\.last_result \}\) === 'known'/);
+  });
+});
+
 describe('Nomi guides, the pet celebrates', () => {
   it('no screen asks Nomi to encourage or celebrate', () => {
     // `encouraging` and `success` are built into src/core/nomi-motion.ts and

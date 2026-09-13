@@ -2,7 +2,7 @@ import { completeRows, supabase, type Db } from './supabase';
 import {
   busiestSet,
   dueForecast,
-  KNOWN_REPS,
+  masteryOf,
   sectionTrends,
   TREND_ATTEMPT_CAP,
   TREND_WINDOW_DAYS,
@@ -15,9 +15,10 @@ import {
   type ForecastDay,
   type ItemHistory,
   type MasteryCounts,
+  type MasteryInput,
   type SectionSplit,
 } from '../core/progress';
-import { startOfUtcDay, type ReviewState } from '../core/schedule';
+import { startOfUtcDay } from '../core/schedule';
 import { summariseUsage, type UsageSummary } from '../core/storage';
 import { busiestLevel, countByLevel } from '../core/deck';
 import type { Level } from '../core/planner';
@@ -197,7 +198,8 @@ export async function fetchDashboard(
     // fields on queries that were being made anyway, not a sixth round trip.
     db
       .from('review_state')
-      .select('study_item_id, study_set_id, reps, interval_days, lapses, due_at', {
+      // last_result: "known" is how a card's last answer went (NOTES §38).
+      .select('study_item_id, study_set_id, reps, interval_days, lapses, due_at, last_result', {
         count: 'exact',
       }),
     // Runs with security_invoker, so RLS applies and this is only ever the
@@ -268,13 +270,11 @@ export async function fetchDashboard(
     interval_days: number;
     lapses: number;
     due_at: string;
+    last_result: 'correct' | 'partial' | 'incorrect' | null;
   }[];
 
-  const stateById = new Map<string, ReviewState>(
-    scheduleRows.map((r) => [
-      r.study_item_id,
-      { reps: r.reps, intervalDays: r.interval_days, ease: 0, lapses: r.lapses },
-    ]),
+  const stateById = new Map<string, MasteryInput>(
+    scheduleRows.map((r) => [r.study_item_id, { reps: r.reps, lastResult: r.last_result }]),
   );
 
   const today = startOfUtcDay(now);
@@ -407,7 +407,9 @@ export async function fetchDashboard(
   if (!schedules.error && !items.error) {
     for (const s of dueNow) statFor(s.studySetId).due++;
     for (const r of scheduleRows) {
-      if (visibleItemIds.has(r.study_item_id) && r.reps >= KNOWN_REPS) statFor(r.study_set_id).known++;
+      if (visibleItemIds.has(r.study_item_id) && masteryOf({ reps: r.reps, lastResult: r.last_result }) === 'known') {
+        statFor(r.study_set_id).known++;
+      }
     }
   }
   for (const s of retryItems) statFor(s.study_set_id).missed++;

@@ -291,6 +291,41 @@ export function buildVariantPrompt(input: {
 }
 
 /**
+ * Wrong answers for turning flashcards into quiz questions (NOTES §38).
+ *
+ * The owner: *"everything must have quiz. gemini can think of what to put in
+ * the quiz based on the notes."* The model writes the wrong answers; the right
+ * one is the card's own and is never the model's to change. `choicesFrom` in
+ * `src/core/quiz.ts` checks each one — not the answer reworded, not a
+ * duplicate, not a paragraph — so the rules below each have a check behind them.
+ */
+export function buildWrongOptionsPrompt(input: {
+  notes: string;
+  cards: readonly { n: number; prompt: string; answer: string }[];
+}): string {
+  return [
+    'These flashcards are being asked as multiple-choice questions in a quiz.',
+    'For every card, write exactly three WRONG answers.',
+    '',
+    'Rules:',
+    '1. Take them from the notes below where you can: other people, places, things, numbers or',
+    '   phrases from the same notes, of the same kind as the right answer — a name for a name, a',
+    '   place for a place, a number for a number.',
+    '2. Plausible to someone who has not studied, clearly wrong to someone who has.',
+    '3. About as long as the right answer, and written the same way.',
+    '4. Never the right answer in other words, never partly right, never "all of the above", never a',
+    '   joke. Three different wrong answers for each card.',
+    '5. Return one entry for every card, with its number.',
+    '',
+    'NOTES:',
+    input.notes,
+    '',
+    'CARDS:',
+    ...input.cards.map((c) => `${c.n}. Question: ${c.prompt}\n   Right answer: ${c.answer}`),
+  ].join('\n');
+}
+
+/**
  * Check an Apply-tier marking checklist against its source (D7's second pass).
  *
  * The model NAMES the points it cannot support; `src/core/rubric.ts` decides the

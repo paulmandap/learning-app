@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **886 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **904 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§37 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§38 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -133,8 +133,12 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     would show a rate and a direction computed differently.
 10. **Typed answers are never auto-marked wrong on a near miss** (NOTES §9.2). No
    character-similarity threshold can separate a typo from a minimal pair.
-11. **Mastery bands key on consecutive correct answers, not on the schedule**
-    (NOTES §18.1). The 21-day interval version could not move for 23 days.
+11. **"Known" is the card's last answer** (NOTES §38, the owner's decision).
+    It was a 21-day interval, which could not move for 23 days (§18.1), then
+    three right in a row, which left a set he had just answered at "0 of 10".
+    Measured first that the count was working. `masteryOf` in
+    `src/core/progress.ts` reads `review_state.last_result`; the schedule is
+    unchanged.
 12. **The upload cap is set by storage, not by the reader** (NOTES §15.2) —
     the inverse of what §12.2 originally recorded. 25 MB per file, 45 MB reader
     ceiling, measured against Google's real 50 MB.
@@ -148,6 +152,11 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     `src/core/nomi-actions.ts` is the allow-list, requests are recognised there
     by patterns (not by the model), and a guard reads `src/data/nomi-agent.ts`
     for any destructive import.
+15. **The quiz asks every card** (NOTES §38). A flashcard is asked as a choice:
+    Gemini writes three wrong answers from the notes (`addQuizChoices`, checked
+    by `choicesFrom`), saved on the card's `options` with its kind unchanged —
+    so it is still a flashcard and still a blank. Until then the other cards'
+    answers stand in (`choicesFromSet`). Marked written questions stay written.
 
 ## Hard-won gotchas — do not rediscover these
 

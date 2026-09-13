@@ -5216,6 +5216,119 @@ privacy column        select ok; acceptPrivacy → "account"; restored to null
 `npx tsx --env-file=.env scripts/isolation-test.ts`. **Not deployed.**
 
 
+## 38. Round four: a title Nomi missed, a quiz for every set, and what "known" means (2026-09-13)
+
+The owner deployed §37 (`934b624`; production matched HEAD) and reported three
+things from using it. One was a bug, one was a bug with a second bug behind it,
+and one was not a bug at all — measured, and then changed at his request.
+
+### 38.1 "I explicitly told Nomi to make the title All Too Well"
+
+His message, as the chat kept it: *Pasted notes, 983 words: "can you make me a
+notes of this? make 10 flash cards. title is All Too Well. I walked through the
+door…"*. Nomi made a set called **"Can you make me a notes"**.
+
+Reproduced as a test with the same shape — the instruction typed straight into
+the paste — using lines from §37's stand-in ballad, not the lyrics: the title
+came back `can you make me a notes`.
+
+Two causes. **An instruction was recognised only on a line of its own or before
+a colon**, so this whole message was notes: the title was its first six words,
+the count of 10 was the chooser's own pick for 983 words (a coincidence), and
+the request sentence went into the set as study material. **And "title is" was
+not a phrasing Nomi knew.**
+
+`splitMessage` now also takes the first line's leading sentences while each is
+part of a request ("can you…", a verb that makes cards, a count, a title) and
+together they ask for something; the title is read from "title is", "titled",
+"call it", "name it", "title:" and "the title should be", and a colon after
+"title" belongs to the title. A first line that merely names something ("I said
+your name once…") is still notes.
+
+**Verified in the built app:** the same message now gets *"Want me to make a new
+set, "All Too Well", with 10 cards?"*, with the request shown apart from
+"Pasted notes, 72 words". The owner's existing set keeps its wrong name and the
+request sentence among its notes; "rename Can you make me a notes to All Too
+Well" fixes the first through Nomi.
+
+### 38.2 "0 of 10 cards known" — measured, not a bug, and changed
+
+Measured before deciding, because a schedule that silently failed to save
+(`recordAttempt` swallows that error) would have looked exactly like it: on the
+test account, three right answers took a card's run from 1 to 4 and its set's
+known count from 0 to 1. The rule — right three times in a row — was working.
+
+The owner: *"what i want is that when i'm done answering it, it means known.
+it's frustrating as a learner that i still see 0 out of 10 even if i already
+answered it."* Offered three definitions — right last time, answered at all, or
+three in a row with "answered" shown beside it — he chose **right last time,
+everywhere**.
+
+`masteryOf` now reads the schedule's `last_result`: right is known, partly right
+is "Partly right", wrong is needs work, no schedule is not started (a schedule
+with no recorded result falls back on the run, which a wrong answer resets).
+The dashboard's per-set count uses the same function; Progress says "You know
+these — your last answer was right"; Nomi says "(your last answer to them was
+right)". The schedule is untouched: a known card still comes back when due, and
+a wrong answer then takes it out again.
+
+**Measured after, same account, no new answers:** the two test sets read 5 of 11
+and 7 of 17 known (12 known and 16 not started across the account), where Home
+had shown "0 of 11 cards known" that morning. A never-answered card answered
+right once moved its set from 5 to 6; the answer and schedule were put back.
+
+### 38.3 "Why no quiz? Everything must have quiz"
+
+Reproduced on the test account: a set of 11 flashcards — 9 Remember, 1
+Understand, 1 Apply — had **no quiz question at any level**, and the Quiz opened
+onto "Results · 0 of 0 right · No questions at this level yet" with no level
+picker.
+
+Two causes. **The quiz asked only multiple-choice and written questions**, and
+most cards are flashcards — more so since §37's salvage turns a multiple-choice
+item with no options, or a written one with nothing to mark it against, into a
+flashcard. **And `finished = index >= items.length` was true for an empty
+level**, so the results page came before the level picker and there was no way
+to reach a level that did have questions.
+
+- **`src/core/quiz.ts`: every card is a question.** A written question that can
+  be marked stays written; everything else is a choice. `choicesFrom` checks the
+  wrong answers Gemini wrote — present, under 120 characters, not duplicates, not
+  the right answer in other words (`sameAnswer`), then the usual multiple-choice
+  checks. `choicesFromSet` stands in with the other cards' answers, same level
+  first and nearest in length, so the quiz is never empty for want of a call.
+- **`src/data/quiz-options.ts`, `addQuizChoices`**: 15 cards a request, numbered
+  rather than by id, saved as the card's `options` with its kind unchanged — a
+  flashcard is still a flashcard and still a fill-in-the-blank. Runs after a set
+  finishes (after the rubric pass) and when the quiz opens on cards with no
+  choices, showing "Making your quiz" for at most 25 seconds before asking with
+  choices from the set.
+- An empty level shows the level picker and says so.
+
+**Measured:**
+
+```
+placeholder key (Gemini refuses)   quiz asks 9 Remember questions, choices from the set
+real key, addQuizChoices           9 of 11 cards given choices in 7.1s
+  "The root collar."  vs  The vascular cambium / The epidermal boundary / The photosynthetic zone
+  "Root hairs."       vs  Lateral roots / Xylem vessels / Stomatal cells
+  not written: the two "which organs make up the shoot system" cards — they fall back to the set
+```
+
+The choices were reset afterwards. **The fallback is visibly weaker**: it offered
+"It serves as the primary photosynthetic organ." on a question about the parts
+of the shoot system. That is why Gemini writes the choices and the set only
+stands in.
+
+### 38.4 Verified
+
+typecheck clean · **904 tests**, 3 skipped (+18) · `expo export` · boot 5/5 ·
+the probes above against the live database and Google · screenshots at 393 dark
+of the quiz with choices from the set and from Gemini, Nomi's offer titled "All
+Too Well", Home and Progress under the new "known". **Not deployed**: production
+is `934b624`, which is §37.
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

@@ -25,6 +25,7 @@ import {
   buildGradePrompt,
   buildRubricCheckPrompt,
   buildVariantPrompt,
+  buildWrongOptionsPrompt,
   READ_SYSTEM_PROMPT,
 } from './prompts';
 import {
@@ -36,7 +37,9 @@ import {
   parseChatResult,
   parseRubricCheck,
   parseVariantResult,
+  parseWrongOptions,
   READ_RESPONSE_SCHEMA,
+  WRONG_OPTIONS_RESPONSE_SCHEMA,
   CHAT_RESPONSE_SCHEMA,
   RUBRIC_CHECK_RESPONSE_SCHEMA,
   VARIANT_RESPONSE_SCHEMA,
@@ -416,6 +419,28 @@ export class GeminiBrowserProvider implements AIProvider {
     });
 
     return parseVariantResult(payload);
+  }
+
+  /**
+   * Three wrong answers per card, for asking flashcards in the quiz (NOTES §38).
+   *
+   * Warmer than grading, cooler than a rephrasing: wrong answers should vary a
+   * little between sets, but they are checked against the right one by
+   * `choicesFrom`, and a wild guess is simply dropped.
+   */
+  async writeWrongOptions(input: {
+    notes: string;
+    cards: { n: number; prompt: string; answer: string }[];
+  }): Promise<{ n: number; wrong: string[] }[]> {
+    const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
+      contents: [{ role: 'user', parts: [{ text: buildWrongOptionsPrompt(input) }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: WRONG_OPTIONS_RESPONSE_SCHEMA,
+        temperature: 0.4,
+      },
+    });
+    return parseWrongOptions(payload);
   }
 
   /**

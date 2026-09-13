@@ -14,15 +14,18 @@ import {
   Screen,
   Title,
 } from '../../../src/ui/components';
+import { StatePanel } from '../../../src/ui/states';
 import { GLYPH } from '../../../src/ui/glyphs';
-import { radius, space, useTheme } from '../../../src/ui/theme';
+import { radius, space, type, useTheme } from '../../../src/ui/theme';
 import { SourcePanel } from '../../../src/ui/source';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import { listItems, promptFor, type StudyItem } from '../../../src/data/items';
 import { fetchProfile } from '../../../src/data/profile';
 import { missedItemIds } from '../../../src/data/attempts';
 import { useStudySession } from '../../../src/data/study-session';
+import { addQuizChoices } from '../../../src/data/quiz-options';
 import { deal, startingLevel } from '../../../src/core/deck';
+import { choicesFor, isWritten, needsChoices, type Option } from '../../../src/core/quiz';
 import { GeminiBrowserProvider } from '../../../src/ai/gemini';
 import { reasonToMessage } from '../../../src/core/ai-errors';
 import { GeminiCallError } from '../../../src/ai/gemini';
@@ -43,6 +46,13 @@ interface Answered {
 }
 
 const ITEM = { id: (i: StudyItem) => i.id, level: (i: StudyItem) => i.level };
+
+/**
+ * How long the quiz waits for Gemini to write answer choices before asking
+ * with choices from the set instead. The writing carries on either way, and a
+ * later round uses what it wrote.
+ */
+const CHOICES_WAIT_MS = 25_000;
 
 export default function Quiz() {
   const { id, retry, level: levelParam } = useLocalSearchParams<{
@@ -80,8 +90,12 @@ export default function Quiz() {
   const [answered, setAnswered] = useState<Answered[]>([]);
   const [current, setCurrent] = useState<GradedAnswer | null>(null);
 
-  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
-  const { data: allItems = [], isLoading } = useQuery({
+  const { data: profile, isSuccess: profileLoaded } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
+  const {
+    data: allItems = [],
+    isLoading,
+    refetch: refetchItems,
+  } = useQuery({
     // Every level in one query, filtered below. Switching levels is then
     // instant, and the per-level counts the buttons show come for free
     // instead of costing three more round trips.
@@ -97,18 +111,56 @@ export default function Quiz() {
     queryFn: () => listDocuments(setId),
   });
 
-  // Quiz uses MC and short written answers only — flashcards have no way to be
-  // marked.
-  const quizzable = useMemo(
-    () => allItems.filter((i) => i.kind === 'mcq' || i.kind === 'short_answer'),
+  /**
+   * Answer choices for cards that have none, written once when the quiz opens.
+   *
+   * Every card is a question now (NOTES §38). A flashcard is asked as a choice
+   * between its answer and three wrong ones; a set made before this, or one
+   * whose choices were not written when it finished, gets them here. The quiz
+   * waits for them — so the choices do not change under a question already on
+   * screen — but not for ever, and a card still without them is asked with
+   * choices from the other cards.
+   */
+  const [choices, setChoices] = useState<'checking' | 'writing' | 'ready'>('checking');
+  const choicesStarted = useRef(false);
+  useEffect(() => {
+    if (choicesStarted.current || isLoading || !profileLoaded) return;
+    choicesStarted.current = true;
+    const apiKey = profile?.gemini_api_key ?? '';
+    if (!apiKey || !allItems.some(needsChoices)) {
+      setChoices('ready');
+      return;
+    }
+    setChoices('writing');
+    const writing = addQuizChoices({ setId, apiKey })
+      .then(async (result) => {
+        if (result.notWritten > 0) console.warn(`[quiz] ${result.notWritten} card(s) asked with choices from the set`);
+        await refetchItems();
+      })
+      .catch((err) => {
+        console.warn(`[quiz] answer choices not written: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    const giveUp = new Promise((resolve) => setTimeout(resolve, CHOICES_WAIT_MS));
+    void Promise.race([writing, giveUp]).then(() => setChoices('ready'));
+  }, [isLoading, profileLoaded, profile, allItems, setId, refetchItems]);
+
+  // The choices for every card, worked out once per change to the cards: the
+  // card's own, or the set's (`choicesFor`). A card that can be asked neither
+  // way — a set too small to take choices from — is left out.
+  const choicesById = useMemo(
+    () => new Map(allItems.map((i) => [i.id, isWritten(i) ? null : choicesFor(i, allItems)])),
     [allItems],
+  );
+  const quizzable = useMemo(
+    () => allItems.filter((i) => isWritten(i) || choicesById.get(i.id) !== null),
+    [allItems, choicesById],
   );
 
   /**
-   * Counts for the level buttons, over QUIZZABLE items only.
+   * Counts for the level buttons, over the cards the quiz can ask.
    *
-   * A set can hold 10 remember cards of which only 3 are multiple choice, and a
-   * button promising 10 that then shows 3 questions would be a lie.
+   * Every card, now, bar a set too small for choices — so these match the
+   * Flashcards counts, which is what a student expects of the same set.
    */
   const countByLevel = useMemo(() => {
     const counts: Partial<Record<Level, number>> = {};
@@ -144,9 +196,9 @@ export default function Quiz() {
   }, [level, retryOnly]);
 
   const item = items[index];
-  const options = useMemo(
-    () => (item?.options ? shuffleOptions(item.options, item.id) : []),
-    [item],
+  const options: Option[] = useMemo(
+    () => (item && !isWritten(item) ? shuffleOptions(choicesById.get(item.id) ?? [], item.id) : []),
+    [item, choicesById],
   );
 
   /**
@@ -173,7 +225,7 @@ export default function Quiz() {
 
     let graded: GradedAnswer;
 
-    if (item.kind === 'mcq') {
+    if (!isWritten(item)) {
       if (chosen === null) {
         setError('Choose an answer first.');
         submitting.current = false;
@@ -186,12 +238,7 @@ export default function Quiz() {
         submitting.current = false;
         return;
       }
-      const rubric = item.rubric;
-      if (!rubric || rubric.expected_concepts.length === 0) {
-        setError("This question can't be marked. Skip it for now.");
-        submitting.current = false;
-        return;
-      }
+      const rubric = item.rubric!;
 
       setBusy(true);
       try {
@@ -233,7 +280,7 @@ export default function Quiz() {
         apiKey: profile?.gemini_api_key ?? undefined,
         score: graded.maxScore > 0 ? graded.score : null,
         maxScore: graded.maxScore > 0 ? graded.maxScore : null,
-        answerText: item.kind === 'mcq' ? (options[chosen ?? 0]?.text ?? null) : typed,
+        answerText: !isWritten(item) ? (options[chosen ?? 0]?.text ?? null) : typed,
         feedback: graded.feedback || null,
       });
     } catch {
@@ -260,7 +307,7 @@ export default function Quiz() {
     setIndex((i) => i + 1);
   }
 
-  if (isLoading) {
+  if (isLoading || choices === 'checking') {
     return (
       <Screen>
         <LoadingState />
@@ -268,7 +315,23 @@ export default function Quiz() {
     );
   }
 
-  const finished = index >= items.length;
+  if (choices === 'writing') {
+    return (
+      <Screen>
+        <Title>Quiz</Title>
+        <StatePanel kind="working"
+          title="Making your quiz"
+          detail="Writing answer choices from your notes. This only happens once for this set."
+        />
+      </Screen>
+    );
+  }
+
+  // Finished means questions were asked and all answered. A level with nothing
+  // to ask is NOT finished: it opened straight onto "0 of 0 right" with no way
+  // to choose another level, which is where the owner found an empty quiz
+  // (NOTES §38). It shows the level picker and says so instead.
+  const finished = items.length > 0 && index >= items.length;
 
   // ------------------------------------------------------------- results --
   if (finished) {
@@ -284,13 +347,6 @@ export default function Quiz() {
             {correct} of {answered.length} right
             {partial > 0 ? `, ${partial} partly right` : ''}.
           </Body>
-          {answered.length === 0 ? (
-            <Body muted>
-              {retryOnly
-                ? emptyLevelCopy('questions', true)
-                : emptyLevelCopy('questions', false)}
-            </Body>
-          ) : null}
         </Card>
 
         {/* Keyed by position, not item id: a retry round can legitimately show
@@ -371,7 +427,7 @@ export default function Quiz() {
           {/* back(), not replace(): replace destroys the history entry, which is
             what left the installed PWA with no way back — it has no edge-swipe
             gesture, so the header chevron is the only route out. */}
-        <Button label="Back to set" variant="secondary" onPress={() => router.back()} />
+          <Button label="Back to set" variant="secondary" onPress={() => router.back()} />
         </Card>
       ) : item ? (
         <>
@@ -380,7 +436,7 @@ export default function Quiz() {
           <Card>
             <Body>{promptFor(item)}</Body>
 
-            {item.kind === 'mcq' ? (
+            {!isWritten(item) ? (
               <View style={{ gap: space.sm }}>
                 {options.map((o, i) => {
                   // Before answering, the only state is "picked". After, the
@@ -415,18 +471,14 @@ export default function Quiz() {
                           backgroundColor: isChosen ? t.bg : 'transparent',
                         }}
                       >
-                        <Text style={{ color: t.text, fontSize: 15, flex: 1 }}>{o.text}</Text>
+                        <Text style={[type.body, { color: t.text, flex: 1 }]}>{o.text}</Text>
                         {/* A mark as well as a colour: roughly one man in twelve
                             cannot separate the green from the red, and the
                             verdict must not live in hue alone. */}
                         {showRight || showWrong ? (
                           <Text
                             accessibilityLabel={showRight ? 'Correct answer' : 'Your answer, wrong'}
-                            style={{
-                              color: showRight ? t.ok : t.danger,
-                              fontSize: 17,
-                              fontWeight: '700',
-                            }}
+                            style={[type.bodyStrong, { color: showRight ? t.ok : t.danger }]}
                           >
                             {showRight ? GLYPH.right : GLYPH.wrong}
                           </Text>

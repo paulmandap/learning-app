@@ -34,7 +34,7 @@
  */
 
 import { supportedFor } from './planner';
-import { normalize, wordCount } from './text';
+import { normalize, splitSentences, wordCount } from './text';
 import { FACE_COUNT } from './avatar';
 import { MAX_QUESTION_CHARS } from './chat';
 import type { PetSpecies } from './pet';
@@ -122,8 +122,19 @@ const SAVE = /\b(?:save|keep|put|store)\b[\s\S]*?\bnotes?\b/i;
 /** A paste that comes with a question about it, which is Gemini's, not an action. */
 const ASK =
   /^(?:(?:can|could) you\s+|please\s+)?(?:explain|summari[sz]e|what does|what do|what is this|tell me about|help me understand|quiz me)\b/i;
-/** "…, call it Cell Biology". */
-const NAMED = /\b(?:called|named|name it|title it|call it)\s+["“']?([^"”'\n:]{1,60}?)["”']?\s*(?:[:.,!]|$)/i;
+/**
+ * "…, call it Cell Biology", "title is All Too Well", "title: Bio 3.1".
+ *
+ * The name ends at punctuation followed by a space or the end, so "Bio 3.1"
+ * keeps its decimal. "title is" is the phrasing the owner used and the first
+ * version did not know (NOTES §38).
+ */
+const NAMED =
+  /\b(?:called|named|titled|(?:call|name|title) it|(?:the\s+)?(?:title|name)\s*(?:is|:|should be|will be))\s*["“']?(.+?)["”']?\s*(?:[.,!?:;](?=\s|$)|$)/i;
+/** A sentence that gives a title. */
+const TITLE_GIVEN = /\b(?:called|named|titled|(?:call|name|title) it)\b|\b(?:title|name)\s*(?:is\b|:|should be\b|will be\b)/i;
+/** "can you …", "please …" — the way a request starts. */
+const REQUESTING = /^(?:(?:can|could|would|will) you|please|pls|i want|i need|i'?d like|help me)\b/i;
 
 const RENAME =
   /^(?:(?:please|pls|can you|could you)[\s,]+)*(?:rename|change the name of)\s+(?:my\s+|the\s+)?["“']?(.+?)["”']?\s+(?:set\s+|deck\s+)?(?:to|as|into)\s+["“']?(.+?)["”']?\s*[.!]*$/i;
@@ -135,26 +146,56 @@ const PET =
 const FACE =
   /\b(?:use|pick|choose|switch to|change to|set)\s+(?:my\s+)?(?:(?:profile\s+)?(?:picture|avatar|pic|photo)\s+(?:to\s+)?)?face\s*(?:number\s*|#\s*)?(\d{1,2})\b/i;
 
+const hasIntent = (text: string) => MAKE.test(text) || ADD_TO.test(text) || SAVE.test(text);
+
+/** One sentence of a request, rather than of the notes. */
+function isRequestSentence(sentence: string): boolean {
+  return (
+    wordCount(sentence) <= 20 &&
+    (REQUESTING.test(sentence) || hasIntent(sentence) || TITLE_GIVEN.test(sentence) || statedCount(sentence) !== null)
+  );
+}
+
 /**
  * Separate an instruction from the notes it is about.
  *
- * "Make 20 flashcards from this:" on its own first line, or before a colon on
- * the same line. Anything else is all notes — a first line that merely contains
- * "set" ("Set theory basics") is a heading, not a request, because an
- * instruction needs its verb.
+ * Three shapes, and the third is the one the owner actually typed (NOTES §38):
+ *
+ *  - "Turn this into a set: <notes>", or an instruction ending in a colon on a
+ *    line of its own;
+ *  - an instruction on its own first line;
+ *  - requests typed straight into the paste, on the same line as the first line
+ *    of the notes — "can you make me a notes of this? make 10 flash cards.
+ *    title is All Too Well. I walked through the door…" — taken sentence by
+ *    sentence until one is not part of a request.
+ *
+ * Whatever is taken must actually ask for something (make, add, save): a first
+ * line that merely names something ("Set theory basics", "I said your name
+ * once") is notes. And the colon in "…, title: Bio 3.1" belongs to the title.
  */
 export function splitMessage(message: string): { instruction: string; notes: string } {
   const text = message.trim();
-  const isInstruction = (line: string) =>
-    wordCount(line) <= 25 && (MAKE.test(line) || ADD_TO.test(line) || SAVE.test(line));
-
   const [first = '', ...rest] = text.split(/\r?\n/);
-  if (rest.length > 0 && isInstruction(first.trim())) {
-    return { instruction: first.trim(), notes: rest.join('\n').trim() };
+
+  const colon = first.match(/^([^:]{3,160}):\s*(.*)$/);
+  if (colon && !/\b(?:title|name)\s*$/i.test(colon[1]!) && wordCount(colon[1]!) <= 25 && hasIntent(colon[1]!)) {
+    const sameLine = colon[2]!.trim();
+    return {
+      instruction: sameLine ? colon[1]!.trim() : first.trim(),
+      notes: [sameLine, ...rest].filter((part) => part.length > 0).join('\n').trim(),
+    };
   }
-  const colon = text.match(/^([^:\n]{3,160}):\s*([\s\S]+)$/);
-  if (colon && isInstruction(colon[1]!)) {
-    return { instruction: colon[1]!.trim(), notes: colon[2]!.trim() };
+
+  const taken: string[] = [];
+  for (const sentence of splitSentences(first)) {
+    if (!isRequestSentence(sentence)) break;
+    taken.push(sentence);
+  }
+  const request = taken.join(' ');
+  if (taken.length > 0 && hasIntent(request)) {
+    let cursor = 0;
+    for (const sentence of taken) cursor = text.indexOf(sentence, cursor) + sentence.length;
+    return { instruction: request, notes: text.slice(cursor).trim() };
   }
   return { instruction: '', notes: text };
 }

@@ -308,10 +308,19 @@ export type MasteryBucket = 'known' | 'getting' | 'needsWork' | 'notStarted';
 
 export type MasteryCounts = Record<MasteryBucket, number>;
 
+/** How a card's last answer went, as its schedule records it. */
+export type LastResult = 'correct' | 'partial' | 'incorrect';
+
+/** What `masteryOf` needs from a card's schedule. */
+export interface MasteryInput {
+  reps: number;
+  lastResult?: LastResult | null;
+}
+
 /**
- * Correct answers in a row before a card counts as known.
+ * ## History: the two definitions of "known" before this one
  *
- * ## Why this replaced a 21-day interval
+ * ### A 21-day interval, replaced by three in a row (§18.1)
  *
  * The first version called a card mastered once its interval reached 21 days,
  * which is SM-2's conventional line and is defensible as a statement about
@@ -338,32 +347,45 @@ export type MasteryCounts = Record<MasteryBucket, number>;
  * Three in a row lands on day 7 instead, and it is also the plainer claim: "you
  * have got this right three times running" is something a person can check
  * against their own memory, which "its interval exceeds 21 days" is not.
+ *
+ * ### Three in a row, replaced by the last answer (NOTES §38)
+ *
+ * The owner, after answering every card in a set: *"what i want is that when
+ * i'm done answering it, it means known. it's frustrating as a learner that i
+ * still see 0 out of 10 even if i already answered it."*
+ *
+ * It was measured first, because it could have been a schedule that never
+ * saved: on the test account three right answers took a card's run from 1 to 4
+ * and its set's known count from 0 to 1. The rule was working; the rule was the
+ * problem. Asked what should count, he chose "right last time", everywhere.
+ *
+ * Nothing about studying weakens. The schedule still brings a known card back
+ * when it is due, and a wrong answer then takes it straight back out — so
+ * "known" is always a statement about the last time the card was asked.
  */
-export const KNOWN_REPS = 3;
 
 /**
- * Which bucket one card is in.
+ * Which bucket one card is in, by how its last answer went.
  *
- * `reps` is the scheduler's count of consecutive successes: a correct answer
- * increments it, a wrong answer resets it to zero, and a partial holds it. That
- * makes it exactly the number this wants, already maintained, with no new
- * storage — and it moves the same day a student answers, which the interval
- * never did.
+ * `lastResult` is the schedule's own record of that answer. A schedule written
+ * without one falls back on the run of right answers, which a wrong answer
+ * resets to zero — so a run above zero means the last answer was not wrong.
  */
-export function masteryOf(state: ReviewState | null | undefined): MasteryBucket {
+export function masteryOf(state: MasteryInput | null | undefined): MasteryBucket {
   // No schedule at all means it has never been answered. Distinct from a card
-  // answered wrong, which HAS a schedule sitting at zero — those are different
-  // things to a learner, and the whole point is that the bands mean something.
+  // answered wrong, which HAS a schedule — those are different things to a
+  // learner, and the whole point is that the bands mean something.
   if (!state) return 'notStarted';
-  if (state.reps >= KNOWN_REPS) return 'known';
-  if (state.reps > 0) return 'getting';
+  const last: LastResult = state.lastResult ?? (state.reps > 0 ? 'correct' : 'incorrect');
+  if (last === 'correct') return 'known';
+  if (last === 'partial') return 'getting';
   return 'needsWork';
 }
 
 /** Bucket every card in a set. Cards with no schedule have not been started. */
 export function masteryCounts<T>(
   items: T[],
-  stateOf: (item: T) => ReviewState | null | undefined,
+  stateOf: (item: T) => MasteryInput | null | undefined,
 ): MasteryCounts {
   const counts: MasteryCounts = { known: 0, getting: 0, needsWork: 0, notStarted: 0 };
   for (const item of items) counts[masteryOf(stateOf(item))]++;

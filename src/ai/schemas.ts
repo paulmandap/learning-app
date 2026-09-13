@@ -274,6 +274,48 @@ export function parseVariantResult(payload: unknown): { prompt: string } | null 
   return parsed.success ? parsed.data : null;
 }
 
+// --------------------------------------------------------- quiz choices --
+
+const wrongOptionsItemSchema = z.object({
+  n: z.number().int(),
+  wrong: z.array(z.string()),
+});
+
+/** Three wrong answers per numbered card (NOTES §38). */
+export const WRONG_OPTIONS_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          n: { type: 'integer' },
+          wrong: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['n', 'wrong'],
+      },
+    },
+  },
+  required: ['items'],
+} as const;
+
+/**
+ * The entries that parse, one by one — a malformed entry costs that card its
+ * written choices, never the batch (the same rule as `parseItemsLoose`).
+ */
+export function parseWrongOptions(payload: unknown): { n: number; wrong: string[] }[] {
+  const container =
+    typeof payload === 'object' && payload !== null && 'items' in payload
+      ? (payload as { items: unknown }).items
+      : payload;
+  if (!Array.isArray(container)) return [];
+  return container
+    .map((raw) => wrongOptionsItemSchema.safeParse(raw))
+    .filter((r): r is { success: true; data: { n: number; wrong: string[] } } => r.success)
+    .map((r) => r.data);
+}
+
 // ---------------------------------------------------------- rubric check --
 
 export const rubricCheckSchema = z.object({

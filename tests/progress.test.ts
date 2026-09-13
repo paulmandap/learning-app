@@ -4,7 +4,6 @@ import {
   describeForecast,
   dueForecast,
   forecastDayLabel,
-  KNOWN_REPS,
   masteryCounts,
   masteryOf,
   MIN_SECTION_ATTEMPTS,
@@ -192,56 +191,53 @@ describe('forecastDayLabel', () => {
   });
 });
 
-describe('masteryOf', () => {
+describe('masteryOf — known means the last answer was right (NOTES §38)', () => {
   it('calls a card with no schedule not started', () => {
     expect(masteryOf(null)).toBe('notStarted');
     expect(masteryOf(undefined)).toBe('notStarted');
   });
 
-  it('calls a card right three times running known', () => {
-    expect(masteryOf(state({ reps: KNOWN_REPS }))).toBe('known');
-    expect(masteryOf(state({ reps: KNOWN_REPS + 4 }))).toBe('known');
+  it('calls a card known as soon as its last answer was right', () => {
+    expect(masteryOf({ reps: 1, lastResult: 'correct' })).toBe('known');
+    expect(masteryOf({ reps: 7, lastResult: 'correct' })).toBe('known');
   });
 
-  it('calls one or two right getting there', () => {
-    expect(masteryOf(state({ reps: 1 }))).toBe('getting');
-    expect(masteryOf(state({ reps: 2 }))).toBe('getting');
+  it("the owner's case: one right pass through a set of 10 makes 10 known", () => {
+    // "it's frustrating as a learner that i still see 0 out of 10 even if i
+    // already answered it" — three in a row left this at 0.
+    const afterOnePass = Array.from({ length: 10 }, () => ({ reps: 1, lastResult: 'correct' as const }));
+    expect(masteryCounts(afterOnePass, (s) => s).known).toBe(10);
   });
 
-  it('calls a card whose last answer was wrong needs work', () => {
-    // reps is reset to 0 by a wrong answer, so this is exactly "you missed it
-    // last time" — the thing a student can act on today.
-    expect(masteryOf(state({ reps: 0, lapses: 1 }))).toBe('needsWork');
+  it('takes a card back out the moment it is answered wrong', () => {
+    expect(masteryOf({ reps: 0, lastResult: 'incorrect' })).toBe('needsWork');
   });
 
   it('separates never-seen from missed-last-time', () => {
-    // These are different things to a learner and the whole point of the bands
-    // is that they mean something. A card answered wrong HAS a schedule.
+    // A card answered wrong HAS a schedule; one never asked does not.
     expect(masteryOf(null)).toBe('notStarted');
-    expect(masteryOf(state({ reps: 0 }))).toBe('needsWork');
+    expect(masteryOf({ reps: 0, lastResult: 'incorrect' })).toBe('needsWork');
   });
 
-  it('does not hold an old bad run against a card that is going well now', () => {
-    // Lapses never decrease, so keying off them would leave a card labelled
-    // badly for ever. What matters is the current run.
-    expect(masteryOf(state({ reps: 5, lapses: 9 }))).toBe('known');
+  it('calls a partly right last answer partly right, not known', () => {
+    // A partial holds the run, so the run alone would call this known.
+    expect(masteryOf({ reps: 3, lastResult: 'partial' })).toBe('getting');
   });
 
-  it('is reachable in a week, which the interval-based version was not', () => {
-    // The defect this replaced: intervals go 1, 6, 16, 45 days and a card is
-    // only shown when due, so a 21-day threshold could not be met before day
-    // 23 however well someone answered. Three correct answers land on day 7.
-    expect(masteryOf(state({ reps: 3, intervalDays: 16 }))).toBe('known');
+  it('reads the run when a schedule has no last result recorded', () => {
+    // A wrong answer resets the run to zero, so a run above zero was not wrong.
+    expect(masteryOf(state({ reps: 2 }))).toBe('known');
+    expect(masteryOf(state({ reps: 0, lapses: 1 }))).toBe('needsWork');
   });
 });
 
 describe('masteryCounts', () => {
   it('buckets every card exactly once', () => {
     const items = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
-    const states: Record<string, ReviewState | null> = {
-      a: state({ reps: 4 }),
-      b: state({ reps: 2 }),
-      c: state({ reps: 0, lapses: 3 }),
+    const states: Record<string, { reps: number; lastResult: 'correct' | 'partial' | 'incorrect' } | null> = {
+      a: { reps: 1, lastResult: 'correct' },
+      b: { reps: 2, lastResult: 'partial' },
+      c: { reps: 0, lastResult: 'incorrect' },
       d: null,
     };
     const counts = masteryCounts(items, (i) => states[i.id]);

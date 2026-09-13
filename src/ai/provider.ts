@@ -124,6 +124,11 @@ export interface AIProvider {
     /** The conversation so far, ending with the student's new message. */
     turns: import('../core/chat').ChatTurn[];
   }): Promise<string | null>;
+  /** Three wrong answers per card, from the notes, for the quiz (NOTES §38). */
+  writeWrongOptions(input: {
+    notes: string;
+    cards: { n: number; prompt: string; answer: string }[];
+  }): Promise<{ n: number; wrong: string[] }[]>;
   /** Check an Apply-tier rubric against its source (D7's postponed pass). */
   verifyRubric(input: {
     prompt: string;

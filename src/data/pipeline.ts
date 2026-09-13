@@ -38,6 +38,7 @@ import {
 } from './documents';
 import { existingCards, insertItems, type ExistingCardRow } from './items';
 import { verifyRubrics } from './rubrics';
+import { addQuizChoices } from './quiz-options';
 import { getSet, markSectionComplete, updateSet, type StoredPlan } from './sets';
 
 /**
@@ -563,6 +564,19 @@ export async function generateSet(input: {
         `[pipeline] rubric check: ${pass.checked} checked, ${pass.flagged} flagged, ` +
           `${pass.failed} could not be checked`,
       );
+    }
+
+    // Answer choices for every card that has none, so the whole set can be
+    // asked in the quiz (NOTES §38). After ready, for the rubric pass's reason:
+    // the cards are usable the moment the set is, and the quiz writes choices
+    // itself for any card this did not reach.
+    try {
+      const choices = await addQuizChoices({ setId, apiKey });
+      if (choices.written > 0 || choices.notWritten > 0) {
+        console.warn(`[pipeline] quiz choices: ${choices.written} written, ${choices.notWritten} not`);
+      }
+    } catch (err) {
+      console.warn(`[pipeline] quiz choices failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

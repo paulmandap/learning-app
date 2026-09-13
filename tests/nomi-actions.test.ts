@@ -145,6 +145,51 @@ describe('proposeAction — pasted notes become a set', () => {
   });
 });
 
+describe("proposeAction — the owner's own request (NOTES §38)", () => {
+  // The shape of what the owner sent: an instruction typed straight into the
+  // paste, on the same line as the first line of the song. The lines here are
+  // from the stand-in ballad of §37, not the real lyrics.
+  const INSTRUCTION = 'can you make me a notes of this? make 10 flash cards. title is All Too Well.';
+  const SONG = [
+    'I drove up north with the windows down in late October',
+    'You had a thermos full of cider and a map you never read',
+    'The radio kept cutting out between the pines and the water',
+    "And you sang the parts you didn't know in your own words instead",
+    'We stopped at a gas station where the owner knew your grandpa',
+    'He gave us two free peaches and a warning about the rain',
+    'You laughed and said the sky was only practicing its thunder',
+    "And I believed you like I'd believe you over and over again",
+  ].join('\n');
+
+  for (const [shape, message] of [
+    ['on the same line as the notes', `${INSTRUCTION} ${SONG}`],
+    ['on a line of its own', `${INSTRUCTION}\n${SONG}`],
+  ] as const) {
+    it(`takes the title, the count and the notes from an instruction ${shape}`, () => {
+      const action = proposeAction(message, snapshot)!.action as Extract<NomiAction, { kind: 'make_set' }>;
+      expect(action.kind).toBe('make_set');
+      expect(action.title).toBe('All Too Well');
+      expect(action.count).toBe(10);
+      expect(action.countPicked).toBe(false);
+      // The request itself is not study material.
+      expect(action.notes).not.toMatch(/flash cards|title is/i);
+      expect(action.notes.startsWith('I drove up north')).toBe(true);
+    });
+  }
+
+  it('reads the other ways a title is given', () => {
+    for (const phrase of ['titled Bio 3.1', 'call it Bio 3.1', 'name it Bio 3.1', 'title: Bio 3.1', 'the title should be Bio 3.1']) {
+      const action = proposeAction(`Make flashcards from this, ${phrase}.\n${SONG}`, snapshot)!.action;
+      expect(action, phrase).toMatchObject({ kind: 'make_set', title: 'Bio 3.1' });
+    }
+  });
+
+  it('does not take a first line of notes for an instruction because it names something', () => {
+    const action = proposeAction(`I said your name once like a word from another language\n${SONG}`, snapshot)!.action;
+    expect(action).toMatchObject({ kind: 'make_set', title: 'I said your name once like' });
+  });
+});
+
 describe('proposeAction — the small writes', () => {
   it('renames a set it can find', () => {
     expect(proposeAction('rename world history to History 101', snapshot)!.action).toEqual({
