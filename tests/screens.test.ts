@@ -235,23 +235,26 @@ describe('Nomi has a way in and a place to go', () => {
     expect(layout).toMatch(/name="nomi"[\s\S]{0,120}backable/);
   });
 
-  it('opens from the heading of Study and Progress', () => {
-    for (const source of [home, progress]) {
-      expect(source).toContain('NomiButton');
-      expect(source).toContain('TitleRow');
+  it('opens from Nomi standing on Home, not from a pill in a heading', () => {
+    // The owner, 2026-09-13: "I don't like how Nomi is just looking like a
+    // button that needs to be clicked." The pill in Study's and Progress's
+    // headings became a card Nomi stands on, on Home (NOTES §36).
+    expect(code(home)).toContain('<NomiCard');
+    for (const tab of tsxUnder(join('app', '(tabs)'))) {
+      expect(code(readFileSync(tab, 'utf8')), tab).not.toContain('NomiButton');
     }
   });
 
-  it('appears on every one of Progress\'s three render branches', () => {
+  it("Progress's three render branches keep their heading", () => {
     // Progress returns early for loading and for nothing-answered-yet. Hand
-    // editing three branches is how two of them quietly lose the control.
-    const rows = progress.match(/<TitleRow title="Progress" action=\{<NomiButton \/>\} \/>/g) ?? [];
+    // editing three branches is how two of them quietly lose their title.
+    const rows = progress.match(/<TitleRow title="Progress" \/>/g) ?? [];
     expect(rows).toHaveLength(3);
   });
 
-  it('navigates to the route the stack registered', () => {
-    const button = read('src', 'ui', 'nomi.tsx');
-    expect(button).toContain("router.push('/nomi')");
+  it('navigates to the route the stack registered, from Home and from the ✦ panel', () => {
+    expect(home).toContain("router.push('/nomi')");
+    expect(read('src', 'ui', 'assistant.tsx')).toContain("router.push('/nomi')");
   });
 
   it('is NOT in the bottom navigation', () => {
@@ -268,13 +271,14 @@ describe('Nomi has a way in and a place to go', () => {
     }
   });
 
-  it('asks the database for nothing when opened', () => {
-    // The screen holds space; it does not report progress it cannot know.
-    // getNomiContext is the boundary Phase C wires up — until then, opening
-    // Nomi must not cost a round trip.
+  it('is the conversation itself, with no description cards', () => {
+    // "there's TOO MUCH text/cards. too much descriptions! remove that." —
+    // the owner, on the screen this replaced (NOTES §36). It reads through the
+    // data layer, never the database directly.
     const screen = code(read('app', 'nomi.tsx'));
-    expect(screen).not.toContain('useQuery');
-    expect(screen).not.toContain('getNomiContext');
+    expect(screen).toContain('<Composer');
+    expect(screen).toContain('<ChatHistory');
+    expect(screen).not.toMatch(/<Card\b|<Body\b/);
     expect(screen).not.toContain('supabase');
   });
 
@@ -302,9 +306,16 @@ describe('the existing assistant still works, and is now called Nomi', () => {
     expect(layout).toContain("segments[0] !== 'sign-in'");
   });
 
-  it('still asks through askAssistant — one AI, not two', () => {
-    const ui = read('src', 'ui', 'assistant.tsx');
-    expect(ui).toContain('askAssistant');
+  it('the ✦ panel and Nomi’s screen are one conversation, not two AIs', () => {
+    // askAssistant was the one-question operation; both windows now read the
+    // same conversation, so a question asked about a card continues in the full
+    // chat (NOTES §36).
+    expect(code(read('src', 'ui', 'assistant.tsx'))).toContain('useNomiConversation(context)');
+    expect(code(read('app', 'nomi.tsx'))).toContain('useNomiConversation(context)');
+  });
+
+  it('is hidden on Nomi’s own screen, where the whole screen is the conversation', () => {
+    expect(read('app', '_layout.tsx')).toContain("segments[0] !== 'nomi'");
   });
 
   it('shows the same owl on both surfaces, and keeps ✦ on the floating button', () => {
@@ -324,14 +335,16 @@ describe('the existing assistant still works, and is now called Nomi', () => {
     expect(read('src', 'ui', 'assistant.tsx')).toContain('Ask Nomi');
   });
 
-  it('leaves the D13 privacy copy exactly as approved', () => {
+  it('leaves the D13 privacy copy exactly as approved — including its extension', () => {
     // The owner's instruction, pinned rather than remembered: this paragraph is
     // approved copy that D13 says must not be paraphrased smaller, and the word
-    // Nomi does not enter it. The app names Nomi everywhere except here.
+    // Nomi does not enter it. Extended with his approval on 2026-09-13, when
+    // Nomi began sending what it knows about the student (NOTES §36).
     const settings = read('app', '(tabs)', 'settings.tsx');
     expect(settings).toContain(
-      'The study assistant works the same way — what you ask it, and the notes it looks at to',
+      'The study assistant works the same way — what you ask it, the notes it looks at, and',
     );
+    expect(settings).toContain('what it knows about your studying (your name, sets, streak and progress) are sent to');
     const notice = settings.slice(settings.indexOf('Where your notes go'), settings.indexOf('key + test'));
     expect(notice).not.toMatch(/nomi/i);
   });
@@ -414,7 +427,7 @@ describe('symbols and waiting are each said one way', () => {
     // chevrons become two different characters (NOTES §35). Comments are
     // stripped first: explaining a glyph in prose is fine.
     for (const file of surfaces().filter((f) => !f.endsWith('glyphs.tsx'))) {
-      expect(code(readFileSync(file, 'utf8')), file).not.toMatch(/[›‹⋯✕✓✗✦✎❏◕⚙]/);
+      expect(code(readFileSync(file, 'utf8')), file).not.toMatch(/[›‹⋯✕✓✗✦✎❏◕⚙↑☰]/);
     }
   });
 
@@ -489,25 +502,33 @@ describe("Nomi's screen describes the present", () => {
     }
   });
 
-  it('bounds how long the goodbye can hold up leaving', () => {
-    // The back control awaits the wave. A promise that only the animation can
-    // resolve is a way out that can stop working.
-    expect(code(screen)).toMatch(/setTimeout\(resolve, GOODBYE_CEILING_MS\)/);
-    expect(screen).toMatch(/GOODBYE_CEILING_MS = \d{3};/);
-  });
-
-  it('states the daily allowance from the constant, not a copy of it', () => {
-    expect(code(screen)).toContain('{DAILY_MESSAGE_LIMIT}');
+  it('opens a new conversation with Nomi saying hello, not a description of Nomi', () => {
+    expect(code(screen)).toContain('<NomiWelcome');
+    expect(code(screen)).toContain('homeLine(chat.snapshot)');
   });
 });
 
 describe('each screen gives its weight to the thing you came to do', () => {
   it('Home gives Continue the filled button, and + New set a compact one', () => {
     // "+ New set" was the only filled button on the screen you open every day,
-    // outweighing Continue — the daily action (NOTES §35).
+    // outweighing Continue — the daily action (NOTES §35). The card is shaded
+    // and its heading sits above it, from the owner's reference (§36).
     const home = code(read('app', '(tabs)', 'index.tsx'));
     expect(home).toContain('action={<PillButton label="+ New set"');
-    expect(home).toMatch(/<Card>\s*<Label>Continue where you left off<\/Label>[\s\S]*?<Button/);
+    expect(home).toMatch(/<SectionRow title="Continue where you left off" \/>\s*<ContinueCard[\s\S]*?actionLabel=/);
+    expect(code(read('src', 'ui', 'home.tsx'))).toMatch(/backgroundColor: t\.feature[\s\S]*?<Button/);
+  });
+
+  it('Home greets the student by name, with their picture top right opening Settings', () => {
+    const home = code(read('app', '(tabs)', 'index.tsx'));
+    expect(home).toContain('<GreetingHeader');
+    expect(home).toContain("onAvatar={() => router.push('/settings')}");
+  });
+
+  it('Delete my data also deletes Nomi chats and profile pictures', () => {
+    const sets = code(read('src', 'data', 'sets.ts'));
+    expect(sets).toContain("from('nomi_conversations').delete()");
+    expect(sets).toContain('removeAvatarPhotos()');
   });
 
   it('the set screen offers its three modes as peers, not as one button and two lesser ones', () => {
@@ -571,5 +592,49 @@ describe('only the one-card screens are centred', () => {
     for (const file of tsxUnder(join('app', '(tabs)'))) {
       expect(code(readFileSync(file, 'utf8')), file).not.toContain('<Screen centered');
     }
+  });
+});
+
+describe('a finished deck clears what it promised', () => {
+  /**
+   * Reported from daily use, 2026-09-13, and reproduced on the test account the
+   * same day: "Retry what you missed" opened on Understand and found nothing,
+   * because every missed card was a Remember card; and after the student got
+   * all five right, pressing back showed "7 due today · 5 cards to retry" until
+   * a full reload (NOTES §36).
+   */
+  const decks = ['flashcards.tsx', 'quiz.tsx', 'blanks.tsx'];
+
+  for (const deck of decks) {
+    it(`${deck} records through useStudySession, so leaving refreshes Home and Progress`, () => {
+      const source = code(read('app', 'set', '[id]', deck));
+      expect(source).toContain('useStudySession(setId)');
+      expect(source).not.toMatch(/\brecordAttempt\(/);
+    });
+
+    it(`${deck} builds its deck with deal(), so a retry deck is every missed card`, () => {
+      expect(code(read('app', 'set', '[id]', deck))).toMatch(/\bdeal\(/);
+    });
+  }
+
+  it('flashcards and quiz start on the level their link names, as initial state, never an effect', () => {
+    for (const deck of ['flashcards.tsx', 'quiz.tsx']) {
+      expect(code(read('app', 'set', '[id]', deck))).toMatch(
+        /useState<Level>\(\(\) => startingLevel\(levelParam\)\)/,
+      );
+    }
+  });
+
+  it('the retry button counts the set it opens, and the due button opens the level the cards are at', () => {
+    const progress = code(read('app', '(tabs)', 'progress.tsx'));
+    expect(progress).toContain('data.retryTargetCount');
+    expect(progress).toContain('data.dueTargetLevel');
+    expect(code(read('app', 'set', '[id]', 'index.tsx'))).toContain('flashcards?level=${dueLevel}');
+  });
+
+  it('Home and Progress refetch when the app comes back to the front', () => {
+    const home = code(read('app', '(tabs)', 'index.tsx'));
+    expect(home.match(/refetchOnWindowFocus: true/g) ?? []).toHaveLength(2);
+    expect(code(read('app', '(tabs)', 'progress.tsx'))).toContain('refetchOnWindowFocus: true');
   });
 });

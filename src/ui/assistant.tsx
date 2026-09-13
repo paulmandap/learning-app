@@ -1,67 +1,43 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import { useQuery } from '@tanstack/react-query';
-import { useSegments } from 'expo-router';
+import { Platform, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { useRouter, useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { elevation, INPUT_FONT_SIZE, radius, space, TAB_BAR_HEIGHT, useTheme } from './theme';
-import { fetchProfile } from '../data/profile';
-import { askAssistant } from '../data/assistant';
+import { elevation, radius, space, TAB_BAR_HEIGHT, type, useTheme } from './theme';
 import { useAssistantContext } from '../data/assistant-context';
-import { describeRemaining, isAskable, MAX_QUESTION_CHARS } from '../core/chat';
+import { useNomiConversation } from '../data/nomi-session';
 import type { NomiState } from '../core/nomi-motion';
 import { NomiCharacter } from './nomi-character';
+import { ChatBubble, Composer } from './nomi';
 import { GLYPH } from './glyphs';
 
 /**
- * The study assistant (Phase 9c, D14) — this is Nomi.
+ * Nomi, in context — the floating ✦ (Phase 9c; a chat since NOTES §36).
  *
  * ## The name
  *
- * Nomi is the product identity for this, not a second AI beside it. `Nomi` on a
- * screen and `StudyAssistant` in the code are the same thing: the name changed,
- * the architecture did not, and `askAssistant` remains the implementation.
- *
- * This floating button is Nomi in its IN-CONTEXT form — it sees the card in
- * front of you. `app/nomi.tsx` is the dedicated place, reached from the heading
- * of Study and Progress, for questions about the studying rather than about one
- * card. Neither is finished; both are the same companion.
+ * Nomi is the product identity for this, not a second AI beside it. The ✦ and
+ * Nomi's own screen are two windows onto ONE conversation: a question asked
+ * here about a card carries on in the full chat, and the other way round,
+ * because both read the same `useNomiConversation`.
  *
  * **The D13 privacy copy in `app/(tabs)/settings.tsx` deliberately still says
  * "the study assistant".** That paragraph is approved copy which D13 says must
- * not be paraphrased smaller, and the owner's instruction is to leave it alone.
- * So the app names Nomi everywhere except there — a chosen inconsistency, not a
- * missed rename, and `tests/screens.test.ts` pins the sentence so an edit
- * cannot drift into it.
- *
- * A small circle in the bottom corner that opens into a panel big enough to
- * read and type in — the owner's words. Closed it is one tappable circle;
- * open it is a sheet on a phone and a panel beside the content on a desktop.
- *
- * ## Deliberately not a chat app
- *
- * One question, one answer, no scrollback. That is not a shortcut:
- *
- *  - a conversation history would be sent with every follow-up, so the third
- *    question in a thread costs several times the first — on a free tier shared
- *    with the thing that actually makes the cards;
- *  - the answer is grounded in the card or the notes in front of you, and a
- *    thread drifts away from that grounding with each turn;
- *  - the useful question here is "explain this bit", asked and answered.
+ * not be paraphrased smaller, and the owner's instruction is to leave the name
+ * out of it. It was EXTENDED with his approval when Nomi learned about the
+ * student (§36) — the wording changed, the name rule did not.
  *
  * ## What it knows
  *
  * Whatever the current screen put in `useAssistantContext` — the open card on a
- * study screen, the set's notes elsewhere. An ungrounded assistant would be
- * worse than the Gemini web app for the same quota, and could confidently
- * contradict the notes the student is about to be examined on.
+ * study screen, the set's notes elsewhere — plus everything Nomi knows about the
+ * student from the app. Grounded answers still come from the notes first.
+ *
+ * ## No longer one question and one answer
+ *
+ * D14 kept this to a single exchange with no history. The owner reversed that
+ * (§36), and the costs D14 named are handled rather than ignored: only the
+ * last twenty messages go with each new one, Nomi's own brain answers app
+ * questions without a model call, and the daily cap still applies to the rest.
  */
 
 const CLOSED_SIZE = 52;
@@ -69,44 +45,33 @@ const CLOSED_SIZE = 52;
 const PANEL_WIDTH = 380;
 /** Below this the panel goes nearly full width, as a sheet. */
 const NARROW_MAX_WIDTH = 520;
-
 /** Sidebar layouts put navigation on the left, so nothing to clear at the bottom. */
 const SIDEBAR_MIN_WIDTH = 800;
+/** The panel shows the tail of the conversation; the full chat has the rest. */
+const PANEL_TURNS = 6;
 
 export function StudyAssistant() {
   const t = useTheme();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const context = useAssistantContext((s) => s.context);
+  const chat = useNomiConversation(context);
 
   const [open, setOpen] = useState(false);
-  const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const inFlight = useRef(false);
-
-  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
-  const apiKey = profile?.gemini_api_key ?? '';
+  const scroll = useRef<ScrollView>(null);
 
   const narrow = width < NARROW_MAX_WIDTH;
   const panelWidth = narrow ? Math.min(width - space.lg * 2, 420) : PANEL_WIDTH;
 
   // Clear the tab bar, but only where there IS one: the tabs group draws it at
   // the bottom on a phone and down the left side on a desktop, and a study
-  // screen pushed above the group has none at all. Offsetting unconditionally
-  // would leave the button floating in mid-air on every deck.
+  // screen pushed above the group has none at all.
   const segments = useSegments();
   const overTabs = segments[0] === '(tabs)' && width < SIDEBAR_MIN_WIDTH;
-  // space.xl above the bar rather than space.lg. On the owner's iPhone the
-  // button read as "sitting in the wrong part" — 16px above a bar that already
-  // carries the home indicator under it left the two crowding each other, and a
-  // floating control that nearly touches fixed furniture looks misplaced rather
-  // than floating.
-  // TAB_BAR_HEIGHT comes from theme.ts, which is where the tab bar's height is
-  // actually decided. It used to be rebuilt here as `space.xs + 44` from a
-  // layout this file does not own, so changing the bar would have moved the
-  // ✦ without anything saying so (NOTES §35).
+  // space.xl above the bar rather than space.lg: on the owner's iPhone the
+  // button read as crowding the home indicator at 16px.
+  // TAB_BAR_HEIGHT comes from theme.ts, where the tab bar's height is decided.
   const bottomOffset = insets.bottom + space.xl + (overTabs ? TAB_BAR_HEIGHT : 0);
 
   // Escape closes it, the way any overlay should on a keyboard.
@@ -118,27 +83,6 @@ export function StudyAssistant() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
-
-  async function ask() {
-    // A ref, set synchronously. The same double-submit that produced phantom
-    // quiz questions would here spend two of a capped twenty on one question.
-    if (inFlight.current || !isAskable(question)) return;
-    inFlight.current = true;
-    setBusy(true);
-    setAnswer(null);
-    setNote(null);
-
-    const result = await askAssistant({ question, context, apiKey });
-
-    if (result.ok) {
-      setAnswer(result.answer);
-      setNote(describeRemaining(result.remaining));
-    } else {
-      setNote(result.message);
-    }
-    setBusy(false);
-    inFlight.current = false;
-  }
 
   // ------------------------------------------------------------- closed --
   if (!open) {
@@ -178,24 +122,21 @@ export function StudyAssistant() {
   //
   // Nomi, in the panel's heading, doing what the panel is doing: a hello as it
   // opens, thinking while the answer is on its way, a small "here it is" when
-  // it lands. On a card it settles into reading rather than idling, so an
-  // answer does not look like it woke the owl up. Pure presentation — nothing
-  // about what is asked, sent or shown depends on it.
+  // it lands. On a card it settles into reading rather than idling. Pure
+  // presentation — nothing about what is asked, sent or shown depends on it.
   const rest: NomiState = context.kind === 'card' ? 'studying' : 'idle';
-  const nomiState: NomiState = busy ? 'thinking' : answer ? 'explaining' : note ? rest : 'greeting';
-  //
+  const lastTurn = chat.turns.at(-1);
+  const nomiState: NomiState = chat.busy ? 'thinking' : lastTurn?.role === 'nomi' ? 'explaining' : 'greeting';
+  const recent = chat.turns.slice(-PANEL_TURNS);
+
   // A dimmed overlay, not a card sitting in the page. The owner, on an iPhone:
   // "when I click on chatbot it's kinda hard to focus, there's too much
-  // distracting part" — the panel opened among the set rows and read as one
-  // more thing on a busy screen rather than as the thing being used.
+  // distracting part".
   //
-  // On a phone it sits near the TOP, which looks like an odd place for a
-  // bottom-corner button to open into until you watch it with the keyboard up:
-  // iOS does not shrink the page for its keyboard, so anything anchored to the
-  // bottom ends up behind it, and Safari then scrolls the whole app to chase
-  // the field. The top half is the only part of the screen the keyboard cannot
-  // take. On a desktop there is no keyboard to dodge, so it stays in the corner
-  // it opened from.
+  // On a phone it sits near the TOP: iOS does not shrink the page for its
+  // keyboard, so anything anchored to the bottom ends up behind it, and Safari
+  // then scrolls the whole app to chase the field. On a desktop there is no
+  // keyboard to dodge, so it stays in the corner it opened from.
   return (
     <View
       style={{
@@ -209,9 +150,7 @@ export function StudyAssistant() {
         justifyContent: narrow ? 'flex-start' : 'flex-end',
       }}
     >
-      {/* Tapping away closes it — the gesture everyone tries first. It is a
-          real control rather than a bare View so it reaches the keyboard and a
-          screen reader too. */}
+      {/* Tapping away closes it — the gesture everyone tries first. */}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Close Nomi"
@@ -222,10 +161,7 @@ export function StudyAssistant() {
           left: 0,
           right: 0,
           bottom: 0,
-          // 0.7, not the 0.55 this started at. Checked in dark, which is how
-          // the owner actually uses it: black over a near-black page barely
-          // separates the panel from what is behind it, and the whole point of
-          // the scrim is that separation. Light mode carries 0.7 comfortably.
+          // 0.7, not 0.55: checked in dark, which is how the owner uses it.
           backgroundColor: 'rgba(0, 0, 0, 0.7)',
         }}
       />
@@ -235,9 +171,7 @@ export function StudyAssistant() {
           marginTop: narrow ? insets.top + space.lg : 0,
           marginRight: narrow ? 0 : space.lg,
           marginBottom: narrow ? 0 : bottomOffset,
-          // Tall enough to read a four-sentence answer without scrolling, and
-          // never taller than the window it floats in.
-          maxHeight: Math.min(height - insets.top - space.xl * 2, 460),
+          maxHeight: Math.min(height - insets.top - space.xl * 2, 560),
           backgroundColor: t.card,
           borderColor: t.border,
           borderWidth: 1,
@@ -253,88 +187,55 @@ export function StudyAssistant() {
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
           <NomiCharacter state={nomiState} settle={rest} size={40} />
-          <Text style={{ flex: 1, fontSize: 16, fontWeight: '700', color: t.text }}>
-            Ask Nomi
-          </Text>
+          <Text style={[type.button, { flex: 1, color: t.text }]}>Ask Nomi</Text>
+          {/* The same conversation, with room to read it. */}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Close"
-            onPress={() => setOpen(false)}
-            hitSlop={10}
+            onPress={() => {
+              setOpen(false);
+              router.push('/nomi');
+            }}
+            hitSlop={8}
           >
+            <Text style={[type.label, { color: t.accent }]}>Open chat</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={() => setOpen(false)} hitSlop={10}>
             <Text style={{ fontSize: 20, color: t.textMuted }}>{GLYPH.close}</Text>
           </Pressable>
         </View>
 
-        {/* Says what it can see, so the answers are not mysterious. A student who
-            knows it is looking at this card asks better questions of it. */}
-        <Text style={{ fontSize: 13, color: t.textMuted }}>
+        {/* Says what it can see, so the answers are not mysterious. */}
+        <Text style={[type.label, { color: t.textMuted }]}>
           {context.kind === 'card'
             ? 'Looking at the card in front of you.'
             : context.kind === 'set'
               ? `Looking at "${context.title}".`
-              : 'Open a set and I can answer from your own notes.'}
+              : 'Ask me anything, or open a set and I can answer from your notes.'}
         </Text>
 
-        <TextInput
-          value={question}
-          onChangeText={setQuestion}
-          placeholder="Why is this the answer?"
-          placeholderTextColor={t.textMuted}
-          multiline
-          maxLength={MAX_QUESTION_CHARS}
-          onSubmitEditing={ask}
-          // The panel opens because someone wants to type. Landing in the field
-          // saves a tap, and there is nothing else here to focus.
-          autoFocus
-          style={{
-            borderWidth: 1,
-            borderColor: t.border,
-            borderRadius: radius.sm,
-            backgroundColor: t.bg,
-            color: t.text,
-            padding: space.md,
-            minHeight: 64,
-            // NOT 15. This field is where the owner found it: iOS zoomed the
-            // whole app on focus and left it zoomed, and swiping around the
-            // zoomed page showed blank canvas past the edges. See INPUT_FONT_SIZE.
-            fontSize: INPUT_FONT_SIZE,
-          }}
-        />
-
-        <Pressable
-          accessibilityRole="button"
-          onPress={ask}
-          disabled={busy || !isAskable(question)}
-          style={{
-            backgroundColor: busy || !isAskable(question) ? t.border : t.accent,
-            borderRadius: radius.sm,
-            paddingVertical: space.md,
-            alignItems: 'center',
-            minHeight: 44,
-            justifyContent: 'center',
-          }}
-        >
-          <Text
-            style={{
-              color: busy || !isAskable(question) ? t.textMuted : t.accentText,
-              fontWeight: '700',
-              fontSize: 15,
-            }}
+        {recent.length > 0 ? (
+          <ScrollView
+            ref={scroll}
+            style={{ flexShrink: 1 }}
+            contentContainerStyle={{ gap: space.sm }}
+            onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
           >
-            {busy ? 'Thinking…' : 'Ask'}
-          </Text>
-        </Pressable>
-
-        {answer ? (
-          // Scrolls rather than clipping: four sentences fit, and an occasional
-          // longer answer must still be readable to the end.
-          <ScrollView style={{ flexShrink: 1 }}>
-            <Text style={{ color: t.text, fontSize: 15, lineHeight: 22 }}>{answer}</Text>
+            {recent.map((turn, i) => (
+              <ChatBubble key={i} turn={turn} showOwl={false} />
+            ))}
           </ScrollView>
         ) : null}
 
-        {note ? <Text style={{ color: t.textMuted, fontSize: 13 }}>{note}</Text> : null}
+        {chat.busy ? <Text style={[type.label, { color: t.textMuted }]}>Nomi is thinking…</Text> : null}
+        {chat.note ? <Text style={[type.label, { color: t.textMuted }]}>{chat.note}</Text> : null}
+
+        <Composer
+          busy={chat.busy}
+          placeholder={context.kind === 'card' ? 'Why is this the answer?' : 'Message Nomi'}
+          // The panel opens because someone wants to type.
+          autoFocus
+          onSend={(text) => void chat.send(text)}
+        />
       </View>
     </View>
   );

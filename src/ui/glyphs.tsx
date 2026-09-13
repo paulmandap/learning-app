@@ -25,6 +25,12 @@ export const GLYPH = {
   wrong: '✗',
   /** Nomi's mark: the floating ask button. */
   nomi: '✦',
+  /** Send a message. */
+  send: '↑',
+  /** Past conversations. */
+  history: '☰',
+  /** Start a new conversation. */
+  newChat: '✎',
 } as const;
 
 export type TabIconName = 'study' | 'notes' | 'progress' | 'settings';

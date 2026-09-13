@@ -231,6 +231,36 @@ export function HeaderTitle({ children }: { children: string }) {
   );
 }
 
+/**
+ * Several glyph buttons at the right of a header — Nomi's "your chats" and
+ * "new chat". One gutter for the row, not one per button, so the last button
+ * lines up with the content column like every other header control.
+ */
+export function HeaderActions({
+  actions,
+}: {
+  actions: { glyph: string; label: string; onPress: () => void }[];
+}) {
+  const t = useTheme();
+  const gutter = useColumnEdge() - CONTROL_SLOT_PADDING;
+  return (
+    <View style={{ flexDirection: 'row', marginRight: gutter }}>
+      {actions.map((action) => (
+        <Pressable
+          key={action.label}
+          accessibilityRole="button"
+          accessibilityLabel={action.label}
+          onPress={action.onPress}
+          hitSlop={6}
+          style={{ width: TOUCH_TARGET, height: TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Text style={{ color: t.accent, fontSize: 22, lineHeight: 26 }}>{action.glyph}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 /** A header button that is just a glyph — the Settings gear on Home. */
 export function HeaderGlyphButton({
   glyph,

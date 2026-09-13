@@ -4,45 +4,48 @@ import {
   Body,
   Button,
   Card,
-  Label,
   ListRow,
   LoadingState,
   Notice,
   PillButton,
   Screen,
   SectionRow,
-  TitleRow,
 } from '../../src/ui/components';
-import { NomiButton } from '../../src/ui/nomi';
+import { NomiCard } from '../../src/ui/nomi';
+import { ContinueCard, GreetingHeader } from '../../src/ui/home';
 import { fetchProfile } from '../../src/data/profile';
 import { listSets, type StudySet } from '../../src/data/sets';
 import { continueTarget } from '../../src/data/attempts';
-import { dueCountsBySet } from '../../src/data/review';
+import { getAppSnapshot } from '../../src/data/nomi';
 import { useSessionStore } from '../../src/data/session';
 import { formatSetTitle } from '../../src/core/title';
+import { greetingName } from '../../src/core/avatar';
+import { homeLine } from '../../src/core/nomi-brain';
 
 /**
  * Study — the tab you open to study.
  *
+ * ## Laid out from the owner's reference (NOTES §36)
+ *
+ *  - **"Welcome back, <name>" and their picture**, top left and top right.
+ *  - **Nomi standing on a card**, saying the most useful true thing it knows.
+ *    Not a button in the heading — the owner's own words were that it looked
+ *    "just like a button that needs to be clicked".
+ *  - **Continue, shaded**, with its heading above it and the set's progress in
+ *    it, holding the screen's one filled button.
+ *  - **Your sets**, each with how much of it is known.
+ *
  * ## Continuing outranks creating
  *
- * This screen used to give its one filled button to "+ New set", with
- * "Continue" above it as a bordered card that was tappable but did not look it
- * — no chevron, no button, while every set row beneath it had a ›. So the
- * loudest thing on the screen you open every day was the thing you do once a
- * week, and the thing you came to do was the quietest (NOTES §35).
- *
- * Now Continue carries the one primary button, and "+ New set" is a compact
- * control beside the list it adds to. With nothing to continue — a new account
- * — making a set IS the thing to do, and it gets the primary button back.
- *
- * What Continue points at did not change: `continueTarget` is still "where you
- * left off", which §23.1 separated from Progress's "where the work is", and
- * §34 declined to replace with a recommendation.
+ * Continue carries the one primary button; "+ New set" is a compact control
+ * beside the list it adds to. With nothing to continue, a new account gets the
+ * primary "+ New set" back. What Continue points at did not change:
+ * `continueTarget` is still "where you left off" (§23.1, §34).
  */
 export default function Home() {
   const router = useRouter();
   const session = useSessionStore((s) => s.session);
+  const userId = session?.user.id ?? '';
 
   const { data: profile, isLoading: profileLoading } = useQuery({
     queryKey: ['profile'],
@@ -51,57 +54,70 @@ export default function Home() {
   });
   const { data: sets = [], isLoading: setsLoading } = useQuery({
     queryKey: ['sets'],
-    // Wrapped, not passed by reference. listSets now takes an optional client
-    // as its last argument (the Phase B seam, extended for Nomi), and TanStack
-    // Query calls a bare queryFn with its own context object — which would
-    // arrive as that argument and be used as a database client.
+    // Wrapped, not passed by reference: TanStack Query would hand its own
+    // context object to listSets' optional client parameter.
     queryFn: () => listSets(),
     enabled: !!session,
   });
 
+  // Both refetch when the app comes back to the front. An installed app is
+  // reopened rather than relaunched, and "due today" is a statement about a day
+  // — without this the morning's Home still said last night's number. Finishing
+  // a deck refreshes them too, through useStudySession (NOTES §36).
   const { data: continueTo } = useQuery({
     queryKey: ['continue'],
     queryFn: continueTarget,
     enabled: !!session,
+    refetchOnWindowFocus: true,
   });
 
-  // One query for the whole screen, not one per set.
-  const { data: dueBySet } = useQuery({
-    queryKey: ['due'],
-    queryFn: () => dueCountsBySet(),
+  // What Nomi knows — and, from the same round of queries, each set's due,
+  // missed and known counts. One source for Nomi's line, the Continue card's
+  // progress and every row's bar, so the three cannot disagree.
+  const { data: snapshot, isSuccess: knowsStudent } = useQuery({
+    queryKey: ['nomi-brain'],
+    queryFn: () => getAppSnapshot(),
     enabled: !!session,
+    refetchOnWindowFocus: true,
   });
 
+  const statsBySet = new Map((snapshot?.sets ?? []).map((s) => [s.id, s]));
   const hasKey = !!profile?.gemini_api_key;
   const continueSet = continueTo ? sets.find((s) => s.id === continueTo.studySetId) : undefined;
+  const continueStats = continueSet ? statsBySet.get(continueSet.id) : undefined;
   const newSet = () => router.push('/new');
 
   return (
     <Screen>
-      {/* The heading moved into the body when this became a tab. The stack
-          header used to carry it, but a tab root has no back control and no
-          header of its own, so the screen has to name itself.
+      <GreetingHeader
+        name={greetingName(profile?.display_name)}
+        avatar={profile?.avatar}
+        userId={userId}
+        onAvatar={() => router.push('/settings')}
+      />
 
-          Nomi rides on that same row: with no navigator header there is nowhere
-          else at the top of a tab for it to go, and the bottom corner is
-          already the floating ✦ — which is the same companion, asked about
-          whatever card is in front of you. */}
-      <TitleRow title="Study" action={<NomiButton />} />
+      {/* Only once Nomi actually knows something: a line computed from an
+          empty snapshot would say "add some notes" to someone with nine sets
+          for the second it took to load. */}
+      {knowsStudent && snapshot ? (
+        <NomiCard line={homeLine(snapshot)} onPress={() => router.push('/nomi')} />
+      ) : null}
 
       {!profileLoading && !hasKey ? (
         <Notice tone="warn">Add your Gemini key in Settings before making study sets.</Notice>
       ) : null}
 
-      {/* Continue where you left off — one tap, no digging (D8). The retry
-          count is what makes coming back feel worth it, so when there IS a
-          missed pile the button says so and goes straight to it. */}
+      {/* Continue where you left off — one tap, no digging (D8). When there
+          is a missed pile the button says so and goes straight to it. */}
       {continueSet && continueTo ? (
-        <Card>
-          <Label>Continue where you left off</Label>
-          <Body strong>{formatSetTitle(continueSet.title)}</Body>
-          <Body muted>{describeContinue(continueTo, dueBySet)}</Body>
-          <Button
-            label={continueTo.missed > 0 ? 'Retry what you missed' : 'Continue'}
+        <>
+          <SectionRow title="Continue where you left off" />
+          <ContinueCard
+            title={formatSetTitle(continueSet.title)}
+            meta={describeContinue(continueTo, continueStats?.due ?? 0)}
+            known={continueStats?.known ?? 0}
+            cards={continueSet.cardCount ?? 0}
+            actionLabel={continueTo.missed > 0 ? 'Retry what you missed' : 'Continue studying'}
             onPress={() =>
               router.push(
                 continueTo.missed > 0
@@ -110,7 +126,7 @@ export default function Home() {
               )
             }
           />
-        </Card>
+        </>
       ) : null}
 
       {setsLoading ? (
@@ -123,20 +139,21 @@ export default function Home() {
       ) : (
         <>
           <SectionRow title="Your sets" action={<PillButton label="+ New set" onPress={newSet} />} />
-          {sets.map((set) => (
-            <ListRow
-              key={set.id}
-              title={formatSetTitle(set.title)}
-              meta={describeSet(set, dueBySet?.get(set.id) ?? 0)}
-              onPress={() => router.push(`/set/${set.id}`)}
-            />
-          ))}
+          {sets.map((set) => {
+            const stats = statsBySet.get(set.id);
+            const cards = set.cardCount ?? 0;
+            return (
+              <ListRow
+                key={set.id}
+                title={formatSetTitle(set.title)}
+                meta={describeSet(set, stats?.due ?? 0)}
+                progress={cards > 0 && stats ? stats.known / cards : undefined}
+                onPress={() => router.push(`/set/${set.id}`)}
+              />
+            );
+          })}
         </>
       )}
-      {/* Settings and Sign out used to sit here as full-width buttons, then as
-          a header gear. Both are now the Settings tab. Sign out stays inside
-          Settings, where it already was. View-level navigation does not belong
-          in the content. */}
     </Screen>
   );
 }
@@ -145,15 +162,9 @@ export default function Home() {
  * What to say under the set's name in the Continue card.
  *
  * Due and missed are different things and both matter: due is the schedule
- * saying it is time, missed is the pile of things you got wrong. They are shown
- * together when both apply, and the fallback stays encouraging rather than
- * empty.
+ * saying it is time, missed is the pile of things you got wrong.
  */
-function describeContinue(
-  target: { studySetId: string; missed: number },
-  dueBySet: Map<string, number> | undefined,
-): string {
-  const due = dueBySet?.get(target.studySetId) ?? 0;
+function describeContinue(target: { missed: number }, due: number): string {
   const parts: string[] = [];
   if (due > 0) parts.push(`${due} due today`);
   if (target.missed > 0) {
@@ -175,8 +186,5 @@ function describeSet(set: StudySet, due: number): string {
 
   if (set.cardCount === undefined || set.cardCount === 0) return status;
   const cards = `${set.cardCount} card${set.cardCount === 1 ? '' : 's'}`;
-  // The due count replaces "Ready" when there is one: "12 due today" is the
-  // more useful half of that line, and both together is more than a list row
-  // should carry.
   return due > 0 ? `${cards} · ${due} due today` : `${cards} · ${status}`;
 }

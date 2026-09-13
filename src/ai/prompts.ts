@@ -251,59 +251,65 @@ export function buildRubricCheckPrompt(input: {
 }
 
 /**
- * The study assistant (Phase 9c, D14).
+ * Nomi's system instruction (Phase 9c, D14 — reversed by the owner, NOTES §36).
  *
- * Grounded in the student's own notes, and told to say so when it is not. The
- * failure that matters here is not a bad answer — it is a **confident answer
- * that contradicts the notes the student is about to be examined on**. Every
- * rule below exists for that.
+ * It used to be a one-shot prompt that ended "if the question is not about
+ * studying, say briefly that you can only help with their notes" — which is
+ * exactly what the owner got for saying "Hi Nomi". Nomi is a companion now:
+ * warm, simple and direct, happy to chat, and still grounded where it matters.
  *
- * The length instruction is doubled by `maxOutputTokens` on the request. A rule
- * with no mechanism behind it is a wish.
+ * Two rules carry over unchanged in spirit, because the failures they prevent
+ * are still the ones that matter:
+ *
+ *  - **Facts about the student come only from the brief.** A companion that
+ *    rounds "3 days" into "about a week" gets believed.
+ *  - **The notes win when a card or a set is open.** A confident answer that
+ *    contradicts what they will be examined on is worse than no answer.
+ *
+ * The conversation itself goes in `contents`, turn by turn; this is only the
+ * standing instruction, so it is sent as `systemInstruction`.
  */
-export function buildChatPrompt(input: {
-  question: string;
-  context: AssistantContext;
-}): string {
+export function buildNomiSystemPrompt(input: { brief: string; context: AssistantContext }): string {
   const lines = [
-    "You are helping a student with their own study notes. Answer their question.",
+    "You are Nomi, a friendly owl who is the student's study companion inside their flashcard app.",
+    "You're chatting with them like a friend in a messenger app.",
     '',
+    'How to reply:',
+    '1. Simple and direct. Usually one to three sentences; go longer only when they ask for',
+    '   detail or an explanation genuinely needs it. No preamble, no "great question".',
+    '2. Everyday chat and small talk are welcome. Say hi back, be warm, answer general',
+    '   questions, and offer study help when it fits — never refuse because a message is',
+    '   not about studying.',
+    '3. For anything about the student themselves — their name, streak, sets, what is due,',
+    '   what they missed, their progress — use ONLY the facts below. Never guess or estimate',
+    "   a number that is not there. If it isn't in the facts, say you can't see that.",
+    '4. Plain language. No headings, no bullet lists, no markdown.',
+    '',
+    input.brief,
   ];
 
   if (input.context.kind === 'card') {
     lines.push(
+      '',
       'They are looking at this card right now:',
       `  Question: ${input.context.prompt}`,
       `  Answer:   ${input.context.answer}`,
-      '',
       'It came from this line of their notes:',
       `  ${input.context.source}`,
-      '',
     );
   } else if (input.context.kind === 'set') {
-    lines.push(
-      `These are their notes for "${input.context.title}":`,
-      input.context.notes,
-      '',
-    );
+    lines.push('', `They have this set open, "${input.context.title}". Its notes:`, input.context.notes);
   }
 
-  lines.push(
-    'THEIR QUESTION:',
-    input.question,
-    '',
-    'Rules:',
-    '1. Answer from their notes above wherever the notes cover it. Their notes are',
-    '   what they will be examined on, so where you know better, say so plainly',
-    '   rather than quietly answering something different from what they wrote.',
-    "2. If the notes do not cover it, say so in a few words and then answer anyway",
-    '   from general knowledge — but make clear which part was not in their notes.',
-    '3. At most four sentences. No preamble, no "great question", no summary of',
-    '   what they asked.',
-    '4. Plain language. No headings, no bullet lists, no markdown.',
-    "5. If the question is not about studying, say briefly that you can only help",
-    '   with their notes.',
-  );
+  if (input.context.kind !== 'none') {
+    lines.push(
+      '',
+      'When a question is about this card or these notes, answer from their notes first —',
+      'they will be examined on them, so where you know better, say so plainly rather than',
+      'quietly answering something different. If the notes do not cover it, say so in a few',
+      'words, then answer from general knowledge.',
+    );
+  }
 
   return lines.join('\n');
 }

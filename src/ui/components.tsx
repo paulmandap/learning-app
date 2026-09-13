@@ -234,7 +234,9 @@ export function OptionList({ options }: { options: Option[] }) {
         <Pressable
           key={o.key}
           accessibilityRole="button"
-          accessibilityLabel={`${o.title}. ${o.detail}${o.badge ? `. ${o.badge}` : ''}`}
+          // The detail is a sentence with its own full stop; appending ". 2 due"
+          // straight after it read "knew it.. 2 due" to a screen reader.
+          accessibilityLabel={`${o.title}. ${o.detail.replace(/\.$/, '')}${o.badge ? `. ${o.badge}` : ''}.`}
           onPress={o.onPress}
           style={({ pressed }) => ({
             flexDirection: 'row',
@@ -331,10 +333,16 @@ export function ListRow({
   title,
   meta,
   onPress,
+  progress,
 }: {
   title: string;
   meta?: string;
   onPress: () => void;
+  /**
+   * How much of it is done, 0 to 1 — a set's cards known. A thin bar under the
+   * meta line, from the owner's reference, where every deck carries one.
+   */
+  progress?: number;
 }) {
   const t = useTheme();
   return (
@@ -355,6 +363,26 @@ export function ListRow({
           {title}
         </Text>
         {meta ? <Text style={[type.caption, { color: t.textMuted }]}>{meta}</Text> : null}
+        {progress !== undefined ? (
+          <View
+            style={{
+              height: 4,
+              marginTop: space.xs,
+              borderRadius: radius.pill,
+              backgroundColor: t.border,
+              overflow: 'hidden',
+            }}
+          >
+            <View
+              style={{
+                width: `${Math.round(Math.min(1, Math.max(0, progress)) * 100)}%`,
+                height: '100%',
+                borderRadius: radius.pill,
+                backgroundColor: t.accent,
+              }}
+            />
+          </View>
+        ) : null}
       </View>
       {/* A glyph rather than an icon set — see src/ui/glyphs.tsx. */}
       <Text style={{ color: t.textMuted, fontSize: 22, marginLeft: space.md }}>{GLYPH.forward}</Text>

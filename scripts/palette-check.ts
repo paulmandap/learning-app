@@ -29,7 +29,7 @@
  *   npx tsx scripts/palette-check.ts
  */
 import { contrastHex, deltaEHex } from '../src/core/color';
-import { DARK, LIGHT } from '../src/core/palette';
+import { AVATAR_FACES, DARK, LIGHT } from '../src/core/palette';
 
 interface Candidate {
   bg: string;
@@ -45,6 +45,9 @@ interface Candidate {
   warnText: string;
   infoBg: string;
   infoText: string;
+  feature: string;
+  featureText: string;
+  featureMuted: string;
   chart: { known: string; learning: string; tricky: string; neutral: string; series: string };
 }
 
@@ -92,10 +95,14 @@ function report(mode: string, p: Candidate) {
   check('ok on card', contrastHex(p.ok, p.card), TEXT_MIN);
   check('warnText on warnBg', contrastHex(p.warnText, p.warnBg), TEXT_MIN);
   check('infoText on infoBg', contrastHex(p.infoText, p.infoBg), TEXT_MIN);
+  check('featureText on feature', contrastHex(p.featureText, p.feature), TEXT_MIN);
+  check('featureMuted on feature', contrastHex(p.featureMuted, p.feature), TEXT_MIN);
 
   console.log('\n  large elements and fills');
   check('accent fill on bg', contrastHex(p.accent, p.bg), FILL_MIN);
   check('accent fill on card', contrastHex(p.accent, p.card), FILL_MIN);
+  // The Continue card's button sits on the shaded surface, not on the page.
+  check('accent fill on feature', contrastHex(p.accent, p.feature), FILL_MIN);
   for (const [name, hex] of Object.entries(p.chart)) {
     check(`chart.${name} on card`, contrastHex(hex, p.card), FILL_MIN);
   }
@@ -103,6 +110,9 @@ function report(mode: string, p: Candidate) {
   console.log('\n  hairlines (reported, low floor by design)');
   check('border on card', contrastHex(p.border, p.card), BORDER_MIN);
   check('border on bg', contrastHex(p.border, p.bg), BORDER_MIN);
+  // The shading IS the signal on the Continue card — it has no border — so it
+  // gets at least the hairline's floor against the page it sits on.
+  check('feature surface on bg', contrastHex(p.feature, p.bg), BORDER_MIN);
 
   console.log('\n  chart fills must stay apart under colour blindness');
   const fills = ['known', 'learning', 'tricky', 'neutral'] as const;
@@ -119,6 +129,13 @@ function report(mode: string, p: Candidate) {
 
 report('light', light);
 report('dark', dark);
+
+// The built-in profile faces are the same in both themes. What must work is
+// the face itself: eyes and mouth against its colour, at the text floor.
+console.log(`\n${'='.repeat(78)}\nPROFILE FACES\n${'='.repeat(78)}\n`);
+AVATAR_FACES.forEach((face, i) => {
+  check(`face ${i + 1} features on face`, contrastHex(face.ink, face.bg), TEXT_MIN);
+});
 
 console.log(`\n${'-'.repeat(78)}`);
 console.log(

@@ -25,7 +25,8 @@ import { formatBytes } from '../../../src/core/storage';
 import { useAssistantContext } from '../../../src/data/assistant-context';
 import { trimNotes } from '../../../src/core/chat';
 import { countItems } from '../../../src/data/items';
-import { dueCountForSet } from '../../../src/data/review';
+import { dueCountForSet, dueLevelsForSet } from '../../../src/data/review';
+import { busiestLevel } from '../../../src/core/deck';
 import { generateSet, type Progress } from '../../../src/data/pipeline';
 
 /**
@@ -90,6 +91,12 @@ export default function SetScreen() {
   const { data: dueCount = 0 } = useQuery({
     queryKey: ['due', setId],
     queryFn: () => dueCountForSet(setId),
+  });
+  // Which level those due cards are at, so the Flashcards row opens a deck that
+  // has them in it. Under ['due'], so leaving a deck refreshes it with the rest.
+  const { data: dueLevels = {} } = useQuery({
+    queryKey: ['due', setId, 'levels'],
+    queryFn: () => dueLevelsForSet(setId),
   });
 
   const apiKey = profile?.gemini_api_key ?? '';
@@ -216,6 +223,8 @@ export default function SetScreen() {
   // "Free up space" only appears while there is space to free — once the
   // originals are gone, offering it again would be an action that does nothing.
   const hasFiles = docs.some((d) => d.storage_path);
+  // Where "7 due" actually is. Null opens the deck on its usual default.
+  const dueLevel = dueCount > 0 ? busiestLevel(dueLevels) : null;
 
   return (
     <Screen>
@@ -355,7 +364,12 @@ export default function SetScreen() {
                 title: 'Flashcards',
                 detail: 'Turn each card over and say whether you knew it.',
                 badge: dueCount > 0 ? `${dueCount} due` : undefined,
-                onPress: () => router.push(`/set/${setId}/flashcards`),
+                onPress: () =>
+                  router.push(
+                    dueLevel
+                      ? `/set/${setId}/flashcards?level=${dueLevel}`
+                      : `/set/${setId}/flashcards`,
+                  ),
               },
               {
                 key: 'quiz',

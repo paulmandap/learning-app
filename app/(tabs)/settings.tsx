@@ -1,8 +1,20 @@
 import { useEffect, useState } from 'react';
-import { Linking } from 'react-native';
+import { Linking, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, Field, Notice, Screen, Title } from '../../src/ui/components';
-import { fetchProfile, saveGeminiKey, savePetChoice } from '../../src/data/profile';
+import { Body, Button, Card, Field, Label, Notice, Screen, Title } from '../../src/ui/components';
+import {
+  AvatarsUnavailableError,
+  fetchProfile,
+  saveAvatar,
+  saveDisplayName,
+  saveGeminiKey,
+  savePetChoice,
+  uploadAvatarPhoto,
+} from '../../src/data/profile';
+import { Avatar, FacePicker, pickProfilePhoto } from '../../src/ui/avatar';
+import { parseAvatar } from '../../src/core/avatar';
+import { useSessionStore } from '../../src/data/session';
+import { space } from '../../src/ui/theme';
 import { PetChooser } from '../../src/ui/pet';
 import { toPetSpecies, type PetSpecies } from '../../src/core/pet';
 import { deleteAllMyData } from '../../src/data/sets';
@@ -40,6 +52,68 @@ export default function Settings() {
   const [pendingPet, setPendingPet] = useState<PetSpecies | null>(null);
   const [petError, setPetError] = useState<string | null>(null);
   const pet = pendingPet ?? toPetSpecies(profile?.pet);
+
+  // --- you: the name Home greets, and the picture beside it (NOTES §36) ---
+  const userId = useSessionStore((s) => s.session?.user.id) ?? '';
+  const [name, setName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const avatar = parseAvatar(profile?.avatar, userId);
+
+  useEffect(() => {
+    if (profile?.display_name) setName(profile.display_name);
+  }, [profile?.display_name]);
+
+  async function saveName() {
+    setSavingName(true);
+    setNameSaved(false);
+    try {
+      await saveDisplayName(name);
+      await queryClient.invalidateQueries({ queryKey: ['profile'] });
+      await queryClient.invalidateQueries({ queryKey: ['nomi-brain'] });
+      setNameSaved(true);
+    } catch {
+      setAvatarError("Couldn't save your name just now. Try again in a moment.");
+    } finally {
+      setSavingName(false);
+    }
+  }
+
+  function describeAvatarError(err: unknown): string {
+    return err instanceof AvatarsUnavailableError
+      ? "Choosing a picture isn't switched on yet."
+      : "Couldn't save that picture just now. Try again in a moment.";
+  }
+
+  async function chooseFace(value: string) {
+    setAvatarBusy(true);
+    setAvatarError(null);
+    try {
+      await saveAvatar(value);
+      await queryClient.invalidateQueries({ queryKey: ['profile'] });
+    } catch (err) {
+      setAvatarError(describeAvatarError(err));
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function uploadPhoto() {
+    setAvatarError(null);
+    try {
+      const image = await pickProfilePhoto();
+      if (!image) return;
+      setAvatarBusy(true);
+      await uploadAvatarPhoto(image, profile?.avatar ?? null);
+      await queryClient.invalidateQueries({ queryKey: ['profile'] });
+    } catch (err) {
+      setAvatarError(describeAvatarError(err));
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
 
   async function choosePet(next: PetSpecies) {
     setPendingPet(next);
@@ -108,6 +182,41 @@ export default function Settings() {
     <Screen>
       <Title>Settings</Title>
 
+      {/* ------------------------------------------------------------ you -- */}
+      {/* First, because it is the one card here about the person rather than
+          the app: the name Home greets them by and the picture in its corner. */}
+      <Card>
+        <Body>You</Body>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.lg }}>
+          <Avatar value={profile?.avatar} userId={userId} size={72} />
+          <View style={{ flex: 1 }}>
+            <Body muted>This is you on Home. Pick a face, or use a photo.</Body>
+          </View>
+        </View>
+        <Field
+          label="Your name"
+          value={name}
+          onChangeText={(v) => {
+            setName(v);
+            setNameSaved(false);
+          }}
+          placeholder="What should Nomi call you?"
+          autoCapitalize="sentences"
+          maxLength={60}
+          onSubmitEditing={saveName}
+        />
+        <Button label="Save name" variant="secondary" onPress={saveName} busy={savingName} />
+        {nameSaved ? <Notice tone="ok">Saved.</Notice> : null}
+        <Label>Pick a face</Label>
+        <FacePicker
+          selected={avatar.kind === 'face' && avatar.chosen ? avatar.index : null}
+          onPick={chooseFace}
+          disabled={!profile || avatarBusy}
+        />
+        <Button label="Use a photo" variant="secondary" onPress={uploadPhoto} busy={avatarBusy} />
+        {avatarError ? <Notice tone="error">{avatarError}</Notice> : null}
+      </Card>
+
       {/* ------------------------------------------------ privacy notice -- */}
       {/* Visible immediately, next to the key field — never behind a tap or a
           link. The "a real person at Google may read them" sentence is the one
@@ -130,9 +239,14 @@ export default function Settings() {
           {/* D13 fixes this copy and says it must not be paraphrased smaller,
               so the assistant is NAMED here rather than left implied — it sends
               notes to Google more often, and more casually, than making cards
-              does. Wording approved by the owner (Phase 9c). */}
-          The study assistant works the same way — what you ask it, and the notes it looks at to
-          answer, are sent to Google too.
+              does. Wording approved by the owner (Phase 9c), and EXTENDED with
+              his approval on 2026-09-13 when the assistant began sending what it
+              knows about the student's studying with each message (NOTES §36).
+              The companion's name stays out of this paragraph, comments
+              included — tests/screens.test.ts reads the whole block. */}
+          The study assistant works the same way — what you ask it, the notes it looks at, and
+          what it knows about your studying (your name, sets, streak and progress) are sent to
+          Google too.
         </Notice>
       </Card>
 

@@ -20,7 +20,9 @@ import { SourcePanel } from '../../../src/ui/source';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import { listItems, promptFor, type StudyItem } from '../../../src/data/items';
 import { fetchProfile } from '../../../src/data/profile';
-import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
+import { missedItemIds } from '../../../src/data/attempts';
+import { useStudySession } from '../../../src/data/study-session';
+import { deal, startingLevel } from '../../../src/core/deck';
 import { GeminiBrowserProvider } from '../../../src/ai/gemini';
 import { reasonToMessage } from '../../../src/core/ai-errors';
 import { GeminiCallError } from '../../../src/ai/gemini';
@@ -40,14 +42,22 @@ interface Answered {
   typed: string;
 }
 
+const ITEM = { id: (i: StudyItem) => i.id, level: (i: StudyItem) => i.level };
+
 export default function Quiz() {
-  const { id, retry } = useLocalSearchParams<{ id: string; retry?: string }>();
+  const { id, retry, level: levelParam } = useLocalSearchParams<{
+    id: string;
+    retry?: string;
+    level?: string;
+  }>();
   const setId = String(id);
   const retryOnly = retry === '1';
   const router = useRouter();
   const t = useTheme();
+  const record = useStudySession(setId);
 
-  const [level, setLevel] = useState<Level>('understand');
+  // The starting level from the link, if it names one — see flashcards.tsx.
+  const [level, setLevel] = useState<Level>(() => startingLevel(levelParam));
   const [index, setIndex] = useState(0);
 
   /**
@@ -109,8 +119,9 @@ export default function Quiz() {
   // Levels are exclusive now (see listItems): Understand means understand, not
   // "understand and everything easier".
   const items = useMemo(() => {
-    const atLevel = quizzable.filter((i) => i.level === level);
-    const pool = retryOnly ? atLevel.filter((i) => missed?.has(i.id)) : atLevel;
+    // A retry round asks every missed question in the set, whatever the level
+    // (NOTES §36); an ordinary round asks one level.
+    const pool = deal(quizzable, { level, retryOnly, missed }, ITEM);
     // Seeded by round AND level, so switching level does not reshuffle the
     // level you were part-way through.
     return shuffleSeeded(pool, `${round}:${level}`);
@@ -214,7 +225,7 @@ export default function Quiz() {
 
     // One attempts row per answer, always.
     try {
-      await recordAttempt({
+      await record({
         studyItemId: item.id,
         studySetId: setId,
         mode: 'quiz',

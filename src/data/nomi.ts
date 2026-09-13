@@ -1,61 +1,87 @@
 import { supabase, type Db } from './supabase';
-import { listSets } from './sets';
-import { emptyNomiContext, type NomiContext } from '../core/nomi';
+import { listSets, type StudySet } from './sets';
+import { EMPTY_DASHBOARD, fetchDashboard, type DashboardData } from './dashboard';
+import { EMPTY_SNAPSHOT, type AppSnapshot } from '../core/nomi-brain';
+import { greetingName } from '../core/avatar';
+import { formatSetTitle } from '../core/title';
 
 /**
- * Nomi's orchestration boundary: what Nomi is allowed to know, assembled once.
+ * Everything Nomi knows about the student, assembled once.
  *
- * ## Why this module exists at all, this early
+ * ## What changed, and why
  *
- * The architectural goal is that Nomi becomes an interface OVER the app's
- * structured learning state, rather than a chatbot that happens to sit next to
- * it. The difference shows up as a layer, not as a feature:
+ * This boundary was built early and kept deliberately almost empty — "only
+ * `listSets`" — on the grounds that anything more would be speculative until
+ * the learning data existed. It exists now, and the owner asked for exactly
+ * what the boundary was for: *"when I asked Nomi 'what is my streak today',
+ * Nomi didn't know the answer. Nomi must know me as the user and the overall
+ * app."* (NOTES §36.)
  *
- *     Nomi UI  →  this module  →  existing src/data functions  →  Supabase
+ *     Nomi (brain + chat)  →  this module  →  existing src/data functions
  *
- * Without the middle step, the first screen that needs a due count reaches for
- * the database itself, the second one reaches slightly differently, and by the
- * third there is no boundary left to put the learning intelligence behind. The
- * layer is cheap now and expensive to retrofit.
+ * It still composes rather than queries. The dashboard already computes the
+ * streak, due counts, missed pile and per-set numbers from its own round of
+ * queries; this adds the set titles `listSets` already reads and the one thing
+ * neither has, the student's name. A second copy of any of those rules here
+ * would drift from Progress the first time either changed.
  *
- * ## No Supabase import here, deliberately
+ * ## Degrades part by part
  *
- * This file composes other `src/data` functions and calls none of the database
- * directly — the same rule `src/data/pipeline.ts` keeps, and for the same
- * reason: an orchestrator that does its own queries stops being an orchestrator
- * and becomes a second data layer. The `db` it takes is only passed through.
- *
- * ## One query, and nothing speculative
- *
- * Only `listSets`. Everything else Nomi will eventually want — what is due,
- * which sections are weak, whether accuracy is improving — needs Phase C and
- * Phase D to exist before it can be answered truthfully, and a number invented
- * to fill a field is exactly the failure a study companion cannot afford. See
- * `src/core/nomi.ts` for the list and why it is still a list.
- *
- * Note that nothing in the UI calls this yet, and that is the point rather than
- * an oversight: opening Nomi's screen costs no round trip. This is the seam
- * Phase C wires up when it has something true to say.
- *
- * Degrades rather than throws, matching `review.ts` and `dashboard.ts`: a
- * companion that cannot list your sets should say it knows of none, not take
- * the screen down.
+ * A snapshot with no name is still worth having, and one with no sets still
+ * knows the streak. Each part fails on its own, loudly in the console, so
+ * "Nomi doesn't know my name" is never indistinguishable from "I never gave
+ * it one".
  */
-export async function getNomiContext(db: Db = supabase): Promise<NomiContext> {
-  try {
-    const sets = await listSets(db);
-    return {
-      sets: sets.map((s) => ({ id: s.id, title: s.title, cardCount: s.cardCount })),
-    };
-  } catch (err) {
-    // Loud, not silent. This project has paid four times for a failure that
-    // left no trace, and "Nomi knows nothing about you" is indistinguishable
-    // from a new account unless the reason is written down somewhere.
-    console.warn(
-      `[nomi] could not read study sets: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    // A FRESH empty context every time — see emptyNomiContext, and the bug
-    // §24.4 records against handing out EMPTY_DASHBOARD by reference.
-    return emptyNomiContext();
-  }
+export async function getAppSnapshot(
+  db: Db = supabase,
+  now: number = Date.now(),
+): Promise<AppSnapshot> {
+  const [dashboard, sets, profile] = await Promise.all([
+    fetchDashboard(now, db).catch((err): DashboardData => {
+      warn('progress', err);
+      return { ...EMPTY_DASHBOARD, setStats: [], forecast: [], trends: [] };
+    }),
+    listSets(db).catch((err): StudySet[] => {
+      warn('study sets', err);
+      return [];
+    }),
+    // One column, the caller's own row — RLS returns nothing else. `limit(1)`
+    // rather than maybeSingle so a missing row is an empty list, not an error.
+    db.from('profiles').select('display_name').limit(1),
+  ]);
+
+  if (profile.error) warn('name', profile.error);
+  const displayName = profile.error
+    ? null
+    : ((profile.data?.[0] as { display_name: string | null } | undefined)?.display_name ?? null);
+
+  const statsById = new Map(dashboard.setStats.map((s) => [s.setId, s]));
+
+  return {
+    ...EMPTY_SNAPSHOT,
+    name: greetingName(displayName),
+    streak: dashboard.streak,
+    studiedToday: dashboard.studiedToday,
+    dueToday: dashboard.dueToday,
+    toRetry: dashboard.toRetry,
+    totalAnswers: dashboard.totalAttempts,
+    sets: sets.map((s) => {
+      const stat = statsById.get(s.id);
+      return {
+        id: s.id,
+        title: formatSetTitle(s.title),
+        cards: s.cardCount ?? 0,
+        due: stat?.due ?? 0,
+        missed: stat?.missed ?? 0,
+        known: stat?.known ?? 0,
+      };
+    }),
+  };
+}
+
+function warn(what: string, err: unknown): void {
+  const message = err instanceof Error ? err.message : (err as { message?: string })?.message ?? String(err);
+  // Loud, not silent: "Nomi knows nothing about you" must never look like a
+  // new account when it is really a failed read.
+  console.warn(`[nomi] could not read ${what}: ${message}`);
 }

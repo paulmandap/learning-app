@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **677 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **768 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35 UI work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§36 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -56,7 +56,7 @@ under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 15, all applied and verified
+### Migrations — 16; 0001–0015 applied and verified, **0016 NOT yet applied**
 
 `0001` schema · `0002` RLS · `0003` views (`security_invoker`) · `0004` storage +
 `touch_heartbeat` · `0005` `review_state` · `0006` `attempts.mode` gains
@@ -65,7 +65,10 @@ unmarkable short answers · `0009` `byte_size` + `study_days` · `0010`
 `chat_usage` + `claim_chat_message` · `0011` `profiles.pet` · `0012` `notes` ·
 `0013` backfill `byte_size` · `0014` allow `'dog'` · `0015` retire `topic_stats`
 and `study_items.form` (applied 2026-09-12 — and it took production down for
-hours, see NOTES §31 before applying anything like it).
+hours, see NOTES §31 before applying anything like it) · `0016`
+`profiles.avatar`, the private `avatars` bucket, `nomi_conversations` and
+`nomi_messages` (written 2026-09-13, **not applied** — additive only, safe in
+either order; the app degrades without it. NOTES §36).
 
 ## Rules — these are not negotiable
 
@@ -185,6 +188,11 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   still owl twice. `openPage({ reducedMotion })` makes the motion setting part
   of the result rather than the browser's default — which, measured, is
   `no-preference` in headless Chrome (NOTES §35).
+- **The test account's Gemini key is a placeholder.** The isolation test writes
+  `A-SECRET-KEY-VALUE` into it, so every Gemini call on that account is refused
+  as an invalid key. For a live model call, use `GEMINI_API_KEY` from `.env`
+  (`scripts/nomi-chat-probe.ts` does) — never mistake the refusal for an outage
+  (NOTES §36).
 - Cloudflare needs a few seconds to propagate; a bundle-hash mismatch
   immediately after a deploy is worth re-reading before investigating.
 - Vitest uses `pool: 'forks'` (Windows). It flakes right after edits — re-run.
@@ -235,6 +243,7 @@ npx tsx --env-file=.env scripts/study-probe.ts <set-id>
 npx tsx --env-file=.env scripts/seed-progress.ts [--days 30] [--clear]
 npx tsx scripts/make-pet-assets.ts            # cuts every assets/*-stages.*
 npx tsx scripts/make-nomi-assets.ts [--debug <dir>]   # Nomi's layers + src/ui/nomi-rig.ts, from design-reference/ (gitignored)
+npx tsx --env-file=.env scripts/nomi-chat-probe.ts    # Nomi's brain + one real Gemini reply + what was saved
 npx tsx scripts/palette-check.ts              # contrast + colour-blindness gate, both modes
 npx tsx --env-file=.env scripts/verify-phase2.ts --pdf <file>
 ```

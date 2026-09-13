@@ -4756,6 +4756,171 @@ Progress, Settings, Notes, Quiz, Blanks, New, sign-in and not-found, Home at 393
 light, Home and Set detail at 1100 dark.
 
 
+## 36. From daily use: counts that did not clear, and Nomi as a companion (2026-09-13)
+
+The owner deployed §35, used it, and reported five things. Two were defects,
+and both had two causes. Three were requests, and one of them reverses D14.
+
+### 36.1 "Retry what you missed (1)" and "8 due today" did not clear
+
+Reproduced on the test account before anything was changed, in the built app:
+
+```
+missed by set/level   {"4abb8b3b":{"remember":5},"6d29b263":{"remember":3}}
+due by set/level      {"6d29b263":{"remember":5},"4abb8b3b":{"remember":7}}
+
+Home                  7 due today · 5 cards to retry | Retry what you missed
+tap it -> deck opens  Remember 10 | Understand 3 | Apply 4 |
+                      Nothing to retry here — you have not missed anything at this level yet.
+switch to Remember,   Done — 5 of 5 got right.
+answer all five
+press back            7 due today · 5 cards to retry | Retry what you missed   <- unchanged
+reload                2 due today | Continue                                   <- the truth
+```
+
+**Cause one: the deck and the count described different things.** Every missed
+card and every due card was at Remember; every deck opens on Understand. The
+retry deck was filtered to the level on screen, so the button that promised
+five cards opened a deck of none. The due count spans all three levels and a
+deck deals one. This is §21's rule broken from a new direction: *count what you
+would deal.*
+
+**Cause two: nothing ever told the screens.** Not one query in the app was
+invalidated after an answer. Home and Progress stay mounted under a deck, and
+the client never refetches on focus, so back returned to the numbers from
+before.
+
+**The fixes, each small:**
+
+- `src/core/deck.ts` — `deal()`: a retry deck is every missed card in the set,
+  whatever the level, and the level picker is hidden while it deals.
+  `startingLevel()`: a link that knows where the work is passes `?level=`, read
+  once as initial state. **Not an effect** — the guard that stops the app moving
+  a student between levels (Phase D) still holds, and still passes.
+- `src/data/study-session.ts` — decks record through `useStudySession`, which
+  waits for every in-flight answer when the deck closes and invalidates once.
+  Not after each answer: refetching the missed pile mid-deck would pull the
+  card just answered out from under the cursor.
+- Home and Progress refetch when the app comes back to the front.
+- Progress's retry button counts the set it opens (`retryTargetCount`), not
+  every set; "Study what's due" and the set screen's Flashcards row open on the
+  level holding the due cards.
+
+**Verified in the built app, no reload:** Progress showed "Retry what you missed
+(3)"; the deck held exactly 3 cards with no level picker; after 3 of 3 and back,
+the button was gone and Progress read "4 cards ready for review".
+
+**Found, not fixed:** due dates land on UTC midnight (`startOfUtcDay`), which is
+08:00 in the owner's UTC+8. A card answered between midnight and 8am local is
+due again at 8am the same day. It was not the cause here — the reproduction
+above is fully explained without it — but it would produce the same symptom
+for anyone studying early, and changing what "a day" means for the scheduler is
+a decision, not a tidy-up.
+
+### 36.2 Home, from the owner's reference
+
+- **"Welcome back, <name>"** with the profile picture top right, opening
+  Settings. `display_name` had existed since 0001 and nothing set it; Settings
+  now does. No name means "Welcome back" alone, never one guessed from email.
+- **Nomi stands on a card** and says one true thing (`homeLine`). The owner, on
+  the pill: *"I don't like how Nomi is just looking like a button that needs to
+  be clicked"*, with another app's companion standing on the edge of a card as
+  the example. The owl's head rises above the card's top edge; the whole card
+  opens the chat. The pill is gone from Study and Progress.
+- **Continue is shaded**, its heading above it, the set's progress in it, and
+  the one filled button. New tokens `feature` / `featureText` / `featureMuted`,
+  gated: featureText 10.49:1 light and 8.25:1 dark; featureMuted 5.50 and 5.52;
+  the accent button on the shade 7.83 and 4.23; the shade against the page 1.36
+  and 1.86 (hairline floor 1.25 — it has no border, so the shade is the signal).
+- **Each set shows how much of it is known.** `setStats` comes from rows the
+  dashboard already fetched — due, missed, known per set — so the bars, Nomi's
+  line and Nomi's answers share one source and cost no query.
+
+### 36.3 Profile pictures — migration 0016
+
+`profiles.avatar` holds `NULL` (a default face, stable per user id), `face:N`, or
+`photo:<user id>/<file>` in a new private `avatars` bucket with owner-only
+policies. Twelve faces — six hues, two expressions — drawn from Views; every
+face's features clear 7.27:1 against it. A photo is centre-cropped to 256px
+JPEG before upload. `tests/avatar.test.ts` reads the migration so the app's
+patterns and the database's check constraint cannot drift. Delete my data
+removes photos and clears the column.
+
+### 36.4 Nomi as a companion — D14 reversed, by the owner
+
+*"i want nomi to become a chatbot, capable of everyday chats … like messenger,
+not limited to 1 chat … nomi must know me as the user and the overall app."*
+And of the screen §35 wrote: *"TOO MUCH text/cards. too much descriptions!"*
+
+The owner's decisions, asked for and given before building: conversations
+**saved and listed like Claude's**; the approved privacy wording **extended**;
+the default picture **faces**. On the cap he asked instead whether Nomi could
+have a trained brain or MCP. The honest answer shaped the design:
+
+- **No model can be trained here, and MCP is for AI clients with a server to
+  plug tools into.** But a combined brain can: `src/core/nomi-brain.ts` answers
+  questions about the student's own app — greetings, streak, due, missed, sets,
+  progress, "what should I study", their name — **from the app, with no model
+  call and no allowance spent**. Patterns are narrow on purpose; the tests hold
+  near-misses ("what is due process?", "what are sets in maths") that must reach
+  Gemini instead.
+- **Everything else goes to Gemini** as a real multi-turn conversation, with
+  `modelBrief` — the student's facts, labelled as accurate — and the open card or
+  notes. The prompt no longer refuses small talk; it still says the notes win.
+- **Costs D14 named are bounded, not ignored:** 60 Gemini replies a day (was 20;
+  a worst-case day stays under three study sets), the last 20 messages as
+  context, and the brain's answers free.
+
+`sendToNomi` saves the student's message first, lets the brain look, claims the
+allowance, calls Gemini, saves the reply — and before 0016 exists it still
+answers, keeping the conversation in memory and never pretending it saved.
+`/nomi` is the chat and nothing else; the ✦ panel over a deck is a second
+window onto the same conversation, and hides on `/nomi` itself. "Hi" could not
+be sent at all — `isAskable` demanded three characters — and now can.
+
+**Live, against the real database and Google (2026-09-13):**
+
+```
+"what's my streak?"                  brain    431ms   "You're on a 1-day streak, and today already counts."
+"…what does xylem do?" (turn 2)      Gemini  4214ms   "Xylem transports water and dissolved minerals…"
+saved                                nothing — 0016 not yet applied, as designed
+```
+
+### 36.5 Four things that were wrong first
+
+1. **"Gemini is busy" was an invalid key.** The test account's stored key is the
+   placeholder `scripts/isolation-test.ts` writes to check keys do not leak, so
+   every call was refused — and every failure had been reported as "busy". A
+   refusal Google explains is now said plainly (`reasonToMessage`), with a test;
+   the probe uses `GEMINI_API_KEY` from `.env`.
+2. **A chat test timed out**, because the shared queue paces and retries on a
+   10/20/40s ladder. `sendToNomi` takes the scheduler as a dependency; tests run
+   the call directly.
+3. **The privacy guard caught a comment.** The approved paragraph must never name
+   the companion, and a new comment inside its block did. The comment was
+   reworded; the deliberately crude guard was left crude.
+4. **Two probes printed `undefined`** before reading page text through the
+   harness — the §35.7 `npx` lesson, again. Probes now import `openPage`.
+
+### 36.6 What is not done
+
+- **Migration 0016 is written and NOT applied.** Until it is, faces cannot be
+  chosen and chats are not saved; everything else works. After applying, run the
+  isolation test (it covers both new tables, B writing into A's conversation,
+  and the avatars bucket) and `scripts/nomi-chat-probe.ts`, which prints what was
+  saved.
+- **Not seen on an iPhone.** The chat's message box sits at the bottom of the
+  screen; iOS Safari's keyboard is the risk the ✦ panel already had to dodge.
+- The UTC day boundary above; the 32 off-scale type values from §35.
+
+**Verified:** typecheck clean · **768 tests**, 3 skipped (+91 since §35) ·
+`expo export` · boot · `palette-check` including the shade and all twelve faces ·
+`scroll-probe --height 420`: all four tabs · the retry fix driven in the built
+app · the chat driven in the built app and against Google · screenshots at 393
+dark of Home, Settings, `/nomi` empty, mid-chat and its history, the ✦ panel;
+Home at 393 light and 1100 dark.
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

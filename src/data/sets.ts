@@ -1,6 +1,7 @@
 import { supabase, type Db } from './supabase';
 import type { Plan } from '../core/planner';
 import type { DropSummary } from '../core/validate';
+import { removeAvatarPhotos } from './profile';
 
 /**
  * Study sets. RLS scopes every query to the signed-in user, so nothing here
@@ -147,10 +148,31 @@ export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
   }
 
   const id = await currentUserId();
-  const { error } = await supabase
-    .from('profiles')
-    .update({ gemini_api_key: null, display_name: null })
-    .eq('id', id);
+
+  // Nomi's conversations (0016). Their messages cascade. A project without the
+  // table has nothing to delete, which is not a failure.
+  const chats = await supabase.from('nomi_conversations').delete().eq('user_id', id);
+  if (chats.error && !['PGRST205', '42P01'].includes(chats.error.code ?? '')) {
+    throw new Error(chats.error.message);
+  }
+
+  // Uploaded profile pictures. Best effort, like every other storage removal
+  // here — and done before the profile stops pointing at them.
+  try {
+    await removeAvatarPhotos();
+  } catch (err) {
+    console.warn(`[sets] could not remove profile pictures: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  const cleared = { gemini_api_key: null, display_name: null, avatar: null };
+  let { error } = await supabase.from('profiles').update(cleared).eq('id', id);
+  // Before 0016 there is no avatar column to clear; clear the rest.
+  if (error?.code === '42703') {
+    ({ error } = await supabase
+      .from('profiles')
+      .update({ gemini_api_key: null, display_name: null })
+      .eq('id', id));
+  }
   if (error) throw new Error(error.message);
 
   return { setsDeleted: sets.length };

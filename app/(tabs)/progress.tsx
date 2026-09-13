@@ -2,7 +2,6 @@ import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Body, Button, Card, LoadingState, Screen, TitleRow } from '../../src/ui/components';
-import { NomiButton } from '../../src/ui/nomi';
 import { radius, space, useTheme } from '../../src/ui/theme';
 import { useSessionStore } from '../../src/data/session';
 import { fetchDashboard, EMPTY_DASHBOARD, type DashboardData } from '../../src/data/dashboard';
@@ -70,12 +69,15 @@ export default function Progress() {
     queryKey: ['dashboard'],
     queryFn: () => fetchDashboard(),
     enabled: !!session,
+    // An installed app is reopened, not relaunched: without this, a morning's
+    // Progress would still show last night's due count (NOTES §36).
+    refetchOnWindowFocus: true,
   });
 
   if (isLoading) {
     return (
       <Screen>
-        <TitleRow title="Progress" action={<NomiButton />} />
+        <TitleRow title="Progress" />
         <LoadingState />
       </Screen>
     );
@@ -86,7 +88,7 @@ export default function Progress() {
   if (data.totalAttempts === 0) {
     return (
       <Screen>
-        <TitleRow title="Progress" action={<NomiButton />} />
+        <TitleRow title="Progress" />
         <Card>
           <Body>Nothing to show yet — you haven't answered any cards.</Body>
           {/* Names the blocks it will fill in, in the words those blocks
@@ -108,7 +110,7 @@ export default function Progress() {
 
   return (
     <Screen>
-      <TitleRow title="Progress" action={<NomiButton />} />
+      <TitleRow title="Progress" />
       <Streak data={data} />
       <Mastery data={data} />
       <Forecast data={data} />
@@ -513,7 +515,8 @@ function NextStep({ data }: { data: DashboardData }) {
   if (data.toRetry > 0 && data.retryTarget) {
     return (
       <Button
-        label={`Retry what you missed (${data.toRetry})`}
+        // The count of the set the button opens, not of every set (§36).
+        label={`Retry what you missed (${data.retryTargetCount})`}
         onPress={() => router.push(`/set/${data.retryTarget}/flashcards?retry=1`)}
       />
     );
@@ -525,7 +528,11 @@ function NextStep({ data }: { data: DashboardData }) {
     return (
       <Button
         label="Study what's due"
-        onPress={() => router.push(`/set/${data.dueTarget}/flashcards`)}
+        onPress={() =>
+          router.push(
+            `/set/${data.dueTarget}/flashcards${data.dueTargetLevel ? `?level=${data.dueTargetLevel}` : ''}`,
+          )
+        }
       />
     );
   }

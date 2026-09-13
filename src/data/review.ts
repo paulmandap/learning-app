@@ -1,6 +1,7 @@
 import { completeRows, supabase, type Db } from './supabase';
 import { NEW_CARD, startOfUtcDay, type Scheduled } from '../core/schedule';
 import type { AttemptResult } from '../core/grade';
+import type { Level } from '../core/planner';
 
 /**
  * Review schedules — when each card is next due (Phase 6).
@@ -110,6 +111,43 @@ export async function dueCountsBySet(
     study_set_id: string;
   }[]) {
     counts.set(row.study_set_id, (counts.get(row.study_set_id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * Due cards in one set, by level.
+ *
+ * The set screen shows "7 due" and opens a deck, and a deck deals one level. So
+ * the link has to know which level the seven are at, or it opens a deck with
+ * none of them in it — which is how "8 due today" survived a finished deck on
+ * the owner's phone (NOTES §36). Same inner join and the same hidden-card rule
+ * as `dueCountsBySet`, so the two counts cannot disagree.
+ */
+export async function dueLevelsForSet(
+  studySetId: string,
+  now: number = Date.now(),
+  db: Db = supabase,
+): Promise<Partial<Record<Level, number>>> {
+  const { data, error, count } = await db
+    .from('review_state')
+    .select('study_items!inner(hidden, level)', { count: 'exact' })
+    .eq('study_set_id', studySetId)
+    .eq('study_items.hidden', false)
+    .lte('due_at', new Date(startOfUtcDay(now)).toISOString());
+
+  if (error) {
+    console.warn(`[review] due levels unavailable: ${error.message}`);
+    return {};
+  }
+
+  const counts: Partial<Record<Level, number>> = {};
+  for (const row of completeRows('dueLevelsForSet', { data, count }) as {
+    study_items: { level: Level } | { level: Level }[] | null;
+  }[]) {
+    const item = Array.isArray(row.study_items) ? row.study_items[0] : row.study_items;
+    if (!item) continue;
+    counts[item.level] = (counts[item.level] ?? 0) + 1;
   }
   return counts;
 }

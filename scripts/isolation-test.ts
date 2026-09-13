@@ -8,7 +8,10 @@
  * Coverage, each asserted separately:
  *   - every user-scoped base table: study_sets, documents, document_pages,
  *     study_items, attempts, review_state (Phase 6), notes (0012),
- *     chat_usage (0010) and study_days (0009)
+ *     chat_usage (0010), study_days (0009), and Nomi's saved conversations,
+ *     nomi_conversations and nomi_messages (0016)
+ *   - B writing a message into A's conversation, which RLS must refuse
+ *   - storage objects under A's prefix in BOTH buckets: documents and avatars
  *   - item_stats and topic_stats  <-- the views, tested in their own right
  *   - storage objects under A's prefix
  *   - profiles.gemini_api_key specifically
@@ -239,6 +242,34 @@ async function main() {
     .from('study_days')
     .upsert({ user_id: A.userId, day: STUDY_DAY_PROBE, answers: 1 }, { onConflict: 'user_id,day' });
 
+  // 0016: a conversation with Nomi. After notes, the most personal thing here —
+  // what someone chose to say, in their own words, to what feels like a friend.
+  // Seeded only if the tables exist; before the migration they cannot leak, and
+  // counting "blocked: no such table" as a pass would be a vacuous one.
+  const convo = await A.client
+    .from('nomi_conversations')
+    .insert({ user_id: A.userId, title: 'probe conversation' })
+    .select('id')
+    .single();
+  const nomiSeeded = !convo.error;
+  if (nomiSeeded) {
+    await A.client.from('nomi_messages').insert({
+      conversation_id: (convo.data as { id: string }).id,
+      user_id: A.userId,
+      role: 'user',
+      content: 'probe message — private to A',
+    });
+  } else {
+    console.log(`  (nomi tables not seeded: ${convo.error?.message} — is 0016 applied?)`);
+  }
+
+  const avatarPath = `${A.userId}/avatar-probe.jpg`;
+  const avatarUpload = await A.client.storage
+    .from('avatars')
+    .upload(avatarPath, new Blob(['probe'], { type: 'image/jpeg' }), { upsert: true });
+  const avatarsSeeded = !avatarUpload.error;
+  if (!avatarsSeeded) console.log(`  (avatar seed note: ${avatarUpload.error?.message})`);
+
   const storagePath = `${A.userId}/${doc?.id ?? 'x'}/probe.txt`;
   const upload = await A.client.storage
     .from('documents')
@@ -269,9 +300,16 @@ async function main() {
     // only user-scoped table that deliberately survives deleting a set, so it
     // is also the longest-lived record of a person's habits in the database.
     'study_days',
+    // 0016. What a student said to Nomi, and the names of those conversations.
+    'nomi_conversations',
+    'nomi_messages',
   ] as const;
 
   for (const table of tables) {
+    if ((table === 'nomi_conversations' || table === 'nomi_messages') && !nomiSeeded) {
+      console.log(`  ----  ${table} — not present (migration 0016), not checked`);
+      continue;
+    }
     const { data, error } = await B.client.from(table).select('*');
     if (error) {
       ok(table, `blocked (${error.code ?? 'error'})`);
@@ -280,6 +318,19 @@ async function main() {
     const leaked = (data ?? []).filter((r: Record<string, unknown>) => r.user_id === A.userId);
     if (leaked.length > 0) fail(table, `LEAKED ${leaked.length} of A's rows`);
     else ok(table, `${data?.length ?? 0} own rows, 0 of A's`);
+  }
+
+  // The insert policy, not only the select one. Knowing someone's conversation
+  // id must not let you write into it under your own name.
+  if (nomiSeeded) {
+    const intrusion = await B.client.from('nomi_messages').insert({
+      conversation_id: (convo.data as { id: string }).id,
+      user_id: B.userId,
+      role: 'user',
+      content: 'intruder',
+    });
+    if (!intrusion.error) fail('nomi_messages write', "B wrote a message into A's conversation");
+    else ok('nomi_messages write', `blocked (${intrusion.error.code ?? 'error'})`);
   }
 
   // ------------------------------------------------------------ profiles --
@@ -356,6 +407,25 @@ async function main() {
   if (!wr.error) fail('storage write', "B wrote into A's prefix");
   else ok('storage write', 'blocked');
 
+  // A profile photo is a picture of a person. Same three checks, second bucket.
+  if (avatarsSeeded) {
+    const avDl = await B.client.storage.from('avatars').download(avatarPath);
+    if (avDl.data) fail('avatars download', "B downloaded A's profile picture");
+    else ok('avatars download', 'blocked');
+
+    const avLs = await B.client.storage.from('avatars').list(A.userId);
+    if ((avLs.data?.length ?? 0) > 0) fail('avatars list', "B listed A's pictures");
+    else ok('avatars list', 'nothing visible');
+
+    const avWr = await B.client.storage
+      .from('avatars')
+      .upload(`${A.userId}/intruder.jpg`, new Blob(['x'], { type: 'image/jpeg' }));
+    if (!avWr.error) fail('avatars write', "B wrote into A's picture folder");
+    else ok('avatars write', 'blocked');
+  } else {
+    console.log('  ----  avatars — bucket not present (migration 0016), not checked');
+  }
+
   // -------------------------------------------------------------- heartbeat --
   console.log('\nHeartbeat table is RPC-only:');
   const hbDirect = await B.client.from('heartbeat').insert({});
@@ -378,6 +448,9 @@ async function main() {
   // schedules. Matched by title rather than by the id from this run, so a
   // sweep also collects what earlier runs left.
   await A.client.storage.from('documents').remove([storagePath]);
+  if (avatarsSeeded) await A.client.storage.from('avatars').remove([avatarPath]);
+  // Messages cascade from the conversation.
+  if (nomiSeeded) await A.client.from('nomi_conversations').delete().eq('title', 'probe conversation');
   await A.client.from('notes').delete().eq('title', 'probe note title');
   await A.client
     .from('chat_usage')

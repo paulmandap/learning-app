@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  conversationTitle,
   describeRemaining,
+  describeWhen,
+  historyWindow,
+  HISTORY_WINDOW,
   isAskable,
   DAILY_MESSAGE_LIMIT,
   LOW_REMAINING,
@@ -8,19 +12,18 @@ import {
   MAX_QUESTION_CHARS,
   MAX_REPLY_TOKENS,
   trimNotes,
+  type ChatTurn,
 } from '../src/core/chat';
-import { buildChatPrompt } from '../src/ai/prompts';
+import { buildNomiSystemPrompt } from '../src/ai/prompts';
 
 describe('the budget', () => {
-  it('keeps a full day of questions comparable to one study set', () => {
-    // The comparison that matters: the assistant must never quietly become the
-    // more expensive half of a shared free-tier allowance. Generation is
-    // output-bound at roughly 2,000-4,000 tokens per section (§3.2.3), so a
-    // set is ~24k. A full day of questions must stay under that.
-    //
-    // Worst case, not typical: MAX_REPLY_TOKENS budgets thinking AND answer
-    // together, and measured usage was ~550 of it, not the whole allowance.
-    expect(DAILY_MESSAGE_LIMIT * MAX_REPLY_TOKENS).toBeLessThan(24_000);
+  it('keeps a worst-case day of Gemini replies under three study sets', () => {
+    // Nomi became a chat at the owner's request (NOTES §36), which reverses
+    // D14's one-question design, and the cap rose from 20 to 60. The principle
+    // survives in a new number: generation is ~24k tokens a set, and a full
+    // day of the longest possible replies must stay under three of those.
+    // Nomi's own instant answers spend nothing and are not in this sum.
+    expect(DAILY_MESSAGE_LIMIT * MAX_REPLY_TOKENS).toBeLessThan(3 * 24_000);
   });
 
   it('leaves room for the answer after the model has finished thinking', () => {
@@ -30,9 +33,10 @@ describe('the budget', () => {
     expect(MAX_REPLY_TOKENS).toBeGreaterThan(600);
   });
 
-  it('bounds a single question', () => {
+  it('bounds a single message and the history sent with it', () => {
     expect(MAX_NOTES_CHARS).toBeLessThanOrEqual(4000);
-    expect(MAX_QUESTION_CHARS).toBeLessThanOrEqual(500);
+    expect(MAX_QUESTION_CHARS).toBeLessThanOrEqual(1000);
+    expect(HISTORY_WINDOW).toBeLessThanOrEqual(20);
   });
 });
 
@@ -42,8 +46,6 @@ describe('trimNotes', () => {
   });
 
   it('cuts on a sentence boundary rather than mid-word', () => {
-    // Cutting mid-word leaves the model completing a fragment, which reads as
-    // though the notes themselves are damaged.
     const notes = 'One sentence here. Two sentence here. Three sentence here.';
     const out = trimNotes(notes, 40);
     expect(out.endsWith('.')).toBe(true);
@@ -51,7 +53,6 @@ describe('trimNotes', () => {
   });
 
   it('falls back to a hard cut when there is no boundary to find', () => {
-    // A transcribed diagram can be one long line with no full stop in it.
     const wall = 'LEAF STEM ROOT FRUIT FLOWER '.repeat(50);
     const out = trimNotes(wall, 100);
     expect(out.length).toBeLessThanOrEqual(100);
@@ -59,7 +60,6 @@ describe('trimNotes', () => {
   });
 
   it('does not throw away most of the budget chasing a boundary', () => {
-    // A full stop at character 5 must not shrink a 100-character budget to 5.
     const notes = 'Ok. ' + 'x'.repeat(200);
     expect(trimNotes(notes, 100).length).toBeGreaterThan(60);
   });
@@ -70,13 +70,15 @@ describe('trimNotes', () => {
 });
 
 describe('isAskable', () => {
-  it('accepts a real question', () => {
-    expect(isAskable('Why is the leaf the photosynthetic organ?')).toBe(true);
+  it('accepts "Hi" — the owner could not send it at all', () => {
+    // It demanded three characters. A greeting is answered by Nomi's own brain
+    // now and spends nothing, so the floor had no reason left to exist.
+    expect(isAskable('Hi')).toBe(true);
+    expect(isAskable('?')).toBe(true);
   });
 
-  it('rejects nothing and near-nothing', () => {
-    // A cheap gate, so an empty box does not spend one of twenty questions.
-    for (const q of ['', '   ', 'a', '?']) expect(isAskable(q)).toBe(false);
+  it('rejects a blank box', () => {
+    for (const q of ['', '   ', '\n\t']) expect(isAskable(q)).toBe(false);
   });
 
   it('rejects an essay', () => {
@@ -84,22 +86,76 @@ describe('isAskable', () => {
   });
 });
 
+describe('historyWindow', () => {
+  const turns = (n: number): ChatTurn[] =>
+    Array.from({ length: n }, (_, i) => ({ role: i % 2 === 0 ? 'user' : 'nomi', text: `m${i}` }));
+
+  it('keeps only the most recent turns', () => {
+    const window = historyWindow(turns(50), 20);
+    expect(window.length).toBeLessThanOrEqual(20);
+    expect(window.at(-1)!.text).toBe('m49');
+  });
+
+  it('always opens on something the student said', () => {
+    // An odd cut would start on a reply to a question the model cannot see.
+    expect(historyWindow(turns(50), 19)[0]!.role).toBe('user');
+    expect(historyWindow(turns(50), 20)[0]!.role).toBe('user');
+  });
+
+  it('keeps a short conversation whole', () => {
+    expect(historyWindow(turns(3))).toHaveLength(3);
+  });
+
+  it('returns nothing when there is nothing the student said', () => {
+    expect(historyWindow([{ role: 'nomi', text: 'hello' }])).toEqual([]);
+  });
+});
+
+describe('conversationTitle', () => {
+  it('uses a short first message as it is', () => {
+    expect(conversationTitle('  what is my   streak  ')).toBe('what is my streak');
+  });
+
+  it('shortens a long one on a word, never mid-word', () => {
+    const title = conversationTitle(
+      'can you explain how the sinoatrial node controls the heart rate during exercise please',
+    );
+    expect(title.length).toBeLessThanOrEqual(61);
+    expect(title.endsWith('…')).toBe(true);
+    expect(title).not.toMatch(/\s…$/);
+  });
+});
+
+describe('describeWhen', () => {
+  const now = new Date(2026, 8, 13, 18, 0).getTime(); // local time, like the phone
+  const hour = 60 * 60 * 1000;
+
+  it('says a time for today, and Yesterday for yesterday', () => {
+    expect(describeWhen(now - 2 * hour, now)).toMatch(/^\d{1,2}:\d{2} [AP]M$/);
+    expect(describeWhen(now - 24 * hour, now)).toBe('Yesterday');
+  });
+
+  it('names the weekday within the week, and the date before that', () => {
+    expect(describeWhen(now - 3 * 24 * hour, now)).toMatch(/day$/);
+    expect(describeWhen(now - 30 * 24 * hour, now)).toMatch(/^[A-Z][a-z]{2} \d{1,2}$/);
+  });
+});
+
 describe('describeRemaining', () => {
   it('says nothing while there is plenty left', () => {
-    // The owner asked not to be told about limits every time. A counter through
-    // nineteen unremarkable questions makes an allowance feel like a meter.
     expect(describeRemaining(DAILY_MESSAGE_LIMIT)).toBeNull();
     expect(describeRemaining(LOW_REMAINING + 1)).toBeNull();
   });
 
   it('speaks up once it is nearly gone', () => {
-    expect(describeRemaining(LOW_REMAINING)).toBe(`${LOW_REMAINING} more questions today.`);
-    expect(describeRemaining(1)).toBe('1 more question today.');
+    expect(describeRemaining(LOW_REMAINING)).toBe(`${LOW_REMAINING} more replies from me today.`);
+    expect(describeRemaining(1)).toBe('1 more reply from me today.');
   });
 
-  it('handles the last one and the one after', () => {
-    expect(describeRemaining(0)).toMatch(/last question/i);
+  it('handles the last one and the one after, and says what still works', () => {
+    expect(describeRemaining(0)).toMatch(/last reply/i);
     expect(describeRemaining(-1)).toMatch(/come back tomorrow/i);
+    expect(describeRemaining(-1)).toMatch(/streak/i);
   });
 
   it('never uses jargon on a student screen', () => {
@@ -112,7 +168,8 @@ describe('describeRemaining', () => {
   });
 });
 
-describe('buildChatPrompt', () => {
+describe('buildNomiSystemPrompt', () => {
+  const brief = 'FACTS ABOUT THE STUDENT, from the app, accurate right now:\n- Name: Paul';
   const card = {
     kind: 'card' as const,
     prompt: 'Which tissue carries water upward?',
@@ -120,39 +177,40 @@ describe('buildChatPrompt', () => {
     source: 'Xylem moves water upward from the roots.',
   };
 
-  it('puts the open card in front of the model', () => {
-    const p = buildChatPrompt({ question: 'Why?', context: card });
+  it('is Nomi, and welcomes everyday chat instead of refusing it', () => {
+    // The owner said "Hi Nomi" and was told it could only help with study
+    // notes. That rule is gone.
+    const p = buildNomiSystemPrompt({ brief, context: { kind: 'none' } });
+    expect(p).toMatch(/You are Nomi/);
+    expect(p).toMatch(/small talk|everyday/i);
+    expect(p).not.toMatch(/only help with/i);
+  });
+
+  it('carries the facts about the student, and forbids inventing any', () => {
+    const p = buildNomiSystemPrompt({ brief, context: { kind: 'none' } });
+    expect(p).toContain('Name: Paul');
+    expect(p).toMatch(/never guess/i);
+  });
+
+  it('puts the open card in front of the model, and keeps the notes-win rule', () => {
+    const p = buildNomiSystemPrompt({ brief, context: card });
     expect(p).toContain('Which tissue carries water upward?');
     expect(p).toContain('Xylem moves water upward from the roots.');
-    expect(p).toContain('Why?');
+    expect(p).toMatch(/examined on/i);
   });
 
   it('puts the set notes in when that is the context', () => {
-    const p = buildChatPrompt({
-      question: 'Summarise this',
+    const p = buildNomiSystemPrompt({
+      brief,
       context: { kind: 'set', title: 'Plant biology', notes: 'Roots absorb water.' },
     });
     expect(p).toContain('Plant biology');
     expect(p).toContain('Roots absorb water.');
   });
 
-  it('still asks something sensible with no context at all', () => {
-    const p = buildChatPrompt({ question: 'What is xylem?', context: { kind: 'none' } });
-    expect(p).toContain('What is xylem?');
-    expect(p.length).toBeGreaterThan(50);
-  });
-
-  it("tells the model the student's notes win", () => {
-    // The failure that matters is not a bad answer, it is a confident answer
-    // contradicting the notes they are about to be examined on.
-    const p = buildChatPrompt({ question: 'Why?', context: card });
-    expect(p).toMatch(/examined on/i);
-    expect(p).toMatch(/not in their notes/i);
-  });
-
-  it('asks for a short, plain answer', () => {
-    const p = buildChatPrompt({ question: 'Why?', context: card });
-    expect(p).toMatch(/four sentences/i);
-    expect(p).toMatch(/no headings|no bullet/i);
+  it('asks for simple, direct, plain replies', () => {
+    const p = buildNomiSystemPrompt({ brief, context: { kind: 'none' } });
+    expect(p).toMatch(/simple and direct/i);
+    expect(p).toMatch(/no headings|no bullet|no markdown/i);
   });
 });

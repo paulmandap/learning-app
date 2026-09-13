@@ -1,127 +1,254 @@
-import { useCallback, useRef, useState } from 'react';
-import { Stack, useIsFocused, useNavigation, useRouter } from 'expo-router';
-import { Body, Button, Card, Label, Screen } from '../src/ui/components';
-import { HeaderBackButton } from '../src/ui/menu';
+import { useRef, useState } from 'react';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Stack } from 'expo-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ChatBubble, Composer, NomiWelcome, ThinkingBubble } from '../src/ui/nomi';
+import { LoadingState } from '../src/ui/components';
+import { HeaderActions } from '../src/ui/menu';
 import { GLYPH } from '../src/ui/glyphs';
-import { NomiHero } from '../src/ui/nomi';
-import { DAILY_MESSAGE_LIMIT } from '../src/core/chat';
-import type { NomiState } from '../src/core/nomi-motion';
+import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from '../src/ui/theme';
+import { useNomiConversation } from '../src/data/nomi-session';
+import { useAssistantContext } from '../src/data/assistant-context';
+import { deleteConversation, listConversations } from '../src/data/nomi-chat';
+import { homeLine } from '../src/core/nomi-brain';
+import { describeWhen } from '../src/core/chat';
 
 /**
- * Nomi — the companion's own screen.
+ * Nomi — a conversation.
  *
- * ## Written for what Nomi is today
+ * ## What the owner asked for
  *
- * This was a roadmap in the future tense — "Nomi will become…", "Soon Nomi
- * will also know…" — with three named empty slots and nothing to do. Some of
- * what it promised had already shipped, and a screen that describes a product
- * that does not exist yet reads, to the student holding it, as a product that
- * does not work (NOTES §35).
+ * *"a chatbot, capable of everyday chats, answering simple and direct, can have
+ * a chat like sender receiver chat like messenger, not limited to 1 chat"*, with
+ * a history *"just like what Claude website does"* — and, of the screen that was
+ * here, *"there's TOO MUCH text/cards. too much descriptions! remove that."*
+ * (NOTES §36.)
  *
- * So it says what is true now, in the present tense: how to ask, what Nomi
- * reads, and what it does not do. The capability is unchanged — one question,
- * one answer, grounded in the card or the set's notes (D14). The fix for an
- * empty-looking screen was honesty about the present, not new intelligence.
+ * So this screen is the chat and nothing else: messages, a box to type in, the
+ * list of past conversations behind a button, and a fresh one behind another.
+ * A new conversation opens with Nomi saying hello and one true line about the
+ * student, not a description of what Nomi is.
  *
- * ## Why there is still no conversation here
+ * ## Two brains, one conversation
  *
- * **D14 gives the assistant one question and one answer with no history**,
- * because a conversation re-sends its whole thread on every turn and the
- * allowance it spends is the same one that makes the cards. And answering
- * "what should I study today?" honestly needs learning data this screen does
- * not read — a companion that makes up how you are doing is worse than one
- * that says nothing, because it gets believed.
- *
- * ## No queries
- *
- * Opening this screen asks the database for nothing. `getNomiContext` in
- * `src/data/nomi.ts` is the boundary it will read through, and it stays unused
- * until there is something true to show.
- *
- * ## Hello and goodbye
- *
- * Nomi greets on arrival and waves on the way out. The wave is awaited by the
- * back control, so it is kept to half a second and never allowed to hold the
- * way out hostage: a timer leaves anyway if the animation cannot report back.
+ * `sendToNomi` answers questions about the student's own app from the app —
+ * instantly, spending nothing — and everything else through Gemini with the
+ * facts attached. The screen cannot tell which, and does not need to.
  */
+
+const SUGGESTIONS = ["What's due today?", 'What should I study?', "What's my streak?", 'Quiz me on something'];
+
 export default function Nomi() {
-  const router = useRouter();
-  const navigation = useNavigation();
-  const focused = useIsFocused();
-  const [state, setState] = useState<NomiState>('greeting');
+  const t = useTheme();
+  const insets = useSafeAreaInsets();
+  const context = useAssistantContext((s) => s.context);
+  const chat = useNomiConversation(context);
+  const scroll = useRef<ScrollView>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
-  const leaving = useRef<Promise<void> | null>(null);
-  const waved = useRef<(() => void) | null>(null);
-
-  /** Wave, then resolve — on the animation finishing, or on the timer, whichever is first. */
-  const sayGoodbye = useCallback(() => {
-    if (!leaving.current) {
-      leaving.current = new Promise<void>((resolve) => {
-        waved.current = resolve;
-        setState('goodbye');
-        setTimeout(resolve, GOODBYE_CEILING_MS);
-      });
-    }
-    return leaving.current;
-  }, []);
-
-  const leave = useCallback(async () => {
-    await sayGoodbye();
-    if (navigation.canGoBack()) router.back();
-    else router.replace('/');
-  }, [navigation, router, sayGoodbye]);
+  const empty = chat.turns.length === 0 && !chat.busy && !chat.loading;
 
   return (
-    <Screen>
-      {/* The layout registers this route with `backable`; this replaces only the
-          control, so the back chevron waits for the wave. The stack header
-          still names the screen, so there is no body heading to repeat it. */}
-      <Stack.Screen options={{ headerLeft: () => <HeaderBackButton onBeforeLeave={sayGoodbye} /> }} />
-
-      <NomiHero
-        state={state}
-        active={focused}
-        onDone={(finished) => {
-          if (finished === 'goodbye') waved.current?.();
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <HeaderActions
+              actions={[
+                { glyph: GLYPH.history, label: 'Your chats', onPress: () => setHistoryOpen(true) },
+                { glyph: GLYPH.newChat, label: 'New chat', onPress: chat.startNew },
+              ]}
+            />
+          ),
         }}
       />
 
-      <Card>
-        <Label>Ask about what you are studying</Label>
-        <Body>
-          Open a set, or start a deck, and tap {GLYPH.nomi} in the corner. Ask why an answer is
-          right, or what a line in your notes means.
-        </Body>
-        <Body muted>One question at a time, up to {DAILY_MESSAGE_LIMIT} a day.</Body>
-      </Card>
+      <ScrollView
+        ref={scroll}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ flexGrow: 1, alignItems: 'center', padding: space.lg }}
+        keyboardShouldPersistTaps="handled"
+        // New messages arrive at the bottom, where a messenger keeps you.
+        onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+      >
+        <View
+          style={{
+            width: '100%',
+            maxWidth: CONTENT_MAX_WIDTH,
+            flexGrow: 1,
+            gap: space.md,
+            justifyContent: empty ? 'center' : 'flex-end',
+          }}
+        >
+          {empty ? (
+            <NomiWelcome
+              name={chat.snapshot.name}
+              line={homeLine(chat.snapshot)}
+              suggestions={SUGGESTIONS}
+              onPick={(text) => void chat.send(text)}
+            />
+          ) : (
+            chat.turns.map((turn, i) => (
+              <ChatBubble
+                key={i}
+                turn={turn}
+                showOwl={turn.role === 'nomi' && chat.turns[i + 1]?.role !== 'nomi'}
+              />
+            ))
+          )}
+          {chat.busy ? <ThinkingBubble /> : null}
+          {chat.note ? (
+            <Text style={[type.caption, { color: t.textMuted, textAlign: 'center' }]}>{chat.note}</Text>
+          ) : null}
+        </View>
+      </ScrollView>
 
-      <Card>
-        <Label>What Nomi reads</Label>
-        <Body>
-          The card in front of you, or the notes of the set you have open — nothing else.
-        </Body>
-        <Body muted>
-          It answers from those notes first. When they do not cover something, it says so before
-          answering anyway. Like making cards, asking sends your question and those notes to Google;
-          Settings explains what that means.
-        </Body>
-      </Card>
+      <View
+        style={{
+          alignItems: 'center',
+          paddingHorizontal: space.lg,
+          paddingTop: space.sm,
+          paddingBottom: insets.bottom + space.sm,
+          borderTopWidth: 1,
+          borderTopColor: t.border,
+          backgroundColor: t.bg,
+        }}
+      >
+        <View style={{ width: '100%', maxWidth: CONTENT_MAX_WIDTH }}>
+          <Composer busy={chat.busy} onSend={(text) => void chat.send(text)} />
+        </View>
+      </View>
 
-      <Card>
-        <Label>What Nomi does not do</Label>
-        <Body muted>
-          It does not remember your earlier questions, and it cannot see how you have been doing.
-          Progress shows that.
-        </Body>
-      </Card>
-
-      <Button label="Back to studying" variant="outline" onPress={() => void leave()} />
-    </Screen>
+      <ChatHistory
+        open={historyOpen}
+        currentId={chat.conversationId}
+        onClose={() => setHistoryOpen(false)}
+        onOpen={(id) => {
+          chat.open(id);
+          setHistoryOpen(false);
+        }}
+        onDeleted={(id) => {
+          if (id === chat.conversationId) chat.startNew();
+        }}
+      />
+    </View>
   );
 }
 
-/**
- * The longest leaving will ever wait. The wave itself is 520ms; this is the
- * backstop for when it cannot say it finished.
- */
-const GOODBYE_CEILING_MS = 800;
+/** Past conversations, newest first — open one, or delete it. */
+function ChatHistory({
+  open,
+  currentId,
+  onClose,
+  onOpen,
+  onDeleted,
+}: {
+  open: boolean;
+  currentId: string | null;
+  onClose: () => void;
+  onOpen: (id: string) => void;
+  onDeleted: (id: string) => void;
+}) {
+  const t = useTheme();
+  const insets = useSafeAreaInsets();
+  const client = useQueryClient();
+  const { data: conversations, isLoading } = useQuery({
+    queryKey: ['nomi-conversations'],
+    queryFn: () => listConversations(),
+    enabled: open,
+  });
+
+  async function remove(id: string) {
+    await deleteConversation(id);
+    onDeleted(id);
+    await client.invalidateQueries({ queryKey: ['nomi-conversations'] });
+  }
+
+  return (
+    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Close your chats"
+        onPress={onClose}
+        // The gutter lives on the backdrop: a panel at width 100% ignores its
+        // own side margins, and ran edge to edge on a phone.
+        style={{
+          flex: 1,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          alignItems: 'center',
+          paddingHorizontal: space.lg,
+        }}
+      >
+        <Pressable
+          // Taps inside the panel must not close it.
+          onPress={() => {}}
+          style={{
+            width: '100%',
+            maxWidth: CONTENT_MAX_WIDTH,
+            marginTop: insets.top + space.xl,
+            maxHeight: '75%',
+            backgroundColor: t.card,
+            borderRadius: radius.lg,
+            borderWidth: 1,
+            borderColor: t.border,
+            padding: space.lg,
+            gap: space.sm,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={[type.title, { color: t.text, flex: 1 }]}>Your chats</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={10}>
+              <Text style={{ fontSize: 20, color: t.textMuted }}>{GLYPH.close}</Text>
+            </Pressable>
+          </View>
+
+          {isLoading ? (
+            <LoadingState />
+          ) : conversations === null ? (
+            <Text style={[type.body, { color: t.textMuted }]}>
+              Saved chats aren't switched on yet. This conversation lasts until you close the app.
+            </Text>
+          ) : (conversations ?? []).length === 0 ? (
+            <Text style={[type.body, { color: t.textMuted }]}>No saved chats yet.</Text>
+          ) : (
+            <ScrollView contentContainerStyle={{ gap: space.xs }}>
+              {(conversations ?? []).map((c) => (
+                <View
+                  key={c.id}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    borderRadius: radius.md,
+                    backgroundColor: c.id === currentId ? t.bg : 'transparent',
+                  }}
+                >
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => onOpen(c.id)}
+                    style={{ flex: 1, minHeight: TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: space.sm }}
+                  >
+                    <Text style={[type.bodyStrong, { color: t.text }]} numberOfLines={1}>
+                      {c.title || 'Chat'}
+                    </Text>
+                    <Text style={[type.caption, { color: t.textMuted }]}>
+                      {describeWhen(Date.parse(c.updated_at), Date.now())}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete ${c.title || 'this chat'}`}
+                    onPress={() => void remove(c.id)}
+                    style={{ minWidth: TOUCH_TARGET, minHeight: TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <Text style={[type.label, { color: t.danger }]}>Delete</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}

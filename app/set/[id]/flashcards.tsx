@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Linking, Platform, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { emptyLevelCopy, LevelSegment } from '../../../src/ui/segment';
+import { emptyLevelCopy, LevelSegment, LEVELS } from '../../../src/ui/segment';
 import { useQuery } from '@tanstack/react-query';
 import {
   Body,
@@ -18,7 +18,9 @@ import { gradeFeedback, hapticFlip, primeFeedback } from '../../../src/ui/feedba
 import { space } from '../../../src/ui/theme';
 import { SourcePanel } from '../../../src/ui/source';
 import { listItems, promptFor, reportItem, type StudyItem } from '../../../src/data/items';
-import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
+import { missedItemIds } from '../../../src/data/attempts';
+import { useStudySession } from '../../../src/data/study-session';
+import { busiestLevel, countByLevel as countAtLevels, deal, startingLevel } from '../../../src/core/deck';
 import { fetchProfile } from '../../../src/data/profile';
 import { useAssistantContext } from '../../../src/data/assistant-context';
 import { reviewStatesForSet } from '../../../src/data/review';
@@ -26,14 +28,24 @@ import { isDue, studyOrder } from '../../../src/core/schedule';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import type { Level } from '../../../src/core/planner';
 
+const ITEM = { id: (i: StudyItem) => i.id, level: (i: StudyItem) => i.level };
+
 export default function Flashcards() {
-  const { id, retry } = useLocalSearchParams<{ id: string; retry?: string }>();
+  const { id, retry, level: levelParam } = useLocalSearchParams<{
+    id: string;
+    retry?: string;
+    level?: string;
+  }>();
   const setId = String(id);
   const retryOnly = retry === '1';
   const router = useRouter();
+  const record = useStudySession(setId);
 
-  // Default Understand, per the spec's level segment.
-  const [level, setLevel] = useState<Level>('understand');
+  // Understand by default, per the spec's level segment — unless the link says
+  // where the work is. "Study what's due" and the set screen's due chip pass
+  // `?level=`, read ONCE as the starting level. The student still decides every
+  // change after that (NOTES §36).
+  const [level, setLevel] = useState<Level>(() => startingLevel(levelParam));
 
   /**
    * How far through each level you are — one position per level, not one
@@ -101,7 +113,10 @@ export default function Flashcards() {
   const atLevel = useMemo(() => allItems.filter((i) => i.level === level), [allItems, level]);
 
   const items = useMemo(() => {
-    if (retryOnly) return atLevel.filter((i) => missedSet?.has(i.id));
+    // Every missed card in the set, whatever the level. It was filtered to the
+    // level on screen, so the retry deck opened empty on Understand while the
+    // missed Remember cards stayed on the button that sent you here (§36).
+    if (retryOnly) return deal(allItems, { level, retryOnly, missed: missedSet }, ITEM);
     // studyOrder, not reviewOrder: same three bands (due, never-seen, future),
     // but within each one the cards that keep beating you come first and a
     // section's cards are dealt together, so a miss is followed by a sibling
@@ -113,7 +128,7 @@ export default function Flashcards() {
       (i) => i.section_title,
       Date.now(),
     );
-  }, [atLevel, retryOnly, missedSet, schedules]);
+  }, [allItems, atLevel, level, retryOnly, missedSet, schedules]);
 
   const dueNow = useMemo(
     () =>
@@ -128,6 +143,29 @@ export default function Flashcards() {
           }).length,
     [atLevel, retryOnly, schedules],
   );
+
+  /**
+   * The next level with cards due, not counting this one.
+   *
+   * A set's "7 due today" spans every level and a deck deals one, so finishing
+   * a level can leave due cards elsewhere. The Done card offers that level
+   * rather than letting the count on Home look like it ignored the work.
+   * The schedules are the ones loaded when the deck opened, which is why the
+   * current level is excluded: its cards were just answered.
+   */
+  const nextDueLevel = useMemo(() => {
+    if (retryOnly) return null;
+    const due = countAtLevels(
+      allItems,
+      (i) => i.level,
+      (i) => {
+        const s = schedules?.get(i.id);
+        return s !== undefined && isDue(s, Date.now());
+      },
+    );
+    const nextLevel = busiestLevel({ ...due, [level]: 0 });
+    return nextLevel ? { level: nextLevel, count: due[nextLevel] ?? 0 } : null;
+  }, [allItems, schedules, level, retryOnly]);
   const { data: docs = [] } = useQuery({
     queryKey: ['docs', setId],
     queryFn: () => listDocuments(setId),
@@ -218,7 +256,7 @@ export default function Flashcards() {
     // Every answer is logged (D8) — the missed pile and Home's "Continue" are
     // both built from attempts, so a flashcard that is never recorded is a
     // flashcard that can never come back.
-    void recordAttempt({
+    void record({
       studyItemId: card.id,
       studySetId: setId,
       mode: 'flashcards',
@@ -286,7 +324,10 @@ export default function Flashcards() {
     <Screen>
       <Title>{retryOnly ? 'Retry what you missed' : 'Flashcards'}</Title>
 
-      <LevelSegment value={level} counts={countByLevel} onChange={setLevel} />
+      {/* No level picker on a retry deck: it deals every missed card at once. */}
+      {!retryOnly ? (
+        <LevelSegment value={level} counts={countByLevel} onChange={setLevel} />
+      ) : null}
 
       {items.length === 0 ? (
         <Card>
@@ -307,8 +348,15 @@ export default function Flashcards() {
               {missed.size} to retry. Coming back to those is where the learning happens.
             </Body>
           ) : null}
+          {nextDueLevel ? (
+            <Button
+              label={`${LEVELS.find((l) => l.key === nextDueLevel.level)?.label}: ${nextDueLevel.count} due`}
+              onPress={() => setLevel(nextDueLevel.level)}
+            />
+          ) : null}
           <Button
             label="Start again"
+            variant={nextDueLevel ? 'secondary' : 'primary'}
             onPress={() => {
               // This level only. The other two keep their places.
               setIndex(() => 0);

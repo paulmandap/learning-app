@@ -55,8 +55,10 @@ function RootNavigator() {
 
   // Mounted once, above the navigator, so it survives navigation and keeps its
   // panel open across screens. Hidden on sign-in: there are no notes to ask
-  // about yet, and a floating button over a one-field form is clutter.
-  const showAssistant = segments[0] !== 'sign-in';
+  // about yet, and a floating button over a one-field form is clutter. Hidden
+  // on Nomi's own screen too, where the whole screen is the conversation it
+  // would open (NOTES §36).
+  const showAssistant = segments[0] !== 'sign-in' && segments[0] !== 'nomi';
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>

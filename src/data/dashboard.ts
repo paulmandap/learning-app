@@ -2,6 +2,7 @@ import { completeRows, supabase, type Db } from './supabase';
 import {
   busiestSet,
   dueForecast,
+  KNOWN_REPS,
   sectionTrends,
   TREND_ATTEMPT_CAP,
   TREND_WINDOW_DAYS,
@@ -18,6 +19,8 @@ import {
 } from '../core/progress';
 import { startOfUtcDay, type ReviewState } from '../core/schedule';
 import { summariseUsage, type UsageSummary } from '../core/storage';
+import { busiestLevel, countByLevel } from '../core/deck';
+import type { Level } from '../core/planner';
 import { storageUsedBytes } from './documents';
 
 /**
@@ -49,6 +52,8 @@ import { storageUsedBytes } from './documents';
 export interface DashboardData {
   /** Consecutive days studied, counting back from the last day with an answer. */
   streak: number;
+  /** Whether today already has an answer — so Nomi can say today counts. */
+  studiedToday: boolean;
   /** Cards reviewed and now due again, across every set. */
   dueToday: number;
   /** Cards whose last answer was wrong or partly right — the missed pile (D8). */
@@ -73,6 +78,25 @@ export interface DashboardData {
   /** Where "Study what's due" should go, chosen the same way. */
   dueTarget: string | null;
   /**
+   * How many missed cards are in `retryTarget` — the number the button shows.
+   *
+   * `toRetry` spans every set, and the button opens one. "Retry what you
+   * missed (12)" leading to a deck of five is the promise §21 says a count must
+   * not make (NOTES §36).
+   */
+  retryTargetCount: number;
+  /** The level holding most of `dueTarget`'s due cards, so the deck opens on them. */
+  dueTargetLevel: Level | null;
+  /**
+   * Per set: due today, to retry, and known.
+   *
+   * From rows this function already fetches, so it costs no query. Nomi's
+   * instant answers ("5 due in Muscular System") and Home's progress bars both
+   * read it, and both would otherwise have needed their own round trips over
+   * the same tables (NOTES §36).
+   */
+  setStats: SetStat[];
+  /**
    * Which sections are moving, and which way.
    *
    * Separate from `sections` rather than folded into it, because the two answer
@@ -85,8 +109,16 @@ export interface DashboardData {
   trends: SectionTrend[];
 }
 
+export interface SetStat {
+  setId: string;
+  due: number;
+  missed: number;
+  known: number;
+}
+
 export const EMPTY_DASHBOARD: DashboardData = {
   streak: 0,
+  studiedToday: false,
   dueToday: 0,
   toRetry: 0,
   mastery: { known: 0, getting: 0, needsWork: 0, notStarted: 0 },
@@ -96,6 +128,9 @@ export const EMPTY_DASHBOARD: DashboardData = {
   forecast: [],
   retryTarget: null,
   dueTarget: null,
+  retryTargetCount: 0,
+  dueTargetLevel: null,
+  setStats: [],
   trends: [],
 };
 
@@ -172,7 +207,7 @@ export async function fetchDashboard(
       .select('study_item_id, study_set_id, attempts, misses, partials, last_result', {
         count: 'exact',
       }),
-    db.from('study_items').select('id, section_title', { count: 'exact' }).eq('hidden', false),
+    db.from('study_items').select('id, section_title, level', { count: 'exact' }).eq('hidden', false),
     // The sixth query, and the only one on this screen that reads a table which
     // grows without limit. `item_stats` sums a lifetime and keeps no order, so
     // "is this getting better?" cannot be answered from it — that needs the
@@ -223,6 +258,7 @@ export async function fetchDashboard(
   }
 
   const streak = studyStreak(times, now);
+  const studiedToday = times.some((t) => startOfUtcDay(t) === startOfUtcDay(now));
 
   // --- mastery, and what is due -------------------------------------------
   const scheduleRows = completeRows('dashboard/review_state', schedules) as {
@@ -245,6 +281,7 @@ export async function fetchDashboard(
   const itemRows = completeRows('dashboard/study_items', items) as {
     id: string;
     section_title: string | null;
+    level: Level;
   }[];
 
   // Only cards the student could actually be dealt. `itemRows` is already
@@ -266,6 +303,16 @@ export async function fetchDashboard(
   // Null when nothing is due, which is the same condition that hides the
   // button — so the two cannot disagree.
   const dueTarget = schedules.error || items.error ? null : busiestSet(dueNow);
+  const levelById = new Map(itemRows.map((i) => [i.id, i.level]));
+  const dueTargetLevel = dueTarget
+    ? busiestLevel(
+        countByLevel(
+          dueNow,
+          (s) => levelById.get(s.studyItemId)!,
+          (s) => s.studySetId === dueTarget && levelById.has(s.studyItemId),
+        ),
+      )
+    : null;
 
   // The week ahead, from the same rows the mastery bands come from — no extra
   // query. Overdue cards fold into today inside dueForecast.
@@ -342,9 +389,33 @@ export async function fetchDashboard(
 
   const toRetry = retryItems.length;
   const retryTarget = busiestSet(retryItems.map((s) => ({ studySetId: s.study_set_id })));
+  const retryTargetCount = retryItems.filter((s) => s.study_set_id === retryTarget).length;
+
+  // --- per set ---------------------------------------------------------------
+  // The same three rules the totals above use — due from `dueNow`, missed from
+  // `retryItems`, known from reps — so a set's numbers always add up to the
+  // screen's. A fresh map every call; nothing here is shared (§24.4).
+  const perSet = new Map<string, SetStat>();
+  const statFor = (setId: string): SetStat => {
+    let stat = perSet.get(setId);
+    if (!stat) {
+      stat = { setId, due: 0, missed: 0, known: 0 };
+      perSet.set(setId, stat);
+    }
+    return stat;
+  };
+  if (!schedules.error && !items.error) {
+    for (const s of dueNow) statFor(s.studySetId).due++;
+    for (const r of scheduleRows) {
+      if (visibleItemIds.has(r.study_item_id) && r.reps >= KNOWN_REPS) statFor(r.study_set_id).known++;
+    }
+  }
+  for (const s of retryItems) statFor(s.study_set_id).missed++;
+  const setStats = [...perSet.values()];
 
   return {
     streak,
+    studiedToday,
     dueToday,
     toRetry,
     mastery,
@@ -354,6 +425,9 @@ export async function fetchDashboard(
     forecast,
     retryTarget,
     dueTarget,
+    retryTargetCount,
+    dueTargetLevel,
+    setStats,
     trends,
   };
 }

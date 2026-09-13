@@ -101,7 +101,9 @@ export function LevelSegment({
  * blanks — so it is the only thing a screen passes.
  */
 export function emptyLevelCopy(subject: string, retryOnly: boolean): string {
+  // A retry deck spans every level now (src/core/deck.ts), so "at this level"
+  // would be describing a filter that no longer exists.
   return retryOnly
-    ? 'Nothing to retry here — you have not missed anything at this level yet.'
+    ? 'Nothing to retry here — you have not missed anything in this set.'
     : `No ${subject} at this level yet.`;
 }

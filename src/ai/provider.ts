@@ -108,7 +108,12 @@ export interface AIProvider {
    * in JSON would spend output tokens on punctuation the screen then strips.
    * Null when the model returned nothing usable.
    */
-  chat(input: { question: string; context: AssistantContext }): Promise<string | null>;
+  chat(input: {
+    /** The standing instruction — see `buildNomiSystemPrompt`. */
+    system: string;
+    /** The conversation so far, ending with the student's new message. */
+    turns: import('../core/chat').ChatTurn[];
+  }): Promise<string | null>;
   /** Check an Apply-tier rubric against its source (D7's postponed pass). */
   verifyRubric(input: {
     prompt: string;

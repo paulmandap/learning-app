@@ -23,7 +23,6 @@ import { MAX_REPLY_TOKENS, type AssistantContext } from '../core/chat';
 import {
   buildGeneratePrompt,
   buildGradePrompt,
-  buildChatPrompt,
   buildRubricCheckPrompt,
   buildVariantPrompt,
   READ_SYSTEM_PROMPT,
@@ -434,14 +433,26 @@ export class GeminiBrowserProvider implements AIProvider {
    * wasted. An explanation wants neither — repeatable enough to be trustworthy,
    * loose enough not to repeat itself word for word when asked twice.
    */
-  async chat(input: { question: string; context: AssistantContext }): Promise<string | null> {
+  async chat(input: {
+    system: string;
+    turns: import('../core/chat').ChatTurn[];
+  }): Promise<string | null> {
+    // A conversation now (NOTES §36): the standing instruction as the system
+    // instruction, and the thread as alternating turns, so the model sees what
+    // was said rather than one pasted block. Nomi's replies are "model" turns.
     const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
-      contents: [{ role: 'user', parts: [{ text: buildChatPrompt(input) }] }],
+      systemInstruction: { parts: [{ text: input.system }] },
+      contents: input.turns.map((turn) => ({
+        role: turn.role === 'nomi' ? 'model' : 'user',
+        parts: [{ text: turn.text }],
+      })),
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: CHAT_RESPONSE_SCHEMA,
         maxOutputTokens: MAX_REPLY_TOKENS,
-        temperature: 0.3,
+        // Warmer than the 0.3 a one-shot explanation used: this is a chat,
+        // and a friend who answers "hi" identically every time is a machine.
+        temperature: 0.6,
       },
     });
 

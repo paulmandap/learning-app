@@ -17,7 +17,9 @@ import {
 import { gradeFeedback, primeFeedback } from '../../../src/ui/feedback';
 import { space, type, useTheme } from '../../../src/ui/theme';
 import { listItems, type StudyItem } from '../../../src/data/items';
-import { missedItemIds, recordAttempt } from '../../../src/data/attempts';
+import { missedItemIds } from '../../../src/data/attempts';
+import { useStudySession } from '../../../src/data/study-session';
+import { deal } from '../../../src/core/deck';
 import { fetchProfile } from '../../../src/data/profile';
 import { reviewStatesForSet } from '../../../src/data/review';
 import { studyOrder } from '../../../src/core/schedule';
@@ -50,6 +52,8 @@ interface Blank {
   cloze: Cloze;
 }
 
+const BLANK = { id: (b: Blank) => b.item.id, level: (b: Blank) => b.item.level };
+
 type Phase =
   | { state: 'asking' }
   | { state: 'right' }
@@ -70,6 +74,7 @@ export default function Blanks() {
   const retryOnly = retry === '1';
   const router = useRouter();
   const t = useTheme();
+  const record = useStudySession(setId);
 
   /**
    * Starts on Understand like the other two modes, but moves itself once the
@@ -150,17 +155,19 @@ export default function Blanks() {
   // the missed pile is already the answer to "what next", so re-sorting it by a
   // schedule that says "tomorrow" for every card it just reset achieves nothing.
   const queue = useMemo(() => {
-    const atLevel = dealable.filter((b) => b.item.level === level);
-    if (retryOnly) return atLevel;
+    // A retry deck is every missed blank in the set, whatever the level — the
+    // same rule the other two modes follow (NOTES §36).
+    const dealt = deal(blanks, { level, retryOnly, missed: missedSet }, BLANK);
+    if (retryOnly) return dealt;
     // The same order Flashcards deals — one function, so a card's turn does not
     // depend on which mode you opened.
     return studyOrder(
-      atLevel,
+      dealt,
       (b) => schedules?.get(b.item.id),
       (b) => b.item.section_title,
       Date.now(),
     );
-  }, [dealable, level, schedules, retryOnly]);
+  }, [blanks, level, schedules, retryOnly, missedSet]);
 
   /**
    * Open on a level that actually has blanks.
@@ -204,7 +211,7 @@ export default function Blanks() {
     gradeFeedback(result === 'correct');
     setAnswered((n) => n + 1);
     if (result === 'correct') setGot((n) => n + 1);
-    void recordAttempt({
+    void record({
       studyItemId: current.item.id,
       studySetId: setId,
       mode: 'blanks',
@@ -260,7 +267,10 @@ export default function Blanks() {
     <Screen>
       <Title>{retryOnly ? 'Retry what you missed' : 'Fill in the blanks'}</Title>
 
-      <LevelSegment value={level} counts={countByLevel} onChange={setLevel} />
+      {/* No level picker on a retry deck: it deals every missed blank at once. */}
+      {!retryOnly ? (
+        <LevelSegment value={level} counts={countByLevel} onChange={setLevel} />
+      ) : null}
 
       {queue.length === 0 ? (
         <Card>

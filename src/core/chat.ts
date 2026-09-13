@@ -24,14 +24,77 @@
  */
 
 /**
- * Questions per day.
+ * Replies from Gemini per day.
  *
- * Twenty. Generous for asking about what you are studying, and bounded: at the
- * context and reply sizes below, a full day of questions costs roughly what
- * generating one study set costs. That is the comparison that matters — the cap
- * is set so the assistant can never quietly become the more expensive half.
+ * Sixty, raised from twenty when Nomi became a chat (NOTES §36). Twenty was set
+ * for one question at a time and priced a whole day at about one study set;
+ * the owner asked for everyday conversation, and twenty greetings would spend
+ * it before lunch. Sixty prices a worst-case day at under three sets.
+ *
+ * What makes that affordable is not the number: **Nomi's own answers do not
+ * count.** "Hi", "what's my streak", "what's due" and the rest are answered
+ * from the app by `src/core/nomi-brain.ts` with no model call at all, so the
+ * allowance is only ever spent on replies that need Gemini.
  */
-export const DAILY_MESSAGE_LIMIT = 20;
+export const DAILY_MESSAGE_LIMIT = 60;
+
+/**
+ * How many earlier messages go with each new one.
+ *
+ * A conversation re-sends its thread on every turn — the cost D14 was written
+ * to avoid. Twenty keeps a real conversation's context (about ten exchanges)
+ * while a long chat costs the same per message as a short one.
+ */
+export const HISTORY_WINDOW = 20;
+
+/**
+ * When a conversation was last active, the way a messenger's chat list says it:
+ * a time today, "Yesterday", a weekday within the week, a date before that.
+ * In the phone's own time zone — this is for a person to read, not to compare.
+ */
+export function describeWhen(ms: number, now: number): string {
+  const day = (t: number) => new Date(t).toDateString();
+  if (day(ms) === day(now)) {
+    return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  if (day(ms) === day(now - 24 * 60 * 60 * 1000)) return 'Yesterday';
+  if (now - ms < 6 * 24 * 60 * 60 * 1000) {
+    return new Date(ms).toLocaleDateString('en-US', { weekday: 'long' });
+  }
+  return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/** One message in a conversation, as the model sees it. */
+export interface ChatTurn {
+  role: 'user' | 'nomi';
+  text: string;
+}
+
+/**
+ * The most recent turns, starting with something the student said.
+ *
+ * A window that opened on one of Nomi's replies would hand the model an answer
+ * to a question it cannot see.
+ */
+export function historyWindow(turns: readonly ChatTurn[], limit: number = HISTORY_WINDOW): ChatTurn[] {
+  const recent = turns.slice(-limit);
+  const firstUser = recent.findIndex((t) => t.role === 'user');
+  return firstUser === -1 ? [] : recent.slice(firstUser);
+}
+
+/**
+ * A conversation's name in the history list: its first message, shortened.
+ *
+ * The way Claude names a chat, without spending a model call to do it. Cut on a
+ * word, so a title never ends half-way through one.
+ */
+export function conversationTitle(firstMessage: string, max = 60): string {
+  const clean = firstMessage.replace(/\s+/g, ' ').trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > max * 0.5 ? cut.slice(0, lastSpace) : cut).trim()}…`;
+}
 
 /**
  * Ceiling on `maxOutputTokens` for a reply.
@@ -74,8 +137,8 @@ export const MAX_REPLY_TOKENS = 1024;
  */
 export const MAX_NOTES_CHARS = 4000;
 
-/** Longest question accepted. Past this it is an essay, not a question. */
-export const MAX_QUESTION_CHARS = 500;
+/** Longest message accepted. A chat message, not an essay pasted in. */
+export const MAX_QUESTION_CHARS = 1000;
 
 /** Remaining questions at or below which the screen starts saying so. */
 export const LOW_REMAINING = 5;
@@ -118,10 +181,17 @@ export function trimNotes(notes: string, max: number = MAX_NOTES_CHARS): string 
   return (lastStop > max * 0.6 ? cut.slice(0, lastStop + 1) : cut).trim();
 }
 
-/** Is this worth spending a question on? A cheap gate, not a judgement. */
+/**
+ * Can this be sent? Anything that is not blank and not too long.
+ *
+ * It used to demand three characters, so the owner could not send "Hi" at all
+ * (NOTES §36). That floor existed to stop an empty box spending one of twenty
+ * questions; a greeting is now answered by Nomi's own brain and spends
+ * nothing, so the floor is gone.
+ */
 export function isAskable(question: string): boolean {
   const clean = question.trim();
-  return clean.length >= 3 && clean.length <= MAX_QUESTION_CHARS;
+  return clean.length >= 1 && clean.length <= MAX_QUESTION_CHARS;
 }
 
 /**
@@ -137,13 +207,13 @@ export function isAskable(question: string): boolean {
  */
 export function describeRemaining(remaining: number): string | null {
   if (remaining < 0) {
-    return "That's all the questions for today — they come back tomorrow.";
+    return "That's all my replies for today — they come back tomorrow. I can still tell you your streak and what's due.";
   }
   if (remaining === 0) {
-    return 'That was your last question for today. More tomorrow.';
+    return 'That was my last reply for today. More tomorrow.';
   }
   if (remaining <= LOW_REMAINING) {
-    return `${remaining} more question${remaining === 1 ? '' : 's'} today.`;
+    return `${remaining} more ${remaining === 1 ? 'reply' : 'replies'} from me today.`;
   }
   return null;
 }
