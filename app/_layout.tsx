@@ -15,6 +15,15 @@ const queryClient = new QueryClient({
   },
 });
 
+/**
+ * The Terms of Use and the Privacy Policy (NOTES §40). Readable by anyone:
+ * the sign-in screen links to them, and asking someone to sign in before they
+ * can read what they are agreeing to would be backwards.
+ */
+function isPublicRoute(segment: string | undefined): boolean {
+  return segment === 'terms' || segment === 'privacy';
+}
+
 /** Sends signed-out users to sign-in, and signed-in users away from it. */
 function useAuthRedirect() {
   const session = useSessionStore((s) => s.session);
@@ -25,7 +34,7 @@ function useAuthRedirect() {
   useEffect(() => {
     if (!ready) return;
     const onSignIn = segments[0] === 'sign-in';
-    if (!session && !onSignIn) router.replace('/sign-in');
+    if (!session && !onSignIn && !isPublicRoute(segments[0])) router.replace('/sign-in');
     if (session && onSignIn) router.replace('/');
   }, [ready, session, segments, router]);
 }
@@ -58,8 +67,9 @@ function RootNavigator() {
   // panel open across screens. Hidden on sign-in: there are no notes to ask
   // about yet, and a floating button over a one-field form is clutter. Hidden
   // on Nomi's own screen too, where the whole screen is the conversation it
-  // would open (NOTES §36).
-  const showAssistant = segments[0] !== 'sign-in' && segments[0] !== 'nomi';
+  // would open (NOTES §36), and over the two legal documents, which may be
+  // read before signing in (NOTES §40).
+  const showAssistant = segments[0] !== 'sign-in' && segments[0] !== 'nomi' && !isPublicRoute(segments[0]);
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
@@ -81,10 +91,10 @@ function RootNavigator() {
           contentStyle: { backgroundColor: t.bg },
         }}
       >
-        {/* Global navigation lives in app/(tabs)/_layout.tsx now — Study,
-            Progress and Settings, as a bottom bar on a phone and a rail on a
-            desktop (spec §2). It draws its own chrome, so the stack header is
-            hidden for the whole group.
+        {/* Global navigation lives in app/(tabs)/_layout.tsx now — Nomi (the
+            tab that was Study, NOTES §40), Notes, Progress and Settings, as a
+            bottom bar on a phone and a rail on a desktop (spec §2). It draws its
+            own chrome, so the stack header is hidden for the whole group.
 
             What stays OUT of the tabs is deliberate: everything below is a
             TASK with its own back control, not a place you navigate to. A
@@ -100,9 +110,9 @@ function RootNavigator() {
             names itself. It was simply never applied to the rest.
             NOTES §35. */}
         <Stack.Screen name="new" options={{ title: '', ...backable }} />
-        {/* Nomi is reached from the heading of Study and Progress, not from the
-            tab bar. The four tabs are the learning loop, and a fifth for a
-            companion would make Nomi somewhere you go INSTEAD of studying
+        {/* Nomi is reached from the heading of the first tab and Progress, not
+            from the tab bar. The four tabs are the learning loop, and a fifth
+            for a companion would make Nomi somewhere you go INSTEAD of studying
             rather than something that sits beside it. Pushed above the tabs
             with a back control, like every other task route. */}
         <Stack.Screen name="nomi" options={{ title: 'Nomi', ...backable }} />
@@ -121,6 +131,9 @@ function RootNavigator() {
           name="set/[id]/blanks"
           options={{ title: '', ...backable }}
         />
+        {/* Each document names itself in its body. */}
+        <Stack.Screen name="terms" options={{ title: '', ...backable }} />
+        <Stack.Screen name="privacy" options={{ title: '', ...backable }} />
         {/* Registered for the same reason as the routes above: without it the
             header reads "+not-found". `backable` matters more here than
             anywhere else — the usual way to reach this screen is a deep link

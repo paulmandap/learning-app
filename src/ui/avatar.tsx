@@ -1,8 +1,10 @@
+import { useEffect, useMemo } from 'react';
 import { Image, Platform, Pressable, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { AVATAR_FACES } from '../core/palette';
 import { defaultFaceIndex, faceValue, parseAvatar } from '../core/avatar';
 import { avatarPhotoUrl } from '../data/profile';
+import { cachedAvatar, rememberAvatarPhoto, rememberAvatarValue } from '../data/avatar-cache';
 import { space, TOUCH_TARGET, useTheme } from './theme';
 
 /**
@@ -12,34 +14,59 @@ import { space, TOUCH_TARGET, useTheme } from './theme';
  * a colour — so they are crisp at 28 points in a heading and at 96 in Settings,
  * weigh nothing, and look the same on every device. The owner asked for
  * defaults "like Netflix" (NOTES §36): a friendly face, not a grey silhouette.
+ *
+ * ## Drawn from this device first (NOTES §40)
+ *
+ * A photo took three round trips to appear — the profile, a signed link, the
+ * picture — with the default face in its place for about a second on every
+ * launch. The last picture shown is now kept on the device
+ * (`src/data/avatar-cache.ts`) and drawn before the profile has even loaded;
+ * the network is asked only for a picture this device has not kept.
  */
 export function Avatar({
   value,
   userId,
   size = 44,
 }: {
+  /** The profile's avatar. Undefined while the profile is still loading. */
   value: string | null | undefined;
   userId: string;
   size?: number;
 }) {
-  const choice = parseAvatar(value, userId);
+  const cached = useMemo(() => cachedAvatar(userId), [userId]);
+  // Until the profile says otherwise, what this device showed last time.
+  const known = value !== undefined ? value : (cached?.value ?? null);
+  const choice = parseAvatar(known, userId);
   const photoPath = choice.kind === 'photo' ? choice.path : null;
+  const stored = photoPath !== null && cached?.photo?.path === photoPath ? cached.photo.dataUrl : null;
+
+  useEffect(() => {
+    if (value !== undefined) rememberAvatarValue(userId, value);
+  }, [userId, value]);
 
   const { data: url } = useQuery({
     queryKey: ['avatar-url', photoPath],
     queryFn: () => avatarPhotoUrl(photoPath!),
-    enabled: photoPath !== null,
+    enabled: photoPath !== null && stored === null,
     // The link lasts an hour; refresh well before it lapses.
     staleTime: 50 * 60 * 1000,
   });
 
+  // A photo this device has not kept: keep it once, for the next launch. This
+  // one goes on showing the link, so the picture does not swap mid-view.
+  useEffect(() => {
+    if (!url || photoPath === null || stored !== null) return;
+    void rememberAvatarPhoto(userId, photoPath, url);
+  }, [url, photoPath, stored, userId]);
+
   if (choice.kind === 'photo') {
-    // Until the link arrives, the person's default face rather than an empty
-    // circle — a picture that has to load should never look like no picture.
-    if (!url) return <Face index={defaultFaceIndex(userId)} size={size} />;
+    const source = stored ?? url;
+    // Until there is a picture to draw, the person's default face rather than
+    // an empty circle — a picture that has to load should never look like no picture.
+    if (!source) return <Face index={defaultFaceIndex(userId)} size={size} />;
     return (
       <Image
-        source={{ uri: url }}
+        source={{ uri: source }}
         style={{ width: size, height: size, borderRadius: size / 2 }}
         accessibilityLabel="Your profile picture"
       />

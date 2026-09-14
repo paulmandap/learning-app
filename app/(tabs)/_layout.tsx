@@ -38,7 +38,7 @@ import { TabIcon, type TabIconName } from '../../src/ui/glyphs';
 const SIDEBAR_MIN_WIDTH = 800;
 
 const TABS = [
-  { name: 'index', href: '/', label: 'Study', icon: 'study' },
+  { name: 'index', href: '/', label: 'Nomi', icon: 'study' },
   { name: 'notes', href: '/notes', label: 'Notes', icon: 'notes' },
   { name: 'progress', href: '/progress', label: 'Progress', icon: 'progress' },
   { name: 'settings', href: '/settings', label: 'Settings', icon: 'settings' },

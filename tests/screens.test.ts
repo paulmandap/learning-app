@@ -260,8 +260,13 @@ describe('Nomi has a way in and a place to go', () => {
   it('is NOT in the bottom navigation', () => {
     // The four tabs are the learning loop. A fifth for a companion would make
     // Nomi somewhere you go instead of studying.
+    //
+    // This read "no 'nomi' anywhere in the tab layout" until the owner renamed
+    // the first tab — Study, the Home tab — to Nomi, after the app (NOTES §40).
+    // The label is the app's name; what must not be a tab is the chat route.
     const tabs = read('app', '(tabs)', '_layout.tsx');
-    expect(tabs).not.toMatch(/nomi/i);
+    expect(tabs).not.toMatch(/href: '\/nomi'|name: 'nomi'/);
+    expect(tabs).toContain("{ name: 'index', href: '/', label: 'Nomi'");
   });
 
   it('leaves the four existing tabs exactly as they were', () => {

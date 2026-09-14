@@ -91,7 +91,8 @@ describe('getAppSnapshot', () => {
     const snapshot = await getAppSnapshot(db, NOON);
 
     expect(snapshot).toEqual({
-      name: 'Paul',
+      // The whole name, as Home greets it (NOTES §40).
+      name: 'Paul Mandap',
       streak: 2,
       studiedToday: true,
       dueToday: 1,

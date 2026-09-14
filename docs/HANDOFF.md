@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **941 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **952 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§39 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§40 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -51,7 +51,8 @@ Study (home) · Add notes · Set (Preparing / Ready) · Flashcards · Quiz · Fi
 the blanks · **Notes list** · **Note editor** · Progress · Settings · **Nomi** ·
 Sign in.
 
-Navigation is four tabs — Study · Notes · Progress · Settings — as a bottom bar
+Navigation is four tabs — Nomi (Home, called Study until NOTES §40) · Notes ·
+Progress · Settings — as a bottom bar
 under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
@@ -169,6 +170,18 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     it can be read and corrected, and the cards cite it through the same
     grounded pipeline as a paste. `checkReviewer` refuses a refusal or a
     one-liner before anything is saved.
+17. **Email codes stay the only sign-in** (NOTES §40, the owner's decision,
+    2026-09-14). Google sign-in and SMS codes were asked for and declined on
+    evidence: SMS is paid on every route (Supabase's providers, and Firebase
+    since September 2024), and Google's sign-in on an installed iPhone app
+    lands in Safari, which does not share storage with the app — D10's reason.
+    Reopen Google only on a sign-in completed inside the installed app.
+18. **Home greets by the whole name** (NOTES §40), reversing a first-word rule
+    the owner read as a rename that had not worked. Nomi's chat uses it too.
+19. **Terms of Use and Privacy Policy at `/terms` and `/privacy`**, readable
+    signed out (NOTES §40): 18 and over, Philippine law, text in
+    `src/core/legal.ts` with its checkable claims in `tests/legal.test.ts`.
+    D13's one-time notice is kept and is not replaced by them.
 
 ## Hard-won gotchas — do not rediscover these
 

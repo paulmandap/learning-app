@@ -154,9 +154,15 @@ export function PrivacyGate() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Not over the Privacy Policy or the Terms of Use (NOTES §40): someone who
+  // has not accepted the notice yet must still be able to read the documents
+  // behind it.
+  const onLegalDocument = segments[0] === 'privacy' || segments[0] === 'terms';
+
   const show =
     !!session &&
     segments[0] !== 'sign-in' &&
+    !onLegalDocument &&
     isSuccess &&
     !acceptedNow &&
     !hasAcceptedPrivacy(profile, userId);

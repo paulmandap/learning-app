@@ -1,5 +1,10 @@
 import { useState } from 'react';
+import { View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Body, Button, Card, Field, Notice, Screen, Title } from '../src/ui/components';
+import { TextLink } from '../src/ui/legal';
+import { space } from '../src/ui/theme';
+import { MINIMUM_AGE } from '../src/core/legal';
 import { supabase } from '../src/data/supabase';
 
 /**
@@ -10,6 +15,7 @@ import { supabase } from '../src/data/supabase';
  * window that asked for it — which is why this is the only sign-in method.
  */
 export default function SignIn() {
+  const router = useRouter();
   const [stage, setStage] = useState<'email' | 'code'>('email');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -59,7 +65,7 @@ export default function SignIn() {
 
   return (
     <Screen centered>
-      <Title>Study</Title>
+      <Title>Nomi</Title>
       <Card>
         {stage === 'email' ? (
           <>
@@ -98,6 +104,16 @@ export default function SignIn() {
         )}
         {error ? <Notice tone="error">{error}</Notice> : null}
       </Card>
+
+      {/* What signing in agrees to, readable before it is agreed to (NOTES §40). */}
+      <Body muted>
+        By signing in, you agree to the Terms of Use, confirm you are {MINIMUM_AGE} or older, and acknowledge the
+        Privacy Policy.
+      </Body>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: space.lg }}>
+        <TextLink label="Terms of Use" onPress={() => router.push('/terms')} />
+        <TextLink label="Privacy Policy" onPress={() => router.push('/privacy')} />
+      </View>
     </Screen>
   );
 }

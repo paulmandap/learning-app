@@ -15,7 +15,8 @@ import { homeLine } from '../../src/core/nomi-brain';
 import { dueFirst } from '../../src/core/set-order';
 
 /**
- * Study — the tab you open to study.
+ * Nomi — the tab you open to study. It was called Study until the owner renamed
+ * it after the app (NOTES §40); the route and its icon are unchanged.
  *
  * ## Laid out from the owner's reference (NOTES §36, §37)
  *

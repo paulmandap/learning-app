@@ -160,6 +160,18 @@ export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
     throw new Error(chats.error.message);
   }
 
+  // What the account holds that no set owns (NOTES §40). Settings has promised
+  // "all your notes" since the notebook shipped, and notes were never deleted:
+  // a note's set is `on delete set null`, so every note outlived it. The days
+  // studied and the daily count of Nomi's replies went the same way. Found
+  // writing the privacy policy, which cannot say this removes what it did not.
+  // Each table has a "delete own" policy (0009, 0010, 0012); one that does not
+  // exist yet has nothing in it to delete.
+  for (const table of ['notes', 'study_days', 'chat_usage'] as const) {
+    const { error: tableError } = await supabase.from(table).delete().eq('user_id', id);
+    if (tableError && !isMissingTable(tableError)) throw new Error(tableError.message);
+  }
+
   // Uploaded profile pictures. Best effort, like every other storage removal
   // here — and done before the profile stops pointing at them.
   try {

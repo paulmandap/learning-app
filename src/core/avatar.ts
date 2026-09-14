@@ -76,13 +76,78 @@ export function photoValue(path: string): string {
 }
 
 /**
- * The name to greet someone by — "Welcome back, Sarah".
+ * The name to greet someone by — "Welcome back, Paul Christian".
  *
- * The first word of the name they gave, because a full name in a greeting reads
- * like a letter from a bank. Null when there is no name, and the caller says
- * "Welcome back" alone rather than inventing one from an email address.
+ * The whole name they gave, as they wrote it. It used to be the first word
+ * only, on the reasoning that a full name in a greeting reads like a letter
+ * from a bank — and the owner, renamed from "Paul" to "Paul Christian", saw the
+ * greeting not change and took the rename for broken (NOTES §40). The name is
+ * theirs to write the way they want to be greeted. Null when there is no name,
+ * and the caller says "Welcome back" alone rather than inventing one from an
+ * email address.
  */
 export function greetingName(displayName: string | null | undefined): string | null {
-  const first = (displayName ?? '').trim().split(/\s+/)[0] ?? '';
-  return first.length > 0 ? first.slice(0, 40) : null;
+  const name = (displayName ?? '').trim().replace(/\s+/g, ' ');
+  return name.length > 0 ? name.slice(0, 60) : null;
+}
+
+// ----------------------------------------------------------- on this device --
+
+/**
+ * The picture last shown, kept on the device so the next launch can draw it
+ * before the network has answered anything (NOTES §40).
+ *
+ * `value` is the profile's avatar as last read. `photo` is that photo's pixels
+ * when it is one: the path they belong to, and the image as a data URL.
+ */
+export interface CachedAvatar {
+  value: string | null;
+  photo: { path: string; dataUrl: string } | null;
+}
+
+/** The largest picture kept. An upload is a 256px JPEG of about 15–40 KB, so this is generous. */
+export const MAX_CACHED_PHOTO_CHARS = 200_000;
+
+export function avatarCacheKey(userId: string): string {
+  return `avatar:${userId}`;
+}
+
+/**
+ * A stored entry, or null when there is none worth trusting.
+ *
+ * Everything is checked, because the entry decides what is drawn before the
+ * profile can contradict it: the value must be one the database would accept,
+ * and pixels are kept only for the photo that value names.
+ */
+export function readCachedAvatar(raw: string | null): CachedAvatar | null {
+  if (!raw) return null;
+  let parsed: { value?: unknown; photo?: { path?: unknown; dataUrl?: unknown } | null };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const value = parsed.value ?? null;
+  if (value !== null && typeof value !== 'string') return null;
+  if (!isValidAvatarValue(value)) return null;
+
+  const photo = parsed.photo;
+  const photoFits =
+    !!photo &&
+    typeof photo.path === 'string' &&
+    typeof photo.dataUrl === 'string' &&
+    photo.dataUrl.startsWith('data:image/') &&
+    photo.dataUrl.length <= MAX_CACHED_PHOTO_CHARS &&
+    value === `photo:${photo.path}`;
+  return {
+    value,
+    photo: photoFits ? { path: photo.path as string, dataUrl: photo.dataUrl as string } : null,
+  };
+}
+
+/** The entry to keep once the profile says what the picture is now. Pixels stay only while their photo is still the picture. */
+export function withAvatarValue(cached: CachedAvatar | null, value: string | null): CachedAvatar {
+  const photo = cached?.photo && value === `photo:${cached.photo.path}` ? cached.photo : null;
+  return { value, photo };
 }

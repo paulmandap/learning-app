@@ -5489,6 +5489,122 @@ of the reviewer offer, the renamed offer, the refused key, and the Taglish
 paste. **Not deployed.**
 
 
+## 40. Round six: a name, a picture, an app called Nomi, two legal documents, and a logo (2026-09-14)
+
+The owner deployed §39 and sent five things, then a sixth mid-way.
+
+### 40.1 "Renamed from Paul to Paul Christian, and it still says Welcome back, Paul"
+
+Not a cache. Settings saved the name and refreshed the profile; `greetingName`
+then kept only the first word, on purpose — "a full name in a greeting reads like
+a letter from a bank" — and a test pinned "Sarah Connor" → "Sarah". The owner
+read the unchanged greeting as the rename failing, which is the better test of
+what the rule was worth. It now greets by the whole name, spaces tidied, up to
+60 characters. Nomi's chat snapshot uses the same function, so Nomi calls them
+by the full name too.
+
+### 40.2 "My picture loads a second after the tab" — kept on the device
+
+A photo took three round trips before it appeared — the profile, a signed link,
+the image — and the default face showed until all three came back. The last
+picture shown is now kept in the browser's storage (`src/data/avatar-cache.ts`):
+the profile's avatar value, and for a photo the image itself as a data URL (256px
+JPEGs, capped at 200,000 characters). `Avatar` draws that before the profile has
+loaded; the signed link is fetched only for a photo this device has not kept,
+and the kept photo is dropped as soon as the profile names a different picture.
+It is removed on sign-out, so a shared phone does not keep someone's photo.
+`readCachedAvatar` trusts nothing it cannot check, because it decides what is
+drawn before the profile can contradict it.
+
+**Verified:** in the built app the entry `avatar:<user id>` is written on Home.
+**Not measured:** a real photo, reloaded, on an iPhone — the test account has none.
+
+### 40.3 "Don't call it Study, call it Nomi" — and the address
+
+The first tab, the sign-in title, the page title, the home-screen name and
+`app.json` now say Nomi. The route (`/`) and the tab's icon are unchanged. The
+guard that kept the companion out of the tab bar read "no `nomi` anywhere in the
+tab layout"; it now checks that no tab is the chat route.
+
+**The address was not changed**, at the owner's word ("skip this for now").
+What was established first, 2026-09-14: a `*.pages.dev` address is the
+Cloudflare project name, is globally unique, and cannot be renamed — only a new
+project can have a new one. `nomi.pages.dev` answered 200 (someone else's);
+`nomi-6kk.pages.dev` did not resolve, so a project named `nomi-6kk` would get
+exactly that address. A new address is a new origin: everyone is signed out
+once, the privacy notice's device copy and the kept picture start empty, and the
+home-screen app has to be added again.
+
+### 40.4 Terms of Use and a Privacy Policy
+
+Two documents, at `/terms` and `/privacy`, readable signed out: the sign-in
+screen says signing in agrees to them and links both, and Settings links both
+under Your account. D13's one-time notice is unchanged and is not a substitute.
+The text lives in `src/core/legal.ts`; `tests/legal.test.ts` checks the claims
+that can be checked against the app.
+
+Sources: the section structure of Termly's privacy policy template and iubenda's
+terms of use template (TermsFeed's pages refused the fetch, 403); the Data
+Privacy Act of 2012 rights and the 72-hour breach notification from a Philippine
+legal commentary (privacy.gov.ph refused the fetch); and Google's Gemini API
+terms, read directly: *"You must be 18 years of age or older to use the APIs"*,
+the API may not be used in a service *"likely to be accessed by individuals
+under the age of 18"*, and on the free tier *"human reviewers may read, annotate,
+and process your API input and output"*.
+
+Decided by the owner: **18 and older**; operator **Paul Christian Mandap**,
+contact **paulmandap16@gmail.com**, **Philippine law**. Not legal advice and not
+reviewed by a lawyer. **Existing accounts are not asked to accept the Terms** —
+only the sign-in screen says it.
+
+### 40.5 Delete my data did not delete notes — found writing the policy
+
+Settings has said *"Removes every set, all your notes and files, and everything
+you've answered"* since the notebook shipped. `deleteAllMyData` deleted sets,
+chats and pictures and cleared the profile — never `notes` (a note's set is `on
+delete set null`, so every note outlived it), `study_days` or `chat_usage`. A
+policy cannot say deletion removes what it does not. All three are now deleted;
+each has a "delete own" policy (0009, 0010, 0012). **Not run against the live
+database** — it deletes everything the account holds.
+
+### 40.6 Sign in with Google, or a phone number — declined, with evidence
+
+The owner asked mid-way for Google sign-in and SMS codes, "completely FREE" if
+possible. Researched, not built:
+
+- **SMS is not free on any route.** Supabase's phone sign-in needs Twilio,
+  MessageBird or Vonage, charged per message after trial credit. Firebase has
+  required a billing account for phone sign-in since September 2024 (secondary
+  sources, 2026).
+- **Google sign-in costs nothing, and lands in the wrong place.** On an iPhone
+  home-screen app the sign-in page opens in Safari, and Safari and the installed
+  app do not share storage — the session never reaches the app. That is D10's
+  reason for email codes, verbatim.
+
+The owner chose to skip SMS and keep email codes only. **What would reopen
+Google:** a sign-in completed inside the owner's installed iPhone app.
+
+### 40.7 The logo — redrawn, not used yet
+
+The owner picked an icon (a brown rounded square with the owl waving) and asked
+for it in higher quality with nothing about it changed, then chose a vector
+redraw. The original exists only as an image pasted into the chat, about 100px;
+it is not on disk. Two drafts were drawn and rendered with headless Chrome;
+the second is closer — rounder head, tufts from the head, soft gradients — and
+still visibly not the original. It is in `design-reference/nomi-icon-draft.svg`
+(gitignored) and **not wired in**: the app's icons are still the flashcard mark.
+Waiting on the original saved as `design-reference/nomi-icon.png`, to compare
+side by side. `scripts/make-icons.mjs` is not an SVG parser, so wiring it in
+means rasterising with Chrome rather than that script.
+
+### 40.8 Verified
+
+typecheck clean · **952 tests**, 3 skipped (+11) · `expo export` · boot 5/5 ·
+screenshots at 393 dark of sign-in (signed out), the Privacy Policy and Terms of
+Use (signed out) and Home (signed in, tab "Nomi", `avatar:` entry written).
+**Not deployed.**
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

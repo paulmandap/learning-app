@@ -1,16 +1,20 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  avatarCacheKey,
   defaultFaceIndex,
   FACE_COUNT,
   FACE_PATTERN,
   faceValue,
   greetingName,
   isValidAvatarValue,
+  MAX_CACHED_PHOTO_CHARS,
   parseAvatar,
   PHOTO_PATTERN,
   photoPath,
   photoValue,
+  readCachedAvatar,
+  withAvatarValue,
 } from '../src/core/avatar';
 import { AVATAR_FACES } from '../src/core/palette';
 import { contrastHex } from '../src/core/color';
@@ -82,13 +86,56 @@ describe('the faces themselves', () => {
 });
 
 describe('greetingName', () => {
-  it('greets by first name', () => {
-    expect(greetingName('Sarah Connor')).toBe('Sarah');
+  it('greets by the whole name they gave, as they wrote it (NOTES §40)', () => {
+    // Renamed from "Paul" to "Paul Christian", Home still said "Welcome back, Paul".
+    expect(greetingName('Paul Christian')).toBe('Paul Christian');
+    expect(greetingName('  Paul   Christian  ')).toBe('Paul Christian');
     expect(greetingName('  Paul  ')).toBe('Paul');
   });
 
   it('has no name to offer rather than inventing one', () => {
     expect(greetingName(null)).toBeNull();
     expect(greetingName('   ')).toBeNull();
+  });
+});
+
+describe('the picture kept on this device (NOTES §40)', () => {
+  const path = `${USER}/avatar-1757750400000.jpg`;
+  const photo = `photo:${path}`;
+  const dataUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRg';
+
+  it('reads back what was kept', () => {
+    expect(readCachedAvatar(JSON.stringify({ value: photo, photo: { path, dataUrl } }))).toEqual({
+      value: photo,
+      photo: { path, dataUrl },
+    });
+    expect(readCachedAvatar(JSON.stringify({ value: 'face:3', photo: null }))).toEqual({ value: 'face:3', photo: null });
+    expect(readCachedAvatar(JSON.stringify({ value: null, photo: null }))).toEqual({ value: null, photo: null });
+  });
+
+  it('trusts nothing it cannot check — it decides what is drawn before the profile can say otherwise', () => {
+    for (const raw of [null, '', 'not json', 'null', '42', JSON.stringify({ value: 'face:99' }), JSON.stringify({ value: 7 })]) {
+      expect(readCachedAvatar(raw), String(raw)).toBeNull();
+    }
+    // Pixels for another photo, not an image, or too large: dropped. The value stays.
+    expect(readCachedAvatar(JSON.stringify({ value: 'face:2', photo: { path, dataUrl } }))).toEqual({
+      value: 'face:2',
+      photo: null,
+    });
+    expect(readCachedAvatar(JSON.stringify({ value: photo, photo: { path, dataUrl: 'javascript:alert(1)' } }))?.photo).toBeNull();
+    const huge = `data:image/jpeg;base64,${'A'.repeat(MAX_CACHED_PHOTO_CHARS)}`;
+    expect(readCachedAvatar(JSON.stringify({ value: photo, photo: { path, dataUrl: huge } }))?.photo).toBeNull();
+  });
+
+  it('keeps pixels only while their photo is still the picture', () => {
+    const kept = { value: photo, photo: { path, dataUrl } };
+    expect(withAvatarValue(kept, photo)).toEqual(kept);
+    expect(withAvatarValue(kept, 'face:1')).toEqual({ value: 'face:1', photo: null });
+    expect(withAvatarValue(kept, `photo:${USER}/avatar-2.jpg`)).toEqual({ value: `photo:${USER}/avatar-2.jpg`, photo: null });
+    expect(withAvatarValue(null, null)).toEqual({ value: null, photo: null });
+  });
+
+  it('is kept per person', () => {
+    expect(avatarCacheKey(USER)).not.toBe(avatarCacheKey('9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b'));
   });
 });

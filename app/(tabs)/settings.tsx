@@ -13,6 +13,9 @@ import {
 } from '../../src/data/profile';
 import { Avatar, FacePicker, pickProfilePhoto } from '../../src/ui/avatar';
 import { PrivacyNotice } from '../../src/ui/privacy';
+import { TextLink } from '../../src/ui/legal';
+import { forgetAvatar } from '../../src/data/avatar-cache';
+import { router } from 'expo-router';
 import { parseAvatar } from '../../src/core/avatar';
 import { useSessionStore } from '../../src/data/session';
 import { space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
@@ -304,6 +307,9 @@ export default function Settings() {
           label="Sign out"
           variant="secondary"
           onPress={() => {
+            // The picture kept on this device leaves with the session, so a
+            // shared phone does not hold someone's photo after they go (NOTES §40).
+            forgetAvatar(userId);
             void supabase.auth.signOut();
           }}
         />
@@ -317,6 +323,9 @@ export default function Settings() {
         >
           <Text style={[type.label, { color: t.accent }]}>Privacy: where your notes go</Text>
         </Pressable>
+        {/* The full documents; the notice above is their short version (NOTES §40). */}
+        <TextLink label="Privacy Policy" onPress={() => router.push('/privacy')} />
+        <TextLink label="Terms of Use" onPress={() => router.push('/terms')} />
       </Card>
 
       {/* Deleting is irreversible, so it asks once rather than acting on the
