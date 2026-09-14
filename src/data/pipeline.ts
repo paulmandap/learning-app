@@ -41,6 +41,7 @@ import {
 import { existingCards, insertItems, type ExistingCardRow } from './items';
 import { verifyRubrics } from './rubrics';
 import { addQuizChoices } from './quiz-options';
+import { locatePictureLabels } from './picture-labels';
 import { getSet, markSectionComplete, updateSet, type StoredPlan } from './sets';
 
 /**
@@ -592,6 +593,18 @@ export async function generateSet(input: {
       }
     } catch (err) {
       console.warn(`[pipeline] quiz choices failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Where the labels are on each picture, so a card can cover its answer
+    // (NOTES §44). After ready, for the same reason as the two passes above;
+    // until it lands, a picture shows with the answer.
+    try {
+      const pictures = await locatePictureLabels({ setId, apiKey });
+      if (pictures.located > 0 || pictures.failed > 0) {
+        console.warn(`[pipeline] picture labels: ${pictures.located} found, ${pictures.failed} not`);
+      }
+    } catch (err) {
+      console.warn(`[pipeline] picture labels failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

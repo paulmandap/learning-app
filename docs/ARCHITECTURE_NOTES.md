@@ -5943,7 +5943,117 @@ After the owner applied 0018:
 A picture's page is Gemini's reading of it, which describes the drawing as well
 as its labels, so a card can ask what the picture looks like ("a green oval").
 Left as it is; the first real diagram the owner adds will say whether it matters.
-**Not deployed.**
+**Deployed by the owner on 2026-09-14.**
+
+
+## 44. Round nine: a picture that gave the answer away (2026-09-14)
+
+The owner put a diagram in a note — the arithmetic logic unit: Shifter, Binary
+Adder, Status Register, Temporary, Accumulator, Internal CPU Bus — made cards,
+and reported two things.
+
+### 44.1 "I don't see the picture" on Make cards
+
+Not lost. The box on Make cards holds the note's words, and the line saying the
+picture would be read too sat under a box without it, which read as the picture
+having gone. The note's pictures are now shown there as small previews
+(`app/new.tsx`).
+
+### 44.2 The picture gives the answer away
+
+*"Which register … is listed alongside the Status Register and Temporary
+register?"* — with the picture above it, "Accumulator" printed in it. Phase 7a
+put the picture on the question face (§8.1) on the reasoning that a drawing
+helps you answer; but cards from a picture are written from the picture's own
+words, so its labels ARE the answers. The owner asked for the answer to be
+"censored", and remembered it had been planned: spec §6's diagram label
+questions, gated in §8.2, where the gate failed.
+
+**Measured before building** (`scripts/label-cover-probe.ts`). Covering is not
+§8.2's question. That asked for a box around the PART a label points at, for
+tap-the-part answers, in an invented 0–1 format that came back in pixels half the
+time. Covering needs a box around the label's TEXT, asked for in Gemini's own
+`box_2d` format (0–1000), and a cover a little too big costs nothing. The probe
+draws three diagrams, so where each label really is is known to the pixel: the
+owner's ALU figure; the same as a phone photo (80% size, turned 2.5°, blurred,
+JPEG at 60%); and a plant cell with seven leader-line labels, two of them a line
+apart. A label counts as hidden only if its cover — the returned box, padded by a
+quarter of its height — contains every pixel of its text.
+
+```
+model that answered                   rounds   labels fully hidden   a cover also hid a neighbour
+gemini-3.6-flash  (the main model)       6        37 of 37              0
+gemini-3.5-flash-lite (the backup)       9        39 of 58              0
+   … on the photo-like figure            2         1 of 12
+```
+
+The backup answered three of the nine rounds that asked the usual ladder, because
+the main model was busy — so in the app it would, too. Both of the owner's cards
+cover exactly the right label with one rule — a label is covered when its words
+are in the answer and not in the question: "An Internal CPU Bus should be used…"
+covers "Internal CPU Bus" (returned as one label over three lines), and
+"Accumulator" covers "Accumulator".
+
+**The owner chose covering** (2026-09-14), over moving the picture to the answer
+side.
+
+### 44.3 Built: the picture covers its answer, or waits for the flip
+
+- **Where it goes** — `placePicture` (`src/core/label-cover.ts`). With the
+  question, answer covered, when the picture's label positions are known; with
+  the question, uncovered, when the answer is not on the picture at all; with
+  the answer otherwise — no positions yet, or more than 60% of the labels to
+  cover. The answer side always shows the whole picture. A label is covered when
+  the answer names it and the question does not, or when it shares a meaningful
+  word with the answer that the question does not use. Words are cut to five
+  letters, so "temporarily" finds "Temporary": an extra cover is safe, a missed
+  one is not.
+- **Who says where** — `locateLabels` (`src/ai/gemini.ts`, prompt in
+  `src/ai/labels.ts`) asks `LABEL_MODEL` only, with no ladder, and
+  `parseLabelBoxes` refuses a reply in fractions or in pixels rather than
+  rescaling it. `locatePictureLabels` (`src/data/picture-labels.ts`) keeps
+  `{ model, labels }` on the document (migration 0019): right after a set is
+  made, and for older sets the first time one of a picture's cards comes up,
+  with the student's own key. Only positions from `LABEL_MODEL` are read back.
+- **Drawn** — `FlipCard` (`src/ui/flashcard.tsx`): covers in the accent colour
+  with a "?", placed on the part of the box the picture really fills (`contain`
+  centres it), padded by nearly a third of the label's height. The picture waits
+  for its real shape before it is drawn with the question, so a cover never
+  lands beside its label. `imageSide` defaults to the answer, guarded in
+  `tests/screens.test.ts`.
+
+One request per picture, and only sets with pictures pay it. Kept out of the
+reading request, which runs for every page of every PDF: positions are only
+wanted for pictures.
+
+### 44.4 Verified before 0019
+
+typecheck clean · **1003 tests**, 3 skipped (+18) · `expo export` · boot · in the
+built app, as the test user: a picture card with no positions draws its picture
+once, on the answer side; the log says 0019 is missing; the deck runs to Done
+with no errors. A note's picture shows as a preview on Make cards, and the note
+probe of §43 still passes whole.
+
+### 44.5 Verified after 0019 (applied by the owner the same day)
+
+- **The first end-to-end run found no positions at all.** `gemini-3.6-flash`
+  was busy for the whole 414s run — the picture was read by 3.8-flash and the
+  cards written by flash-lite — so `locatePictureLabels` gave up, and all 7
+  cards put the picture with the answer: 0 answers showing. The fallback,
+  measured in exactly the case it exists for.
+- **Then, in the built app, as the test user:** a set built directly from the
+  ALU figure (true label positions known) with the owner's two cards and one
+  whose answer is not on the picture. The app's own `locatePictureLabels` found
+  all six labels once the model answered (9s). "Internal CPU Bus" and
+  "Accumulator" each sat completely under their cover on a 420×185 picture, no
+  other label was hidden, and the answer side showed the whole picture; the
+  third card showed the picture whole with its question. No page errors. Probe
+  set and picture deleted.
+- **Other models, for when 3.6 is busy:** `gemini-3.8-flash` hid 12 of 12 on the
+  ALU figure over two rounds before it went busy too; `gemini-3.7-flash` was
+  busy throughout. Not enough to trust either, so `LABEL_MODEL` stays one model.
+  Worth re-measuring on a quiet day: the free tier's busy spells decide how
+  often a picture gets covered rather than moved to the answer side.
 
 
 ## Sources

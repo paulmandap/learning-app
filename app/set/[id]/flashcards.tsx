@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Linking, Platform, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { emptyLevelCopy, LevelSegment, LEVELS } from '../../../src/ui/segment';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Body,
   Button,
@@ -27,6 +27,8 @@ import { reviewStatesForSet } from '../../../src/data/review';
 import { isDue, studyOrder } from '../../../src/core/schedule';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import { NomiFinish } from '../../../src/ui/nomi-finish';
+import { locatePictureLabels, pictureLabels } from '../../../src/data/picture-labels';
+import { placePicture } from '../../../src/core/label-cover';
 import type { Level } from '../../../src/core/planner';
 
 const ITEM = { id: (i: StudyItem) => i.id, level: (i: StudyItem) => i.level };
@@ -303,6 +305,39 @@ export default function Flashcards() {
     staleTime: 8 * 60 * 1000,
   });
 
+  /**
+   * Which side the picture goes on, and what it covers (NOTES §44).
+   *
+   * Cards from a picture are written from its own words, so its labels are the
+   * answers, and shown with the question uncovered it gave them away. It goes
+   * with the question only when the labels' positions are known and the
+   * answer's label can be covered (`placePicture`); otherwise with the answer.
+   */
+  const queryClient = useQueryClient();
+  const { data: labelsByDoc } = useQuery({
+    queryKey: ['pictureLabels', setId],
+    queryFn: () => pictureLabels(setId),
+    enabled: !!figureDoc,
+  });
+  const apiKey = profile?.gemini_api_key ?? '';
+  // A set made before §44 has pictures with no positions yet. They are found
+  // once, the first time one of the picture's cards comes up.
+  useQuery({
+    queryKey: ['locatePictureLabels', figureDoc?.id],
+    queryFn: async () => {
+      const result = await locatePictureLabels({ setId, apiKey, documentId: figureDoc!.id });
+      if (result.located > 0) await queryClient.invalidateQueries({ queryKey: ['pictureLabels', setId] });
+      return result;
+    },
+    enabled: !!figureDoc && labelsByDoc !== undefined && !labelsByDoc.has(figureDoc.id) && apiKey.length > 0,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const placement =
+    card && figureDoc
+      ? placePicture({ question: promptFor(card), answer: card.answer, labels: labelsByDoc?.get(figureDoc.id) ?? null })
+      : null;
+
   async function openPage() {
     if (!card?.document_id) return;
     const doc = docs.find((d) => d.id === card.document_id);
@@ -391,6 +426,8 @@ export default function Flashcards() {
             // are noise competing with the question.
             showHints={index === 0}
             imageUri={figureUri ?? undefined}
+            imageSide={placement?.side}
+            imageCovers={placement?.covers}
           />
 
           {/* Buttons stay alongside the swipe: swiping is faster once learned,

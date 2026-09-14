@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Platform, TextInput, View } from 'react-native';
+import { Image, Platform, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Body, Button, Card, Field, Notice, Screen, Title } from '../src/ui/components';
-import { INPUT_FONT_SIZE, useTheme } from '../src/ui/theme';
+import { INPUT_FONT_SIZE, radius, space, useTheme } from '../src/ui/theme';
 import { fetchProfile } from '../src/data/profile';
 import { storageUsedBytes } from '../src/data/documents';
 import { checkUpload } from '../src/core/storage';
@@ -11,7 +11,7 @@ import { type FileSource, type PasteSource } from '../src/data/pipeline';
 import { startSet } from '../src/data/start-set';
 import { CARD_COUNTS } from '../src/core/nomi-actions';
 import { extractHeadings } from '../src/ai/gemini';
-import { downloadNoteImages, fetchNote, linkNoteToSet } from '../src/data/notes';
+import { downloadNoteImages, fetchNote, linkNoteToSet, noteImageUrls } from '../src/data/notes';
 import { noteTitle } from '../src/core/notes';
 import { imagePaths } from '../src/core/rich-note';
 
@@ -88,6 +88,13 @@ export default function NewSet() {
   // only pictures is still something to make cards from.
   const notePictures = fromNote && note?.content ? imagePaths(note.content) : [];
   const hasInput = text.trim().length > 0 || file !== null || notePictures.length > 0;
+  const { data: pictureUrls = {} } = useQuery({
+    queryKey: ['noteImageUrls', noteId, notePictures.join('|')],
+    queryFn: () => noteImageUrls(notePictures),
+    enabled: notePictures.length > 0,
+    // The links last an hour; this screen is open for minutes.
+    staleTime: 30 * 60 * 1000,
+  });
 
   function pickFile() {
     if (Platform.OS !== 'web') return;
@@ -227,15 +234,34 @@ export default function NewSet() {
             textAlignVertical: 'top',
           }}
         />
+        {/* The note's pictures, shown. The box above holds only words, and a
+            line saying "the picture will be read too" under a box without it
+            read as the picture having gone missing — the owner asked whether
+            it was a bug (NOTES §44). */}
+        {notePictures.length > 0 ? (
+          <>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+              {notePictures.map((path) =>
+                pictureUrls[path] ? (
+                  <Image
+                    key={path}
+                    source={{ uri: pictureUrls[path] }}
+                    resizeMode="cover"
+                    accessibilityLabel="A picture from your note"
+                    style={{ width: 88, height: 88, borderRadius: radius.sm, backgroundColor: t.bg }}
+                  />
+                ) : null,
+              )}
+            </View>
+            <Body muted>
+              {notePictures.length === 1 ? 'This picture' : `These ${notePictures.length} pictures`} from your
+              note will be read for cards too.
+            </Body>
+          </>
+        ) : null}
         <Body muted>or</Body>
         <Button label="Choose a file (PDF, picture, or .txt)" variant="secondary" onPress={pickFile} />
         {file ? <Notice tone="ok">{file.name}</Notice> : null}
-        {notePictures.length > 0 ? (
-          <Body muted>
-            {notePictures.length === 1 ? 'The picture' : `The ${notePictures.length} pictures`} in your note
-            will be read for cards too.
-          </Body>
-        ) : null}
         <Body muted>
           Your notes are sent to Google to make your cards. Someone at Google may read them, so
           please don't add anything private.

@@ -147,6 +147,11 @@ export interface AIProvider {
     notes: string;
     cards: { n: number; prompt: string; answer: string }[];
   }): Promise<{ n: number; wrong: string[] }[]>;
+  /**
+   * Where each text label is on a picture, so a card can cover its answer
+   * (NOTES §44). Null when the reply holds no positions that can be trusted.
+   */
+  locateLabels(input: { file: Blob; mime: string }): Promise<import('../core/label-cover').LabelBox[] | null>;
   /** Check an Apply-tier rubric against its source (D7's postponed pass). */
   verifyRubric(input: {
     prompt: string;

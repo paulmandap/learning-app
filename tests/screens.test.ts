@@ -640,6 +640,15 @@ describe('the note editor stays out of the start of the app (NOTES §43)', () =>
   });
 });
 
+describe("a card's picture never shows its answer (NOTES §44)", () => {
+  it('goes with the answer unless the deck has worked out what to cover', () => {
+    // A card that is not told where its picture goes must not default to the
+    // question, which is where the owner's diagram gave every answer away.
+    expect(read('src', 'ui', 'flashcard.tsx')).toContain("imageSide = 'answer'");
+    expect(code(read('app', 'set', '[id]', 'flashcards.tsx'))).toContain('placePicture(');
+  });
+});
+
 describe('Nomi moves without getting in the way', () => {
   const renderer = code(read('src', 'ui', 'nomi-character.tsx'));
 

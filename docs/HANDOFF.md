@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **985 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1003 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§43 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§44 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -57,7 +57,11 @@ under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 18; all applied and verified
+### Migrations — 19; all applied and verified
+
+0019 (`documents.labels`) was applied by the owner on 2026-09-14 and covering
+was verified in the built app the same day (NOTES §44.5). Until a picture has
+positions, its cards show it with the answer, never with the question.
 
 0018 was applied by the owner on 2026-09-14 and verified the same day:
 `notes.content` present, the `note-images` bucket takes an upload into the
@@ -80,7 +84,8 @@ hours, see NOTES §31 before applying anything like it) · `0016`
 `profiles.avatar`, the private `avatars` bucket, `nomi_conversations` and
 `nomi_messages` (NOTES §36) · `0017` `profiles.privacy_accepted_at`, for the
 one-time privacy notice (NOTES §37). Both additive; applied 2026-09-13 ·
-`0018` `notes.content` and the private `note-images` bucket (NOTES §43).
+`0018` `notes.content` and the private `note-images` bucket (NOTES §43) ·
+`0019` `documents.labels`, where a picture's labels are (NOTES §44).
 
 ## Rules — these are not negotiable
 
@@ -200,6 +205,13 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 22. **The card-maker works in set page numbers** (NOTES §43), and each card is
     stored with its own document and that document's page. A set with one
     document is numbered as it always was.
+23. **A card's picture goes with the answer unless its answer can be covered**
+    (NOTES §44, the owner's decision), reversing Phase 7a's question-side
+    picture, which gave every answer away. `placePicture` decides. Label
+    positions come from `LABEL_MODEL` alone, with no ladder: measured, it hid
+    37 of 37 labels and the backup rung 39 of 58. Never let a ladder or a
+    different model place labels without re-running
+    `scripts/label-cover-probe.ts` against it.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -354,6 +366,7 @@ npx tsx --env-file=.env scripts/reviewer-probe.ts [--runs 3] [--only rename] [--
 npx tsx --env-file=.env scripts/nomi-offer-probe.ts --out <dir>   # Nomi's offers in the built app, photographed; checks a refused reviewer saved nothing
 npx tsx --env-file=.env scripts/generation-probe.ts --file notes.txt --count 60   # model output vs dropped vs stored, and which lines
 npx tsx --env-file=.env scripts/avatar-probe.ts       # save faces and photos twice, print the real errors, restore
+npx tsx --env-file=.env scripts/label-cover-probe.ts [--runs=3] [--model=<id>] [--only=alu-block]   # can a model place labels well enough to cover an answer? drawn diagrams, known truth
 npx tsx scripts/palette-check.ts              # contrast + colour-blindness gate, both modes
 npx tsx --env-file=.env scripts/verify-phase2.ts --pdf <file>
 ```

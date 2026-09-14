@@ -12,7 +12,9 @@
  * the endpoint will not answer. Send nothing else.
  */
 
-import { GEMINI_API_BASE, LIGHT_LADDER } from './models';
+import { GEMINI_API_BASE, LABEL_MODEL, LIGHT_LADDER } from './models';
+import { LABELS_RESPONSE_SCHEMA, LOCATE_LABELS_PROMPT } from './labels';
+import { parseLabelBoxes, type LabelBox } from '../core/label-cover';
 import {
   classifyGeminiResponse,
   classifyThrownError,
@@ -445,6 +447,37 @@ export class GeminiBrowserProvider implements AIProvider {
       },
     });
     return parseWrongOptions(payload);
+  }
+
+  /**
+   * Where each text label is on a picture, so a card can cover the one its
+   * answer is (NOTES §44).
+   *
+   * ONE model and no ladder: `LABEL_MODEL` is the one measured to place labels
+   * well, and the ladder's last rung left a third of them showing. A busy model
+   * throws RateLimitedError like any call, so a queue retries it; past that the
+   * positions wait, and the picture shows with the answer meanwhile.
+   *
+   * Null when the reply holds no positions that can be trusted.
+   */
+  async locateLabels(input: { file: Blob; mime: string }): Promise<LabelBox[] | null> {
+    const payload = await this.#generateContentWithFallback([LABEL_MODEL], {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType: input.mime, data: await blobToBase64(input.file) } },
+            { text: LOCATE_LABELS_PROMPT },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: LABELS_RESPONSE_SCHEMA,
+        temperature: 0,
+      },
+    });
+    return parseLabelBoxes(payload);
   }
 
   /**

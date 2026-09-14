@@ -107,6 +107,20 @@ export const LIGHT_LADDER: readonly string[] = [
   'gemini-3.5-flash-lite',
 ];
 
+/**
+ * The one model trusted to say where a picture's labels are (NOTES §44).
+ *
+ * Measured, not assumed: covering the label a card's answer is, this model hid
+ * 37 of 37 labels completely over six rounds on three diagrams; the ladder's
+ * last rung, gemini-3.5-flash-lite, hid 39 of 58, and 1 of 12 on a photographed
+ * page. So locating labels takes NO ladder — when this model is busy the
+ * positions wait, and the picture shows with the answer meanwhile.
+ *
+ * Deliberately not `MODELS.light`: that moving is not a reason for this to move.
+ * Re-measure with `scripts/label-cover-probe.ts --model=<id>` first.
+ */
+export const LABEL_MODEL = 'gemini-3.6-flash';
+
 export type ModelTier = keyof typeof MODELS;
 
 /** Base URL for the Gemini REST API. */

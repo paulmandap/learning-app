@@ -7,6 +7,7 @@ import {
   type SwipeVerdict,
 } from '../core/gesture';
 import { alignmentFor } from '../core/layout';
+import { coverRects, type LabelBox } from '../core/label-cover';
 import { gradeFeedback } from './feedback';
 import { radius, space, swipeTint, type, useTheme } from './theme';
 
@@ -45,14 +46,19 @@ export interface FlipCardProps {
   /**
    * The source picture, for cards made from an uploaded image (Phase 7a).
    *
-   * Shown on the QUESTION face only. A card asking "which organ is the primary
-   * photosynthetic organ?" is far easier to answer with the drawing in front of
-   * you; the answer face is a few words and gains nothing from it.
+   * Always on the answer face, uncovered. On the question face only when
+   * `imageSide` says so, with `imageCovers` hidden.
    *
-   * This is the whole diagram, not a highlighted part — label-position
-   * questions are the postponed §6 feature and are gated separately.
+   * 7a put it on the question face alone, reasoning that a drawing helps you
+   * answer. But cards from a picture are written from its own words, so its
+   * labels are the answers, and the owner's first diagram gave every one away
+   * (NOTES §44). The deck decides where it goes with `placePicture`.
    */
   imageUri?: string;
+  /** Which face shows the picture: the answer, unless the deck worked out what to cover. */
+  imageSide?: 'question' | 'answer';
+  /** Labels to cover when the picture is with the question. */
+  imageCovers?: LabelBox[];
   revealed: boolean;
   onFlip: () => void;
   /** Called once the card has animated away. */
@@ -76,6 +82,8 @@ export function FlipCard({
   onGrade,
   showHints = false,
   imageUri,
+  imageSide = 'answer',
+  imageCovers,
 }: FlipCardProps) {
   const t = useTheme();
   const [width, setWidth] = useState(0);
@@ -87,13 +95,23 @@ export function FlipCard({
    * shape the student photographed, and guessing crops it.
    */
   const [figureRatio, setFigureRatio] = useState(FIGURE_FALLBACK_RATIO);
+  /**
+   * Whether that shape is the real one. A cover is placed by the picture's true
+   * shape, so on a guessed one it can sit beside the label it should hide — the
+   * picture waits for this before it is drawn with the question (NOTES §44).
+   */
+  const [ratioKnown, setRatioKnown] = useState(false);
   useEffect(() => {
+    setRatioKnown(false);
     if (!imageUri) return;
     let live = true;
     Image.getSize(
       imageUri,
       (w, h) => {
-        if (live && h > 0) setFigureRatio(w / h);
+        if (live && h > 0) {
+          setFigureRatio(w / h);
+          setRatioKnown(true);
+        }
       },
       () => {
         // Unreachable image: keep the fallback shape rather than collapsing the
@@ -302,6 +320,77 @@ export function FlipCard({
       ? CARD_MIN_HEIGHT + figureHeight + space.md
       : CARD_MIN_HEIGHT;
 
+  /**
+   * The picture, as either face draws it — with its answer covered, or whole.
+   *
+   * `contain` keeps the whole picture inside the box at its own shape, centred,
+   * so the covers are placed on the part of the box the picture really fills.
+   */
+  const renderFigure = (covered: boolean) => {
+    if (!imageUri || figureWidth <= 0) return null;
+    const drawnWidth = Math.min(figureWidth, figureHeight * figureRatio);
+    const drawnHeight = drawnWidth / figureRatio;
+    const rects = covered
+      ? coverRects(imageCovers ?? [], {
+          left: (figureWidth - drawnWidth) / 2,
+          top: (figureHeight - drawnHeight) / 2,
+          width: drawnWidth,
+          height: drawnHeight,
+        })
+      : [];
+    return (
+      <View style={{ width: figureWidth, height: figureHeight, marginBottom: space.md }}>
+        {/* contain, not cover: a diagram cropped to fill the box loses the
+            labels round its edge, which are the entire point of showing it. */}
+        <Image
+          source={{ uri: imageUri }}
+          resizeMode="contain"
+          accessibilityLabel={
+            rects.length > 0
+              ? 'The picture these notes came from, with the answer covered'
+              : 'The picture these notes came from'
+          }
+          style={{
+            // EXPLICIT pixel width and height, computed from the card's
+            // measured width and the picture's real shape.
+            //
+            // Two earlier attempts failed on react-native-web: a fixed
+            // height cropped a wide diagram to its top band (title and two
+            // labels visible, four cut off), and width:'100%' with
+            // aspectRatio + maxHeight collapsed the element to nothing.
+            // Numbers cannot do either.
+            width: figureWidth,
+            height: figureHeight,
+            borderRadius: radius.sm,
+            backgroundColor: t.bg,
+          }}
+        />
+        {rects.map((r, i) => (
+          <View
+            key={i}
+            style={{
+              position: 'absolute',
+              left: r.left,
+              top: r.top,
+              width: r.width,
+              height: r.height,
+              backgroundColor: t.accent,
+              borderRadius: 4,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {r.height >= 14 ? (
+              <Text style={{ color: t.accentText, fontWeight: '800', fontSize: Math.min(16, Math.round(r.height * 0.7)) }}>
+                ?
+              </Text>
+            ) : null}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   const faceBase = {
     position: 'absolute' as const,
     inset: 0 as never,
@@ -338,30 +427,10 @@ export function FlipCard({
               Bold, per the type scale: weight is what marks this as the side
               being asked, so a card caught mid-flip is never ambiguous. */}
           <Animated.View style={[faceBase, { transform: [{ perspective: 1200 }, { rotateY: frontRotate }] }]}>
-            {imageUri && figureWidth > 0 ? (
-              // contain, not cover: a diagram cropped to fill the box loses the
-              // labels round its edge, which are the entire point of showing it.
-              <Image
-                source={{ uri: imageUri }}
-                resizeMode="contain"
-                accessibilityLabel="The picture these notes came from"
-                style={{
-                  // EXPLICIT pixel width and height, computed from the card's
-                  // measured width and the picture's real shape.
-                  //
-                  // Two earlier attempts failed on react-native-web: a fixed
-                  // height cropped a wide diagram to its top band (title and two
-                  // labels visible, four cut off), and width:'100%' with
-                  // aspectRatio + maxHeight collapsed the element to nothing.
-                  // Numbers cannot do either.
-                  width: figureWidth,
-                  height: figureHeight,
-                  marginBottom: space.md,
-                  borderRadius: radius.sm,
-                  backgroundColor: t.bg,
-                }}
-              />
-            ) : null}
+            {/* The picture comes with the question only when the deck has
+                worked out what to cover (NOTES §44), and only once its real
+                shape is known, so each cover lands on its label. */}
+            {imageSide === 'question' && ratioKnown ? renderFigure(true) : null}
             <Text style={[type.cardPrompt, { color: t.text, textAlign: questionAlign }]}>
               {question}
             </Text>
@@ -377,9 +446,11 @@ export function FlipCard({
             ) : null}
           </Animated.View>
 
-          {/* Back — the answer, and nothing else. The "Answer" label is gone:
-              the flip itself already said that. */}
+          {/* Back — the answer, and the whole picture when there is one, which
+              shows where the answer came from (NOTES §44). The "Answer" label
+              is gone: the flip itself already said that. */}
           <Animated.View style={[faceBase, { transform: [{ perspective: 1200 }, { rotateY: backRotate }] }]}>
+            {renderFigure(false)}
             <Text style={[type.card, { color: t.text, textAlign: answerAlign }]}>{answer}</Text>
             {showHints ? (
               <Text
