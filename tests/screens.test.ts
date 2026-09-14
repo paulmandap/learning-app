@@ -544,6 +544,24 @@ describe("the owner's third round (NOTES §37)", () => {
     expect(code(read('src', 'data', 'nomi-session.ts'))).toMatch(/const confirm = [\s\S]*?carryOut\(/);
   });
 
+  it('a change of person resets the cache, and the assistant never mounts signed out (NOTES §42)', () => {
+    // The privacy notice flashed after signing in: the assistant fetched the
+    // profile signed out, the empty answer stayed cached, and the notice read it.
+    const layout = code(read('app', '_layout.tsx'));
+    expect(layout).toMatch(/function useResetCacheOnUserChange[\s\S]*?resetQueries\(\)/);
+    expect(layout).toContain('useResetCacheOnUserChange();');
+    expect(layout).toMatch(/const showAssistant =\s*signedIn &&/);
+  });
+
+  it('the splash is in the page before any script, and the app takes it away (NOTES §42)', () => {
+    const html = read('public', 'index.html');
+    expect(html).toContain('id="splash"');
+    expect(html).toContain('src="/nomi-splash.webp"');
+    expect(html.indexOf('id="splash"')).toBeLessThan(html.indexOf('id="root"'));
+    expect(existsSync(join('public', 'nomi-splash.webp'))).toBe(true);
+    expect(code(read('app', '_layout.tsx'))).toMatch(/getElementById\('splash'\)[\s\S]*?classList\.add\('gone'\)/);
+  });
+
   it('Add notes and Nomi start a set the same way', () => {
     // Raw source, not code(): new.tsx holds the string '.pdf,.txt,image/*', whose
     // "/*" the crude comment stripper reads as the start of a block comment.

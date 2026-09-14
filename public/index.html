@@ -56,10 +56,59 @@
         flex: 1;
       }
     </style>
+
+    <!-- The splash (NOTES §42): Nomi, painted from this file alone, before the
+         JavaScript bundle has loaded — which is most of a cold start on a phone.
+         app/_layout.tsx fades it out once the app knows who is signed in.
+         The picture is made by scripts/make-splash.ts from Nomi's own layers.
+         Backgrounds match the body's above; keep them in step. -->
+    <style id="splash-style">
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        background-color: #f7f7f8;
+        transition: opacity 280ms ease-out;
+      }
+      #splash img {
+        width: 132px;
+        height: 177px;
+        animation: nomi-splash-float 2.4s ease-in-out infinite;
+      }
+      #splash .name {
+        font: 600 30px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        color: #4a2f22;
+      }
+      #splash.gone {
+        opacity: 0;
+        pointer-events: none;
+      }
+      @keyframes nomi-splash-float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-6px); }
+      }
+      @media (prefers-color-scheme: dark) {
+        #splash { background-color: #111318; }
+        #splash .name { color: #f2e3cc; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #splash img { animation: none; }
+        #splash { transition: none; }
+      }
+    </style>
   </head>
 
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="splash" aria-hidden="true">
+      <img src="/nomi-splash.webp" alt="" width="132" height="177" />
+      <div class="name">Nomi</div>
+    </div>
     <div id="root"></div>
 
     <!-- A white screen tells you nothing. If the app fails to start, show why.

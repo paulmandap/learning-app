@@ -1,7 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useColorScheme, View } from 'react-native';
+import { Platform, useColorScheme, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { startSessionListener, useSessionStore } from '../src/data/session';
 import { HeaderBackButton } from '../src/ui/menu';
@@ -40,6 +40,64 @@ function useAuthRedirect() {
 }
 
 /**
+ * Everything cached belongs to whoever was signed in when it was fetched
+ * (NOTES §42), so a change of person resets it.
+ *
+ * Found chasing the owner's report that the privacy notice flashed for a
+ * moment after entering the sign-in code. The app opens at Home, and in the
+ * instant before the redirect to sign-in the assistant asked for the profile
+ * with nobody signed in. Row-level security answered with no row, and that
+ * empty profile stayed in the cache — so on signing in the notice read "not
+ * accepted" and opened, until a background refetch found the real profile and
+ * closed it. The same cache would have shown one person's data to the next on a
+ * shared phone. Token refreshes keep the same person, and keep the cache.
+ */
+function useResetCacheOnUserChange() {
+  const userId = useSessionStore((s) => s.session?.user.id ?? null);
+  const previous = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (previous.current !== undefined && previous.current !== userId) void queryClient.resetQueries();
+    previous.current = userId;
+  }, [userId]);
+}
+
+/**
+ * The shortest the splash stays, from the start of the page load.
+ *
+ * On a cached reload the app knows who is signed in within a few tens of
+ * milliseconds, and a splash that blinks for one frame reads as a glitch, not
+ * as Nomi saying hello.
+ */
+const SPLASH_MIN_MS = 700;
+
+/**
+ * Fade out the splash in `public/index.html` (NOTES §42) once the app knows
+ * whether anyone is signed in — so the first screen it reveals is the right
+ * one, never sign-in flashing before Home.
+ */
+function useHideSplash() {
+  const ready = useSessionStore((s) => s.ready);
+
+  useEffect(() => {
+    if (!ready || Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const splash = document.getElementById('splash');
+    if (!splash) return;
+    const sinceLoad = typeof performance === 'undefined' ? SPLASH_MIN_MS : performance.now();
+    let removal: ReturnType<typeof setTimeout> | undefined;
+    const fade = setTimeout(() => {
+      splash.classList.add('gone');
+      // After the 280ms fade in index.html; gone from the page, not merely invisible.
+      removal = setTimeout(() => splash.remove(), 320);
+    }, Math.max(0, SPLASH_MIN_MS - sinceLoad));
+    return () => {
+      clearTimeout(fade);
+      if (removal) clearTimeout(removal);
+    };
+  }, [ready]);
+}
+
+/**
  * Every screen that is not the root gets an EXPLICIT back control.
  *
  * The stack's built-in chevron only renders when the navigator has a previous
@@ -61,15 +119,21 @@ const backable = {
 function RootNavigator() {
   const t = useTheme();
   const segments = useSegments();
+  const signedIn = useSessionStore((s) => !!s.session);
   useAuthRedirect();
+  useResetCacheOnUserChange();
+  useHideSplash();
 
   // Mounted once, above the navigator, so it survives navigation and keeps its
   // panel open across screens. Hidden on sign-in: there are no notes to ask
   // about yet, and a floating button over a one-field form is clutter. Hidden
   // on Nomi's own screen too, where the whole screen is the conversation it
   // would open (NOTES §36), and over the two legal documents, which may be
-  // read before signing in (NOTES §40).
-  const showAssistant = segments[0] !== 'sign-in' && segments[0] !== 'nomi' && !isPublicRoute(segments[0]);
+  // read before signing in (NOTES §40). And never mounted signed out: it loads
+  // the profile as it mounts, which is how an empty one reached the cache
+  // before the first redirect to sign-in (NOTES §42).
+  const showAssistant =
+    signedIn && segments[0] !== 'sign-in' && segments[0] !== 'nomi' && !isPublicRoute(segments[0]);
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>

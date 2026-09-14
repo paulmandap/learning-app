@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **952 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **954 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§40 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§42 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -263,6 +263,13 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 - **The privacy notice covers every screen until it is read** (NOTES §37).
   `openPage` marks it read for the test user by default; pass
   `privacyNotice: 'unseen'` to photograph it.
+- **`openPage` cannot see anything between signed out and signed in.** It
+  marks the notice read on the device and injects the session before the app
+  boots, so nothing is ever fetched signed out — which is how the notice flash
+  of NOTES §42 hid from every probe. To reproduce a real sign-in: open `/`
+  signed out (`auth: false`), wait, then store the session in localStorage and
+  post `{ event: 'SIGNED_IN', session }` on a `BroadcastChannel` named
+  `sb-<ref>-auth-token`; supabase-js delivers it to the app like its own.
 - **`code()` in `tests/screens.test.ts` strips `/* … */` even inside a string.**
   `app/new.tsx` holds `'.pdf,.txt,image/*'`, so a guard over `code(new.tsx)` lost
   half the file and failed on text that was there. Read that file raw.
@@ -317,6 +324,7 @@ npx tsx --env-file=.env scripts/seed-progress.ts [--days 30] [--clear]
 npx tsx scripts/make-pet-assets.ts            # cuts every assets/*-stages.*
 npx tsx scripts/make-nomi-assets.ts [--debug <dir>]   # Nomi's five layers + src/ui/nomi-rig.ts, from design-reference/nomi-updated-look-interactions-references.png (gitignored)
 npx tsx scripts/make-icons.ts [--preview <dir>]       # every app icon size, from design-reference/nomi-app-icon.png (gitignored)
+npx tsx scripts/make-splash.ts                         # public/nomi-splash.webp from assets/nomi-*.webp — rerun after make-nomi-assets
 npx tsx --env-file=.env scripts/nomi-chat-probe.ts    # Nomi's brain + one real Gemini reply + what was saved
 npx tsx --env-file=.env scripts/reviewer-probe.ts [--runs 3] [--only rename] [--counts 20,60] [--out r.txt]   # patterns vs Gemini's topic/title, and written reviewers
 npx tsx --env-file=.env scripts/nomi-offer-probe.ts --out <dir>   # Nomi's offers in the built app, photographed; checks a refused reviewer saved nothing

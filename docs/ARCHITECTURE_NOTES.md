@@ -5681,6 +5681,93 @@ the new owl. **Not measured:** the animation sampled live in the running app, as
 §35.5 did, and anything on an iPhone. **Not deployed.**
 
 
+## 42. Round seven: the privacy notice flashing at sign-in, a splash, and the sign-in email (2026-09-14)
+
+The owner deployed §41, re-added the app to an iPhone home screen and signed in
+again, and reported what they saw.
+
+### 42.1 "Our old privacy terms show for about 0.2 seconds after I enter the code"
+
+**Reproduced before fixing — at the second attempt.** The first probe opened
+`/sign-in`, signed in within seconds, three runs: the notice never appeared.
+The owner's path differs twice: the app opens at `/`, and the code takes a
+while to arrive by email. The second probe did it their way — opened `/`
+signed out, waited on the sign-in screen, then signed in, with the account's
+notice already accepted. Sign-in was delivered the way the app sees a real one:
+the session stored and `SIGNED_IN` posted on supabase-js's own
+`sb-<ref>-auth-token` BroadcastChannel. A MutationObserver logged the notice's
+heading appearing and disappearing:
+
+```
+before   waited 35s   opened at 23ms, closed at 1,075ms       the owner's flash
+         waited 3s    opened at 14ms, still open 5s later     an accepted notice asked again
+after    waited 35s   never opened
+         waited 3s    never opened
+```
+
+**The cause.** The ✦ assistant is mounted at the root, and on `/` it mounted in
+the instant before the redirect to sign-in. Its `useNomiConversation` asks for
+`['profile']` with no `enabled` guard, so it asked signed out; row-level
+security answered with no row; and `null` stayed in the query cache as a
+success. On signing in, `PrivacyGate` read that cached null as "not accepted"
+and opened. If the empty answer was over 30 seconds old it was stale, a
+background refetch found the real profile, and the notice closed — the flash.
+If it was newer, nothing refetched, and the notice stayed.
+
+**The fix**, in `app/_layout.tsx`: the cache is reset whenever the signed-in
+person changes (`useResetCacheOnUserChange`; token refreshes keep the same
+person and keep the cache), and the assistant is never mounted signed out. The
+same stale cache would have shown one person's data to the next on a shared
+phone. Guarded in `tests/screens.test.ts`.
+
+**Why no earlier probe saw it:** `openPage` marks the notice read on the device
+by default (§37) and injects the session before the app boots, so nothing is
+ever fetched signed out. Both hid this.
+
+### 42.2 A splash with Nomi
+
+Plain HTML at the top of `public/index.html`, painted before the JavaScript
+bundle loads — which is most of a cold start on a phone: Nomi at rest over the
+name, on the page's own light or dark background, with a gentle float that
+reduce-motion turns off. The picture is `public/nomi-splash.webp` (367×493,
+23 KB), composed by `scripts/make-splash.ts` from the same five layers the
+character is drawn from, so the splash owl is the app's owl. `app/_layout.tsx`
+fades it once the app knows whether anyone is signed in, no sooner than 700ms
+after the page began loading, and removes it after the fade.
+
+**iOS launch images were not added.** `apple-touch-startup-image` needs one
+exact image per device size, and the HTML splash already covers the long part
+of a start. Reopen if the owner sees a blank screen before Nomi appears.
+
+**Verified:** rendered on its own in light and dark (a 393-wide render looked
+off-centre; headless Chrome will not lay out narrower than 500px, and at 600 it
+is centred); in the built app the picture loads and the splash is gone by the
+time Home is up.
+
+### 42.3 The sign-in email still says "Study"
+
+The email is the Supabase project's own template — "Magic Link" for existing
+accounts, "Confirm signup" for new ones — not anything in this repository. There
+is no management token (HANDOFF), so the owner changes it in the dashboard;
+steps were given on 2026-09-14. `{{ .Token }}` has to stay in both, or the email
+carries no code.
+
+### 42.4 Asked, not started: rich notes with pictures
+
+The owner wants Notes to handle formatting "just like notion" — bullets, bold —
+and pictures, so cards can be made with diagrams. Waiting on two decisions: an
+editor library against a markup toolbar (the first is a dependency, which
+HANDOFF asks to be measured), and whether pictures in notes and cards from them
+come together or in turn (pictures need a private storage bucket, which is a
+migration the owner applies).
+
+### 42.5 Verified
+
+typecheck clean · **954 tests**, 3 skipped (+2) · `expo export` · boot 5/5 ·
+the two probes above against the live database, before and after · the splash
+rendered alone and checked in the built app. **Not deployed.**
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)
