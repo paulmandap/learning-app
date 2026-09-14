@@ -10,7 +10,8 @@ import {
 import bodyArt from '../../assets/nomi-body.webp';
 import wingLeftArt from '../../assets/nomi-wing-left.webp';
 import wingRightArt from '../../assets/nomi-wing-right.webp';
-import eyesArt from '../../assets/nomi-eyes.webp';
+import eyeLeftArt from '../../assets/nomi-eye-left.webp';
+import eyeRightArt from '../../assets/nomi-eye-right.webp';
 import {
   CHANNELS,
   entryPose,
@@ -28,7 +29,7 @@ import { useReducedMotion } from './motion';
 /**
  * Nomi, drawn and moving.
  *
- * The ONLY file that knows the owl is four stacked pictures. Screens ask for a
+ * The ONLY file that knows the owl is stacked pictures. Screens ask for a
  * state by name — `<NomiCharacter state="thinking" />` — and never see an
  * `Animated.Value`. What each state does lives in `src/core/nomi-motion.ts`,
  * where it can be tested; this turns it into motion.
@@ -36,9 +37,11 @@ import { useReducedMotion } from './motion';
  * ## The parts
  *
  * Cut from the reference sheet's canonical pose by `scripts/make-nomi-assets.ts`:
- * a body, two wings that rotate about their shoulders, and the irises, which
- * squash to blink and shift to look. All four are the same size, so they stack
- * with no layout at all, and `NOMI_RIG` says where the pivots are.
+ * a body, two wings that rotate about their shoulders, and each iris, which
+ * squashes to blink and shifts to look. Each eye blinks toward its own line,
+ * because Nomi's head tilts and the two are not level (NOTES §41). All the
+ * pictures are the same size, so they stack with no layout at all, and
+ * `NOMI_RIG` says where the pivots are.
  *
  * ## Performance, and the phone it has to run on
  *
@@ -234,7 +237,14 @@ export function NomiCharacter({
       { translateY: H / 2 - py },
     ];
     const eyeRadius = NOMI_RIG.eyeRadius * W;
-    const eyeLine = NOMI_RIG.eyeLine * H;
+    // One eye: looks with the other, and blinks toward its OWN line.
+    const eye = (line: number) => [
+      { translateX: v.lookX.interpolate({ inputRange: [-1, 1], outputRange: [-eyeRadius, eyeRadius] }) },
+      { translateY: v.lookY.interpolate({ inputRange: [-1, 1], outputRange: [-eyeRadius, eyeRadius] }) },
+      { translateY: line * H - H / 2 },
+      { scaleY: blink },
+      { translateY: H / 2 - line * H },
+    ];
 
     return {
       figure: [
@@ -252,14 +262,8 @@ export function NomiCharacter({
         NOMI_RIG.wingRightPivot[1] * H,
         degrees(v.wingRight, -1),
       ),
-      eyes: [
-        { translateX: v.lookX.interpolate({ inputRange: [-1, 1], outputRange: [-eyeRadius, eyeRadius] }) },
-        { translateY: v.lookY.interpolate({ inputRange: [-1, 1], outputRange: [-eyeRadius, eyeRadius] }) },
-        // Blink squashes toward the line through both eyes, not the picture's middle.
-        { translateY: eyeLine - H / 2 },
-        { scaleY: blink },
-        { translateY: H / 2 - eyeLine },
-      ],
+      eyeLeft: eye(NOMI_RIG.eyeLeftLine),
+      eyeRight: eye(NOMI_RIG.eyeRightLine),
     };
   }, [W, H, v, blink]);
 
@@ -277,8 +281,11 @@ export function NomiCharacter({
     >
       <Animated.View style={{ width: W, height: H, opacity: v.opacity, transform: transforms.figure }}>
         <Image source={bodyArt} style={layer} />
-        <Animated.View style={[layer, { transform: transforms.eyes }]}>
-          <Image source={eyesArt} style={layer} />
+        <Animated.View style={[layer, { transform: transforms.eyeLeft }]}>
+          <Image source={eyeLeftArt} style={layer} />
+        </Animated.View>
+        <Animated.View style={[layer, { transform: transforms.eyeRight }]}>
+          <Image source={eyeRightArt} style={layer} />
         </Animated.View>
         <Animated.View style={[layer, { transform: transforms.wingLeft }]}>
           <Image source={wingLeftArt} style={layer} />

@@ -6,16 +6,17 @@
  * images, and are only correct for them.
  */
 export const NOMI_RIG = {
-  "width": 305,
-  "height": 380,
+  "width": 367,
+  "height": 493,
   "wingLeftPivot": [
-    0.1082,
-    0.5026
+    0.1771,
+    0.5761
   ],
   "wingRightPivot": [
-    0.8885,
-    0.5026
+    0.7984,
+    0.6329
   ],
-  "eyeLine": 0.3377,
-  "eyeRadius": 0.1197
+  "eyeLeftLine": 0.3355,
+  "eyeRightLine": 0.4055,
+  "eyeRadius": 0.1396
 } as const;

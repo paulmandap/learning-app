@@ -315,7 +315,8 @@ npx tsx --env-file=.env scripts/notes-probe.ts [--generate]
 npx tsx --env-file=.env scripts/study-probe.ts <set-id>
 npx tsx --env-file=.env scripts/seed-progress.ts [--days 30] [--clear]
 npx tsx scripts/make-pet-assets.ts            # cuts every assets/*-stages.*
-npx tsx scripts/make-nomi-assets.ts [--debug <dir>]   # Nomi's layers + src/ui/nomi-rig.ts, from design-reference/ (gitignored)
+npx tsx scripts/make-nomi-assets.ts [--debug <dir>]   # Nomi's five layers + src/ui/nomi-rig.ts, from design-reference/nomi-updated-look-interactions-references.png (gitignored)
+npx tsx scripts/make-icons.ts [--preview <dir>]       # every app icon size, from design-reference/nomi-app-icon.png (gitignored)
 npx tsx --env-file=.env scripts/nomi-chat-probe.ts    # Nomi's brain + one real Gemini reply + what was saved
 npx tsx --env-file=.env scripts/reviewer-probe.ts [--runs 3] [--only rename] [--counts 20,60] [--out r.txt]   # patterns vs Gemini's topic/title, and written reviewers
 npx tsx --env-file=.env scripts/nomi-offer-probe.ts --out <dir>   # Nomi's offers in the built app, photographed; checks a refused reviewer saved nothing

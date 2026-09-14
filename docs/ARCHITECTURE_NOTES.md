@@ -5605,6 +5605,82 @@ Use (signed out) and Home (signed in, tab "Nomi", `avatar:` entry written).
 **Not deployed.**
 
 
+## 41. Nomi's new look, and the app icon from the owner's picture (2026-09-14)
+
+The owner saved two pictures to `design-reference/` (gitignored):
+`nomi-updated-look-interactions-references.png`, 1536×1024 — a canonical pose
+and eight states — and `nomi-app-icon.png`, 1254×1254. *"i want this Nomi's new
+look. implement that please."* This supersedes §40.7: the hand-redrawn vector
+was never used, and has been deleted.
+
+### 41.1 The icon: cut out of the picture, not drawn
+
+`scripts/make-icons.ts` replaces `make-icons.mjs` and `assets/icon.svg`, which
+painted the old flashcard mark from shapes typed in by hand. The new script
+measures the rounded square in the picture and cuts it out:
+
+```
+square        x 238–1016, y 220–1018 — 779 × 799, NOT square
+corner radii  194.6, 194.6, 198, 198 → 196.3
+```
+
+Squashing it square would make the owl 2.5% shorter, so the 20px difference is
+trimmed off the top, which is plain background above the ear tufts. The 2px
+rim, antialiased against the pale page, is trimmed too, so no light fringe
+reaches a dark home screen. **Rounded** outputs (`assets/icon.png` 1024, both
+48px favicons, `icon-192`, `icon-512`) get transparent corners antialiased at
+their own size; **full-bleed** outputs (`apple-touch-icon` 180, the maskable 512)
+have their corners filled from just inside the arc, because iOS and Android mask
+those themselves. `assets/icon.png` is 1.39 MB — the art is painterly — and is
+not part of the web bundle.
+
+### 41.2 Nomi, re-cut from the new canonical pose
+
+The same method as §35.5 — one pose, cut into layers that move — with three
+changes the new owl forced:
+
+- **The head tilts**, so the eyes are not level: the left iris sits 34px above
+  the right. Blinking one eye layer toward the line between them would slide
+  both eyes while they close, so **each eye is its own layer** with its own
+  line (`eyeLeftLine` 0.3355, `eyeRightLine` 0.4055 of the height).
+- **The head is wider than the body** and overhangs it. The ellipse fitted to
+  the silhouette above and below the wings would have fitted the head and left a
+  body-coloured ghost of the right wing behind every wave, so **the body's edge
+  under each wing is placed by hand**, like the wing outlines.
+- **The belly borders the wings**, so the colour behind a wing is no longer read
+  just inside its inner edge — that is cream — but **blended between two brown
+  samples** of the body, above and below the wing.
+
+Four faults were found on the debug sheet and fixed, in order:
+
+1. **A light line along the wings at rest, worst 68.** Where the wing outline
+   crosses the dark outline stroke, no wing colour composites back to the
+   original over the paler fill, and clamping one left the line. Those pixels
+   now stay as drawn on both layers. At rest: **2 pixels over 8 of 138,110**,
+   worst 61, one where each wing meets the head or body.
+2. **A pale patch behind the lifted left wing**: the upper fill sample sat on
+   cream belly. Moved to the brown side of the head.
+3. **Thin dark arcs left beside the body when a wing lifted**: the outlines were
+   tight on their outer side, where the neighbour is paper. Loosened by 3px there;
+   still tight against the belly.
+4. **An orange wedge on the face during blinks**: the ring that samples the face
+   behind the right eye crossed the beak. Only face-coloured samples count now.
+
+Rig 367 × 493 (was 305 × 380); layers 35.5 KB in all. The motion in
+`src/core/nomi-motion.ts` is unchanged — on the debug sheet the wave at 135°
+still reads as a wing raised beside the head.
+
+### 41.3 Verified
+
+typecheck clean · **952 tests**, 3 skipped · `expo export` · boot 5/5 · the
+build carries `nomi-body`, `nomi-eye-left`, `nomi-eye-right` and no `nomi-eyes` ·
+the debug sheet (at rest, body alone, wings out with a blink, wave at 60° and
+135°, on dark and light) · the icon preview at 512, 180, 192 and 48 on dark and
+light · screenshots at 393 dark of Home's Nomi card and Nomi's welcome, both
+the new owl. **Not measured:** the animation sampled live in the running app, as
+§35.5 did, and anything on an iPhone. **Not deployed.**
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

@@ -5,20 +5,41 @@
  *   npx tsx scripts/make-nomi-assets.ts <sheet.png> --debug <dir>
  *
  * Reads the character reference sheet from `design-reference/` (gitignored —
- * reference material, not an app asset) and writes four same-size, transparent
+ * reference material, not an app asset) and writes five same-size, transparent
  * WebP layers to `assets/`:
  *
  *   nomi-body.webp        everything that does not move on its own
  *   nomi-wing-left.webp   rotates about the shoulder
  *   nomi-wing-right.webp
- *   nomi-eyes.webp        both irises; squashed to blink, shifted to look
+ *   nomi-eye-left.webp    each iris on its own: squashed to blink, shifted to look
+ *   nomi-eye-right.webp
  *
- * And writes the rig — pivots and the eye line, as fractions of the layer size
- * — to `src/ui/nomi-rig.ts`, in the same run. The numbers describe those exact
- * images, so they are only ever written together; a rig typed in by hand would
- * be one re-cut away from wings that pivot about thin air.
+ * And writes the rig — pivots and each eye's line, as fractions of the layer
+ * size — to `src/ui/nomi-rig.ts`, in the same run. The numbers describe those
+ * exact images, so they are only ever written together; a rig typed in by hand
+ * would be one re-cut away from wings that pivot about thin air.
  *
- * ## Why layers cut from ONE pose, not the eight poses on the sheet
+ * ## The sheet (NOTES §41)
+ *
+ * `nomi-updated-look-interactions-references.png`, 1536×1024: the owner's new
+ * look for Nomi. It replaced `nomi-different-interactions.png` (NOTES §35.5),
+ * and three things about the new owl changed how it is cut:
+ *
+ *  - **The head tilts**, so the eyes are not level — the left iris sits 33px
+ *    higher than the right. One eye layer blinking toward the line between them
+ *    would slide both eyes while they close. Each eye is its own layer, with its
+ *    own line.
+ *  - **The head is wider than the body** and overhangs it, so the old way of
+ *    finding the body behind a wing — one ellipse fitted to the silhouette above
+ *    and below the wings — would fit the head, and leave a body-coloured ghost of
+ *    the right wing behind when it waves. Where the body runs under each wing is
+ *    placed by hand, like the wing outlines.
+ *  - **The belly borders the wings.** The body colour behind a wing used to be
+ *    read just inside the wing's inner edge; here that is cream belly, which a
+ *    lifted wing would uncover as a cream patch. It is blended instead between
+ *    two brown samples of the body itself, at the shoulder and below the wing.
+ *
+ * ## Why layers cut from ONE pose, not the poses on the sheet
  *
  * The sheet draws each state as a separate illustration, and they do not line
  * up: the owl is a different size and sits in a different place in every cell.
@@ -26,26 +47,16 @@
  * had to come from one generated image (NOTES §17.5). Parts of a single pose
  * move without ever changing what the owl is.
  *
- * ## The one hard part: what is BEHIND a wing
+ * ## What is behind a wing
  *
  * The art is flat. Where a wing overlaps the body there is no body underneath
- * it, so a wing that lifts would uncover a hole. Two facts make it fillable:
+ * it, so a wing that lifts would uncover a hole. Under each wing the body is
+ * filled to its hand-placed edge with the blended body colour; beyond that edge
+ * is paper, and stays transparent.
  *
- *  - **The body's edge under a wing is predictable.** The owl is one egg, head
- *    and body together, visible above and below each wing — so one ellipse,
- *    fitted to BOTH sides at once, says where the silhouette runs in between.
- *    A quadratic per side was tried first and was wrong in a way worth
- *    recording: fitted mostly to the head, it curved the body INWARD below the
- *    shoulder, and the owl under its wings came out as a box.
- *  - **The body is nearly one colour there.** Sampled on the sheet: body side
- *    166,108,71 and wing 150,96,61. So each row is filled with the body colour
- *    measured just inside the wing's inner edge, and the seam is invisible.
- *
- * The wing outlines are hand-placed polygons, read off a 4× gridded crop.
- * Deliberately loose on the body side: a polygon a pixel too wide carries a
- * sliver of near-identical body colour with the wing, while one a pixel too
- * tight leaves a sliver of WING painted on the body — a second wing edge that
- * appears the moment the real one lifts.
+ * The wing outlines are hand-placed polygons, read off a 4× gridded crop. TIGHT
+ * against the belly — a polygon a pixel into the cream carries a cream sliver
+ * up with the wing — and loose only where the neighbour is the same brown.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -54,21 +65,73 @@ import { openCanvasPage } from './chrome-canvas';
 type Point = [number, number];
 
 /**
- * Where everything is, in pixels of FRAME (origin at the frame's top-left).
- *
- * Measured from `design-reference/nomi-different-interactions.png`, 1697×927.
- * Regenerating the sheet at another size or layout invalidates every number
- * here, which is why they are named rather than inlined in the page code.
+ * Where everything is, in pixels of the SHEET, measured from
+ * `design-reference/nomi-updated-look-interactions-references.png` (1536×1024)
+ * on 4× gridded crops. Converted to frame coordinates before the page sees them.
+ * Regenerating the sheet at another size or layout invalidates every number.
  */
+const SHEET = {
+  /** The canonical pose, inside its panel, clear of the label above and the name below. */
+  frame: { x: 40, y: 235, w: 390, h: 530 },
+
+  /**
+   * Outlines are 3px LOOSE on the outer side, where the neighbour is paper and
+   * taking a little of it costs nothing: drawn tight on the first cut, each
+   * wing left its own outer outline standing beside the body as a thin dark
+   * arc when it lifted. Tight on the inner side, against the belly.
+   */
+  wings: {
+    left: {
+      points: [
+        [107, 516], [120, 518], [138, 523], [151, 531], [160, 546], [164, 566], [162, 585],
+        [158, 602], [151, 619], [141, 634], [128, 647], [113, 659], [100, 670], [90, 679],
+        [79, 679], [70, 672], [63, 657], [59, 639], [58, 619], [59, 597], [64, 578],
+        [72, 559], [82, 540], [93, 523], [101, 517],
+      ] as Point[],
+      pivot: [116, 528] as Point,
+      /** Where the body runs under the wing, as [y, x], top to bottom. */
+      bodyEdge: [[516, 108], [550, 98], [590, 93], [630, 94], [665, 99], [690, 110]] as Point[],
+      /**
+       * Brown body above the wing, at the side of the head, and in the shadowed
+       * lobe below it. The first cut took the upper sample beside the wing's
+       * top, which is cream belly, and the body behind the lifted wing came out
+       * pale.
+       */
+      fill: { top: [90, 500] as Point, bottom: [115, 690] as Point },
+    },
+    right: {
+      points: [
+        [307, 551], [322, 550], [340, 548], [354, 545], [366, 550], [374, 566], [379, 589],
+        [381, 605], [378, 626], [373, 644], [365, 662], [351, 678], [335, 688], [319, 692],
+        [312, 688], [316, 674], [324, 659], [329, 642], [331, 624], [330, 604], [326, 584],
+        [318, 567], [309, 554],
+      ] as Point[],
+      pivot: [344, 556] as Point,
+      bodyEdge: [[546, 354], [570, 352], [600, 351], [630, 348], [660, 340], [690, 322]] as Point[],
+      fill: { top: [338, 575] as Point, bottom: [336, 660] as Point },
+    },
+  },
+
+  /**
+   * Starting guesses for the irises; the page measures the real centre and
+   * radius from the pixels. Left, then right, as the viewer sees them.
+   */
+  eyes: [
+    { cx: 168, cy: 408 },
+    { cx: 320, cy: 441 },
+  ],
+};
+
+const toFrame = (p: Point): Point => [p[0] - SHEET.frame.x, p[1] - SHEET.frame.y];
+const edgeToFrame = (p: Point): Point => [p[0] - SHEET.frame.y, p[1] - SHEET.frame.x];
+
 const CONFIG = {
-  /** The canonical pose, clear of the "CANONICAL POSE" labels above and below. */
-  frame: { x: 680, y: 88, w: 320, h: 392 },
+  frame: SHEET.frame,
 
   /**
    * Paper, and the ground shadow drawn on it. Both are pale and nearly neutral;
-   * the belly (228,196,162) and the face (251,233,208) are warmer than this
-   * allows, and are enclosed by the body anyway, so a flood from the edge can
-   * never reach them.
+   * the belly and the face are warmer than this allows, and are enclosed by the
+   * body anyway, so a flood from the edge can never reach them.
    */
   paperMinLuma: 200,
   paperMaxWarmth: 40,
@@ -76,56 +139,38 @@ const CONFIG = {
   /** Pixels this close to the paper get their alpha estimated, not copied. */
   edgeBand: 3,
 
-  wings: {
-    left: {
-      points: [
-        [34, 181], [44, 185], [52, 195], [58, 210], [62, 225], [64, 240], [64, 262],
-        [64, 285], [60, 302], [56, 316], [49, 326], [38, 327], [26, 314], [13, 296],
-        [6, 282], [2, 255], [3, 232], [10, 206], [21, 189],
-      ] as Point[],
-      pivot: [40, 194] as Point,
-    },
-    right: {
-      points: [
-        [283, 181], [295, 187], [304, 197], [311, 220], [317, 245], [315, 270], [310, 285],
-        [303, 299], [295, 311], [286, 320], [275, 327], [263, 324], [258, 310], [254, 295],
-        [253, 270], [252, 240], [254, 215], [260, 200], [270, 187],
-      ] as Point[],
-      pivot: [278, 194] as Point,
-    },
-  },
-
-  /**
-   * Rows where the body's own edge is visible, above and below the wings. The
-   * lower range stops above the feet, which sit inside the silhouette anyway.
-   */
-  bodyFitRows: [[112, 176], [330, 344]] as Point[],
+  wings: Object.fromEntries(
+    (['left', 'right'] as const).map((side) => {
+      const w = SHEET.wings[side];
+      return [
+        side,
+        {
+          points: w.points.map(toFrame),
+          pivot: toFrame(w.pivot),
+          bodyEdge: w.bodyEdge.map(edgeToFrame),
+          fill: { top: toFrame(w.fill.top), bottom: toFrame(w.fill.bottom) },
+        },
+      ];
+    }),
+  ),
 
   /** Iris edge: the first pixels paler than this, walking out from the pupil. */
   irisMaxLuma: 215,
   /** Added to each measured iris radius, for the reason given on `eyes`. */
   eyeMargin: 1.25,
 
-  /** Body colour is sampled this many pixels inside a wing's inner edge. */
-  fillSampleFrom: 2,
-  fillSampleTo: 5,
-
   /**
-   * Starting guesses for the irises; the page measures the real centre and
-   * radius from the pixels. Hand estimates were a pixel or so out, and that
-   * was enough to leave a faint brown circle on the face behind each eye.
-   *
    * Generous on purpose: a radius a little too large takes a sliver of the
    * cream face with the eye, which is invisible against the cream it squashes
    * over; too small leaves a brown ring on the face during every blink.
    */
-  eyes: [
-    { cx: 100.6, cy: 131.8 },
-    { cx: 215.6, cy: 131.0 },
-  ],
+  eyes: SHEET.eyes.map((e) => ({ cx: e.cx - SHEET.frame.x, cy: e.cy - SHEET.frame.y })),
   eyeFeather: 1.5,
   /** The face colour behind an eye is read on a ring this far outside it. */
   ringOffset: 6,
+  /** Rays that measure an iris start this far out, past the white highlight, and give up here. */
+  rayFrom: 22,
+  rayTo: 70,
 
   quality: 0.92,
 };
@@ -170,8 +215,9 @@ const isPaper = (p) => lumaAt(p) >= cfg.paperMinLuma && d[p * 4] - d[p * 4 + 2] 
 }
 let bgR = 0, bgG = 0, bgB = 0, bgN = 0;
 for (let p = 0; p < N; p++) {
-  if (paper[p] && lumaAt(p) > 235) { bgR += d[p * 4]; bgG += d[p * 4 + 1]; bgB += d[p * 4 + 2]; bgN++; }
+  if (paper[p] && lumaAt(p) > 225) { bgR += d[p * 4]; bgG += d[p * 4 + 1]; bgB += d[p * 4 + 2]; bgN++; }
 }
+if (!bgN) throw new Error('no paper found in the frame');
 const bg = [bgR / bgN, bgG / bgN, bgB / bgN];
 
 // 2. The largest remaining piece is the owl. Label fragments and sparkles are not.
@@ -254,135 +300,71 @@ function coverage(points) {
   return out;
 }
 
-/** Silhouette edges of one row, at half coverage. */
-function rowEdges(y) {
-  let left = -1, right = -1;
-  for (let x = 0; x < W; x++) if (owl[(y * W + x) * 4 + 3] >= 0.5) { left = x; break; }
-  for (let x = W - 1; x >= 0; x--) if (owl[(y * W + x) * 4 + 3] >= 0.5) { right = x; break; }
-  return [left, right];
+/** Where the body ends in a row: straight between the hand-placed [y, x] points, held beyond the ends. */
+function edgeAt(points, y) {
+  if (y <= points[0][0]) return points[0][1];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1], b = points[i];
+    if (y <= b[0]) return a[1] + ((b[1] - a[1]) * (y - a[0])) / (b[0] - a[0]);
+  }
+  return points[points.length - 1][1];
 }
 
-/** Solve a small linear system by Gaussian elimination with partial pivoting. */
-function solve(A, b) {
-  const n = b.length, M = A.map((row, i) => row.concat([b[i]]));
-  for (let c = 0; c < n; c++) {
-    let piv = c;
-    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
-    const tmp = M[c]; M[c] = M[piv]; M[piv] = tmp;
-    for (let r = c + 1; r < n; r++) {
-      const f = M[r][c] / M[c][c];
-      for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
-    }
+/** A 5×5 patch of the owl's own colour, averaged. Throws if it is not on the owl. */
+function patch(pt) {
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+    const x = pt[0] + dx, y = pt[1] + dy;
+    if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    const q = (y * W + x) * 4;
+    if (owl[q + 3] < 1) continue;
+    r += owl[q]; g += owl[q + 1]; b += owl[q + 2]; n++;
   }
-  const x = new Array(n).fill(0);
-  for (let r = n - 1; r >= 0; r--) {
-    let s = M[r][n];
-    for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k];
-    x[r] = s / M[r][r];
-  }
-  return x;
+  if (!n) throw new Error('fill sample at ' + pt.join(',') + ' (frame) is not on the owl');
+  return [r / n, g / n, b / n];
 }
 
-/**
- * The owl's outline as one axis-aligned ellipse, fitted to both sides at once.
- *
- * The axis is the mean of left and right edges, which holds the fit
- * symmetric. An ellipse's squared half-width is a quadratic in y —
- * dx² = a0 + a1·y + a2·y², with a2 < 0 — so this is ordinary least squares on
- * dx², with no iteration and nothing to converge.
- *
- * NOT "dx²·P + y²·Q + y·S + T = 1", which was the first version: that system
- * has the trivial solution P = Q = S = 0, T = 1, which fits every row exactly
- * and describes nothing. It returned NaN for every row, and because NaN fails
- * every comparison, the at-rest check reported success over pixels it had
- * silently skipped.
- */
-function bodyFit(rowRanges) {
-  const rows = [];
-  for (const range of rowRanges) for (let y = range[0]; y <= range[1]; y++) {
-    const e = rowEdges(y);
-    if (e[0] >= 0 && e[1] >= 0) rows.push({ y, left: e[0] + 0.5, right: e[1] + 0.5 });
-  }
-  const cx = rows.reduce((s, r) => s + (r.left + r.right) / 2, 0) / rows.length;
-  const AtA = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], Atb = [0, 0, 0];
-  for (const r of rows) for (const x of [r.left, r.right]) {
-    const v = [1, r.y, r.y * r.y], target = (x - cx) * (x - cx);
-    for (let i = 0; i < 3; i++) { Atb[i] += v[i] * target; for (let j = 0; j < 3; j++) AtA[i][j] += v[i] * v[j]; }
-  }
-  const [a0, a1, a2] = solve(AtA, Atb);
-  if (!(a2 < 0) || !Number.isFinite(a0 + a1 + a2)) throw new Error('outline fit is not an ellipse: ' + [a0, a1, a2].join(', '));
-  const half = (y) => Math.sqrt(Math.max(0, a0 + a1 * y + a2 * y * y));
-  let worst = 0;
-  for (const r of rows) worst = Math.max(worst, Math.abs(cx - half(r.y) - r.left), Math.abs(cx + half(r.y) - r.right));
-  return { cx, half, left: (y) => cx - half(y), right: (y) => cx + half(y), samples: rows.length, worstResidual: worst };
-}
-
-/** Per row, the body colour just inside the wing's inner edge. */
-function rowFill(mask, side) {
-  const cols = new Array(H).fill(null);
-  for (let y = 0; y < H; y++) {
-    let inner = -1;
-    if (side === 'left') { for (let x = W - 1; x >= 0; x--) if (mask[y * W + x] > 0.01) { inner = x; break; } }
-    else { for (let x = 0; x < W; x++) if (mask[y * W + x] > 0.01) { inner = x; break; } }
-    if (inner < 0) continue;
-    let r = 0, g = 0, b = 0, n = 0;
-    for (let k = cfg.fillSampleFrom; k <= cfg.fillSampleTo; k++) {
-      const x = side === 'left' ? inner + k : inner - k;
-      if (x < 0 || x >= W) continue;
-      const q = (y * W + x) * 4;
-      if (owl[q + 3] < 1) continue;
-      r += owl[q]; g += owl[q + 1]; b += owl[q + 2]; n++;
-    }
-    if (n) cols[y] = [r / n, g / n, b / n];
-  }
-  // Rows with no body beside them borrow the nearest row that had some.
-  const known = cols.map((c, y) => (c ? y : -1)).filter((y) => y >= 0);
-  for (let y = 0; y < H; y++) {
-    if (cols[y] || !known.length) continue;
-    let near = known[0];
-    for (const k of known) if (Math.abs(k - y) < Math.abs(near - y)) near = k;
-    cols[y] = cols[near];
-  }
-  // Smoothed down the rows, so no single row can band.
+/** Per row, the body colour behind a wing: blended from the shoulder sample to the one below. */
+function rowFill(spec) {
+  const top = patch(spec.fill.top), bottom = patch(spec.fill.bottom);
+  const y0 = spec.fill.top[1], y1 = spec.fill.bottom[1];
   const out = new Array(H);
   for (let y = 0; y < H; y++) {
-    let r = 0, g = 0, b = 0, n = 0;
-    for (let k = -3; k <= 3; k++) { const c = cols[y + k]; if (c) { r += c[0]; g += c[1]; b += c[2]; n++; } }
-    out[y] = n ? [r / n, g / n, b / n] : [0, 0, 0];
+    const t = clamp((y - y0) / (y1 - y0), 0, 1);
+    out[y] = [0, 1, 2].map((ch) => top[ch] + (bottom[ch] - top[ch]) * t);
   }
-  return out;
+  return { rows: out, top, bottom };
 }
 
 const body = new Float32Array(owl);
-const layers = { wingLeft: new Float32Array(N * 4), wingRight: new Float32Array(N * 4), eyes: new Float32Array(N * 4) };
-const report = {};
-
-const outline = bodyFit(cfg.bodyFitRows);
-report.outline = { cx: outline.cx, samples: outline.samples, worstResidual: outline.worstResidual, profile: [] };
-for (let y = 104; y <= 352; y += 12) {
-  const e = rowEdges(y);
-  report.outline.profile.push([y, e[0], Math.round(outline.left(y) * 10) / 10, e[1], Math.round(outline.right(y) * 10) / 10]);
-}
+const layers = {
+  wingLeft: new Float32Array(N * 4),
+  wingRight: new Float32Array(N * 4),
+  eyeLeft: new Float32Array(N * 4),
+  eyeRight: new Float32Array(N * 4),
+};
+const report = { fill: {} };
 
 for (const side of ['left', 'right']) {
   const spec = cfg.wings[side];
   const mask = coverage(spec.points);
-  const fill = rowFill(mask, side);
+  const fillSpec = rowFill(spec);
+  const fill = fillSpec.rows;
+  report.fill[side] = { top: fillSpec.top.map(Math.round), bottom: fillSpec.bottom.map(Math.round) };
   const wing = side === 'left' ? layers.wingLeft : layers.wingRight;
   for (let p = 0; p < N; p++) {
     const m = mask[p];
     if (m <= 0) continue;
     const q = p * 4, x = p % W, y = (p - x) / W;
     wing[q] = owl[q]; wing[q + 1] = owl[q + 1]; wing[q + 2] = owl[q + 2]; wing[q + 3] = owl[q + 3] * m;
-    const inside = side === 'left' ? clamp(x + 0.5 - outline.left(y), 0, 1) : clamp(outline.right(y) - x + 0.5, 0, 1);
+    const edge = edgeAt(spec.bodyEdge, y + 0.5);
+    const inside = side === 'left' ? clamp(x + 0.5 - edge, 0, 1) : clamp(edge - x + 0.5, 0, 1);
     const f = fill[y];
 
     // A pixel on the polygon's own antialiased edge, where the owl is opaque:
     // split it EXACTLY rather than blending. Blending left the wing's dark
-    // inner shadow mixed into the fill, 8-12 off at rest along every inner
-    // edge; and where the fitted body edge also crossed the pixel, it left the
-    // owl translucent there. So the body stays opaque under a part-covered
-    // pixel, whatever the fit says — the fit only decides where the wing is
+    // inner shadow mixed into the fill (NOTES §35.5). The body stays opaque
+    // under a part-covered pixel; the edge only decides where the wing is
     // SOLID and the body behind it has to end.
     if (owl[q + 3] >= 0.999 && m < 1) {
       // Mostly body: leave the body as drawn; the wing adds its share of the
@@ -390,7 +372,14 @@ for (const side of ['left', 'right']) {
       if (m < 0.5) continue;
       // Mostly wing: the body under it is the fill, and the wing takes the
       // colour that makes m·wing + (1 − m)·fill come back to the original.
-      for (let ch = 0; ch < 3; ch++) wing[q + ch] = clamp((owl[q + ch] - (1 - m) * f[ch]) / m, 0, 255);
+      const solved = [0, 1, 2].map((ch) => (owl[q + ch] - (1 - m) * f[ch]) / m);
+      // Unless no colour can. A dark outline pixel over a paler fill needs a
+      // wing colour below 0; clamping it left a light line along the wing at
+      // rest — worst 68 on the new sheet's first cut (NOTES §41). Such a pixel
+      // stays as drawn on both layers instead: exact at rest, and one pixel of
+      // it is left behind when the wing lifts.
+      if (solved.some((c) => c < -2 || c > 257)) continue;
+      for (let ch = 0; ch < 3; ch++) wing[q + ch] = clamp(solved[ch], 0, 255);
       body[q] = f[0]; body[q + 1] = f[1]; body[q + 2] = f[2]; body[q + 3] = 1;
       continue;
     }
@@ -416,11 +405,11 @@ function sampleOwl(x, y) {
   return out;
 }
 /**
- * The real centre and radius of an iris, from where the pupil's darkness ends.
+ * The real centre and radius of an iris, from where its darkness ends.
  *
- * Rays start 22px out, past the white highlight, which sits inside the pupil
- * and would otherwise read as the iris ending early. Opposite rays re-centre
- * the estimate: if the left ray is longer than the right, the centre is left.
+ * Rays start past the white highlight, which sits inside the pupil and would
+ * otherwise read as the iris ending early. Opposite rays re-centre the
+ * estimate: if the left ray is longer than the right, the centre is left.
  */
 function measureEye(guess) {
   let cx = guess.cx, cy = guess.cy, radius = 0;
@@ -429,8 +418,8 @@ function measureEye(guess) {
     const len = [];
     for (let k = 0; k < RAYS; k++) {
       const t = (k / RAYS) * Math.PI * 2;
-      let r = 22;
-      for (; r < 60; r += 0.25) {
+      let r = cfg.rayFrom;
+      for (; r < cfg.rayTo; r += 0.25) {
         const s = sampleOwl(cx + r * Math.cos(t), cy + r * Math.sin(t));
         if (0.3 * s[0] + 0.59 * s[1] + 0.11 * s[2] > cfg.irisMaxLuma) break;
       }
@@ -445,13 +434,31 @@ function measureEye(guess) {
     const sorted = len.slice().sort((a, b) => a - b);
     radius = sorted[Math.floor(RAYS * 0.9)];
   }
+  if (radius >= cfg.rayTo - 1) throw new Error('an iris never ended within ' + cfg.rayTo + 'px of ' + guess.cx + ',' + guess.cy);
   return { cx, cy, r: radius + cfg.eyeMargin };
 }
 const eyes = cfg.eyes.map(measureEye);
 report.eyes = eyes.map((e) => ({ cx: Math.round(e.cx * 10) / 10, cy: Math.round(e.cy * 10) / 10, r: Math.round(e.r * 10) / 10 }));
 
-for (const e of eyes) {
+eyes.forEach((e, i) => {
+  const layer = i === 0 ? layers.eyeLeft : layers.eyeRight;
   const ringR = e.r + cfg.ringOffset;
+  // Only the FACE counts as what is behind an eye. Beside the right eye the
+  // ring crosses the beak, and averaging its orange in painted an orange wedge
+  // on the face that showed through every blink (NOTES §41). Samples paler than
+  // the iris edge are face; where a stretch of ring has none, the eye's own
+  // average face colour stands in.
+  const faceLike = (s) => 0.3 * s[0] + 0.59 * s[1] + 0.11 * s[2] > cfg.irisMaxLuma;
+  const faceSum = [0, 0, 0];
+  let faceN = 0;
+  for (let k = 0; k < 72; k++) {
+    const t = (k / 72) * Math.PI * 2;
+    const s = sampleOwl(e.cx + ringR * Math.cos(t), e.cy + ringR * Math.sin(t));
+    if (!faceLike(s)) continue;
+    faceSum[0] += s[0]; faceSum[1] += s[1]; faceSum[2] += s[2]; faceN++;
+  }
+  if (!faceN) throw new Error('no face colour around the eye at ' + Math.round(e.cx) + ',' + Math.round(e.cy));
+  const faceColour = faceSum.map((c) => c / faceN);
   for (let y = Math.floor(e.cy - e.r - 4); y <= Math.ceil(e.cy + e.r + 4); y++) {
     for (let x = Math.floor(e.cx - e.r - 4); x <= Math.ceil(e.cx + e.r + 4); x++) {
       if (x < 0 || y < 0 || x >= W || y >= H) continue;
@@ -459,33 +466,36 @@ for (const e of eyes) {
       const cov = clamp((e.r + cfg.eyeFeather - dd) / cfg.eyeFeather, 0, 1);
       if (cov <= 0) continue;
       const q = (y * W + x) * 4;
-      layers.eyes[q] = owl[q]; layers.eyes[q + 1] = owl[q + 1]; layers.eyes[q + 2] = owl[q + 2];
-      layers.eyes[q + 3] = owl[q + 3] * cov;
+      layer[q] = owl[q]; layer[q + 1] = owl[q + 1]; layer[q + 2] = owl[q + 2];
+      layer[q + 3] = owl[q + 3] * cov;
       // Mostly face: leave the face as drawn — the eye's share is the same colour.
       if (cov < 0.5) continue;
       const theta = Math.atan2(y + 0.5 - e.cy, x + 0.5 - e.cx);
-      const ring = [0, 0, 0];
+      const ringSum = [0, 0, 0];
+      let ringN = 0;
       for (let k = -2; k <= 2; k++) {
         const t = theta + k * 0.12;
         const s = sampleOwl(e.cx + ringR * Math.cos(t), e.cy + ringR * Math.sin(t));
-        ring[0] += s[0] / 5; ring[1] += s[1] / 5; ring[2] += s[2] / 5;
+        if (!faceLike(s)) continue;
+        ringSum[0] += s[0]; ringSum[1] += s[1]; ringSum[2] += s[2]; ringN++;
       }
+      const ring = ringN ? ringSum.map((c) => c / ringN) : faceColour;
       // Mostly eye: the face behind is the ring colour, and the eye takes the
       // colour that makes cov·eye + (1 − cov)·ring come back to the original.
       for (let ch = 0; ch < 3; ch++) {
-        if (cov < 1) layers.eyes[q + ch] = clamp((owl[q + ch] - (1 - cov) * ring[ch]) / cov, 0, 255);
+        if (cov < 1) layer[q + ch] = clamp((owl[q + ch] - (1 - cov) * ring[ch]) / cov, 0, 255);
         body[q + ch] = ring[ch];
       }
     }
   }
-}
+});
 
 // 7. At rest the layers must reproduce the owl. Measured, not assumed.
 //
 // Non-finite values first, and loudly. NaN fails every comparison, so a layer
-// full of it sails through a "worst difference" check as a pass — which is
-// exactly what the first, degenerate outline fit did.
-for (const [name, arr] of [['body', body], ['wingLeft', layers.wingLeft], ['wingRight', layers.wingRight], ['eyes', layers.eyes]]) {
+// full of it sails through a "worst difference" check as a pass (NOTES §35.5).
+const allLayers = [['body', body], ['wingLeft', layers.wingLeft], ['wingRight', layers.wingRight], ['eyeLeft', layers.eyeLeft], ['eyeRight', layers.eyeRight]];
+for (const [name, arr] of allLayers) {
   for (let i = 0; i < arr.length; i++) {
     if (!Number.isFinite(arr[i])) throw new Error(name + ' has a non-finite value at pixel ' + Math.floor(i / 4) + ' — something upstream divided by zero');
   }
@@ -505,7 +515,8 @@ for (const [name, arr] of [['body', body], ['wingLeft', layers.wingLeft], ['wing
     let c = px(body, q);
     c = over(px(layers.wingLeft, q), c);
     c = over(px(layers.wingRight, q), c);
-    c = over(px(layers.eyes, q), c);
+    c = over(px(layers.eyeLeft, q), c);
+    c = over(px(layers.eyeRight, q), c);
     const diff = Math.max(Math.abs(c[0] - owl[q]), Math.abs(c[1] - owl[q + 1]), Math.abs(c[2] - owl[q + 2]), 255 * Math.abs(c[3] - 1));
     counted++;
     if (diff > worst) worst = diff;
@@ -519,7 +530,7 @@ for (const [name, arr] of [['body', body], ['wingLeft', layers.wingLeft], ['wing
 
 // 8. One crop for every layer, so they stay registered.
 let minX = W, minY = H, maxX = -1, maxY = -1;
-for (const arr of [body, layers.wingLeft, layers.wingRight, layers.eyes]) {
+for (const [, arr] of allLayers) {
   for (let p = 0; p < N; p++) {
     if (arr[p * 4 + 3] <= 0.03) continue;
     const x = p % W, y = (p - x) / W;
@@ -547,7 +558,8 @@ const canvases = {
   body: toCanvas(body),
   wingLeft: toCanvas(layers.wingLeft),
   wingRight: toCanvas(layers.wingRight),
-  eyes: toCanvas(layers.eyes),
+  eyeLeft: toCanvas(layers.eyeLeft),
+  eyeRight: toCanvas(layers.eyeRight),
 };
 
 const rig = {
@@ -555,45 +567,46 @@ const rig = {
   height: TH,
   wingLeftPivot: [(cfg.wings.left.pivot[0] - minX) / TW, (cfg.wings.left.pivot[1] - minY) / TH],
   wingRightPivot: [(cfg.wings.right.pivot[0] - minX) / TW, (cfg.wings.right.pivot[1] - minY) / TH],
-  eyeLine: ((eyes[0].cy + eyes[1].cy) / 2 - minY) / TH,
+  eyeLeftLine: (eyes[0].cy - minY) / TH,
+  eyeRightLine: (eyes[1].cy - minY) / TH,
   eyeRadius: ((eyes[0].r + eyes[1].r) / 2) / TW,
 };
 
-// 9. Debug sheet: at rest, body alone, wings out + blink, wave + glance.
+// 9. Debug sheet: at rest, body alone, wings out + blink, wave, full wave + glance.
 let debug = null;
 if (cfg.debug) {
-  const scale = 1.5, padX = 70, padY = 20;
+  const scale = 1.5, padX = 90, padY = 30;
   const panelW = TW * scale + padX * 2, panelH = TH * scale + padY * 2;
-  const all = ['body', 'wingLeft', 'wingRight', 'eyes'];
+  const all = ['body', 'eyeLeft', 'eyeRight', 'wingLeft', 'wingRight'];
   const poses = [
     { wl: 0, wr: 0, blink: 1, look: [0, 0], layers: all },
     { wl: 0, wr: 0, blink: 1, look: [0, 0], layers: ['body'] },
-    { wl: 30, wr: -30, blink: 0.12, look: [0, 0], layers: all },
-    { wl: 0, wr: -60, blink: 1, look: [3, -3], layers: all },
-    { wl: 0, wr: -140, blink: 1, look: [3, -3], layers: all },
+    { wl: 35, wr: 35, blink: 0.1, look: [0, 0], layers: all },
+    { wl: 0, wr: 60, blink: 1, look: [4, -4], layers: all },
+    { wl: 0, wr: 135, blink: 1, look: [4, -4], layers: all },
   ];
   const sheet = makeCanvas(panelW * poses.length, panelH * 2);
   const g = sheet.getContext('2d');
   const grounds = ['#0e191e', '#f4f2ed'];
   const pivotPx = (pv) => [pv[0] * TW, pv[1] * TH];
-  const pad = 0;
   grounds.forEach((ground, row) => {
     poses.forEach((pose, col) => {
       g.save();
       g.fillStyle = ground;
       g.fillRect(col * panelW, row * panelH, panelW, panelH);
-      g.translate(col * panelW + padX + pad, row * panelH + padY + pad);
+      g.translate(col * panelW + padX, row * panelH + padY);
       g.scale(scale, scale);
       for (const name of pose.layers) {
         g.save();
         if (name === 'wingLeft' || name === 'wingRight') {
           const pv = pivotPx(name === 'wingLeft' ? rig.wingLeftPivot : rig.wingRightPivot);
           g.translate(pv[0], pv[1]);
-          g.rotate(((name === 'wingLeft' ? pose.wl : pose.wr) * Math.PI) / 180);
+          // Positive is OUTWARD for both wings, as in the app.
+          g.rotate(((name === 'wingLeft' ? pose.wl : -pose.wr) * Math.PI) / 180);
           g.translate(-pv[0], -pv[1]);
         }
-        if (name === 'eyes') {
-          const ey = rig.eyeLine * TH;
+        if (name === 'eyeLeft' || name === 'eyeRight') {
+          const ey = (name === 'eyeLeft' ? rig.eyeLeftLine : rig.eyeRightLine) * TH;
           g.translate(pose.look[0], ey + pose.look[1]);
           g.scale(1, pose.blink);
           g.translate(0, -ey);
@@ -616,7 +629,8 @@ const OUTPUT: Record<string, string> = {
   body: 'nomi-body.webp',
   wingLeft: 'nomi-wing-left.webp',
   wingRight: 'nomi-wing-right.webp',
-  eyes: 'nomi-eyes.webp',
+  eyeLeft: 'nomi-eye-left.webp',
+  eyeRight: 'nomi-eye-right.webp',
 };
 
 async function main() {
@@ -624,7 +638,7 @@ async function main() {
   const debugAt = args.indexOf('--debug');
   const debugDir = debugAt === -1 ? null : args[debugAt + 1];
   const positional = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--debug');
-  const sheet = positional[0] ?? join('design-reference', 'nomi-different-interactions.png');
+  const sheet = positional[0] ?? join('design-reference', 'nomi-updated-look-interactions-references.png');
 
   if (!existsSync(sheet)) {
     throw new Error(
