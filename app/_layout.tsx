@@ -67,9 +67,10 @@ function useResetCacheOnUserChange() {
  *
  * On a cached reload the app knows who is signed in within a few tens of
  * milliseconds, and a splash that blinks for one frame reads as a glitch, not
- * as Nomi saying hello.
+ * as Nomi saying hello. 1400ms since the splash started moving (NOTES §43): long
+ * enough for one whole wave or gesture, which peaks a little after a second.
  */
-const SPLASH_MIN_MS = 700;
+const SPLASH_MIN_MS = 1400;
 
 /**
  * Fade out the splash in `public/index.html` (NOTES §42) once the app knows

@@ -76,6 +76,10 @@ export interface Page {
   fill(value: string): Promise<void>;
   /** Press the control whose visible label matches exactly, case-insensitively. */
   click(label: string): Promise<void>;
+  /** Type as a keyboard does, where the focus is — what reaches an editor's shortcuts. */
+  type(value: string): Promise<void>;
+  /** Press Enter, Backspace or Tab where the focus is. */
+  press(key: 'Enter' | 'Backspace' | 'Tab'): Promise<void>;
   screenshot(file: string): Promise<void>;
   /** console.* and uncaught exceptions, in order. */
   logs(): string[];
@@ -317,6 +321,34 @@ export async function openPage(options: {
   }
 
   /**
+   * Type as a keyboard does: a key event per character, where the focus is.
+   *
+   * `fill` sets a field's value, and the note editor is not a field (NOTES
+   * §43). Setting text from page code — `execCommand('insertText')` — put the
+   * words in but never ran the editor's shortcuts, so "- " stayed a dash and
+   * a probe could not tell a broken shortcut from a harness that cannot type.
+   */
+  async function type(value: string): Promise<void> {
+    await on('Emulation.setFocusEmulationEnabled', { enabled: true });
+    for (const ch of value) {
+      await on('Input.dispatchKeyEvent', { type: 'keyDown', key: ch, text: ch, unmodifiedText: ch });
+      await on('Input.dispatchKeyEvent', { type: 'keyUp', key: ch });
+    }
+  }
+
+  const KEYS = {
+    Enter: { code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' },
+    Backspace: { code: 'Backspace', windowsVirtualKeyCode: 8 },
+    Tab: { code: 'Tab', windowsVirtualKeyCode: 9 },
+  } as const;
+
+  async function press(key: keyof typeof KEYS): Promise<void> {
+    await on('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await on('Input.dispatchKeyEvent', { type: 'keyDown', key, ...KEYS[key] });
+    await on('Input.dispatchKeyEvent', { type: 'keyUp', key, code: KEYS[key].code, windowsVirtualKeyCode: KEYS[key].windowsVirtualKeyCode });
+  }
+
+  /**
    * Every picture on the page has finished loading (or has failed).
    *
    * Capturing before this is true produces a screenshot with an empty box
@@ -471,6 +503,8 @@ export async function openPage(options: {
     waitFor,
     fill,
     click,
+    type,
+    press,
     screenshot,
     logs: () => logs,
     close: async () => {

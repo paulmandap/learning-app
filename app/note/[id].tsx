@@ -1,23 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { TextInput, View } from 'react-native';
+import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Body, Button, Card, Field, LoadingState, Notice, Screen } from '../../src/ui/components';
-import { INPUT_FONT_SIZE, space, useTheme } from '../../src/ui/theme';
-import { deleteNote, fetchNote, saveNote } from '../../src/data/notes';
+import { RichNoteEditor } from '../../src/ui/rich-note-editor';
+import { deleteNote, fetchNote, noteImageUrls, saveNote, uploadNoteImage } from '../../src/data/notes';
+import { canMakeCards, describeSaved, MIN_WORDS_FOR_CARDS, noteWordCount } from '../../src/core/notes';
 import {
-  canMakeCards,
-  describeSaved,
-  MAX_NOTE_CHARS,
-  MIN_WORDS_FOR_CARDS,
-  noteWordCount,
-} from '../../src/core/notes';
+  docToText,
+  forStorage,
+  imagePaths,
+  textToDoc,
+  withImageSources,
+  type RichDoc,
+} from '../../src/core/rich-note';
 
 /** How long after the last keystroke a save fires. */
 const SAVE_DEBOUNCE_MS = 1200;
 
 /**
- * Writing a note (Phase 10).
+ * Writing a note (Phase 10), formatted and with pictures since NOTES §43.
  *
  * ## Saving is the whole design
  *
@@ -34,12 +36,20 @@ const SAVE_DEBOUNCE_MS = 1200;
  * The debounce is a ref rather than state so a keystroke does not re-render the
  * editor to reschedule a timer — at speed that is the difference between typing
  * and fighting the field.
+ *
+ * ## Formatting and pictures
+ *
+ * The editor (`src/ui/rich-note-editor.web.tsx`) hands back the whole document
+ * on every change. Each save writes it as `content`, with pictures by path only,
+ * and writes its plain text as `body` — so the word count below, the Notes list
+ * and "Make flashcards" all keep reading what they always read. A note written
+ * before the editor opens from its `body`, and gains `content` the first time
+ * it is edited.
  */
 export default function NoteEditor() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const noteId = String(id);
   const router = useRouter();
-  const t = useTheme();
   const queryClient = useQueryClient();
 
   const { data: note, isLoading } = useQuery({
@@ -49,25 +59,34 @@ export default function NoteEditor() {
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [pictures, setPictures] = useState(0);
+  /** The document the editor opens with, pictures linked. Null until those links are ready. */
+  const [openingDoc, setOpeningDoc] = useState<RichDoc | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [saveError, setSaveError] = useState(false);
+  const [pictureError, setPictureError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tick, setTick] = useState(0);
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // What is actually on screen, readable from a callback without re-creating
   // it on every keystroke — the unmount save reads this, not stale state.
-  const latest = useRef({ title: '', body: '' });
+  const latest = useRef<{ title: string; body: string; content: RichDoc | null }>({ title: '', body: '', content: null });
   const loaded = useRef(false);
 
   // Fill the fields once. Re-filling on every refetch would overwrite what
   // someone is typing with what the server last heard.
   useEffect(() => {
     if (!note || loaded.current) return;
+    loaded.current = true;
     setTitle(note.title);
     setBody(note.body);
-    latest.current = { title: note.title, body: note.body };
-    loaded.current = true;
+    latest.current = { title: note.title, body: note.body, content: note.content };
+
+    const stored = note.content ?? textToDoc(note.body);
+    const paths = imagePaths(stored);
+    setPictures(paths.length);
+    void noteImageUrls(paths).then((urls) => setOpeningDoc(withImageSources(stored, urls)));
   }, [note]);
 
   const save = useCallback(async () => {
@@ -88,14 +107,32 @@ export default function NoteEditor() {
     }
   }, [noteId, queryClient]);
 
-  function edited(next: { title?: string; body?: string }) {
-    latest.current = { ...latest.current, ...next };
-    if (next.title !== undefined) setTitle(next.title);
-    if (next.body !== undefined) setBody(next.body);
-
+  const scheduleSave = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => void save(), SAVE_DEBOUNCE_MS);
+  }, [save]);
+
+  function editedTitle(next: string) {
+    latest.current = { ...latest.current, title: next };
+    setTitle(next);
+    scheduleSave();
   }
+
+  const editedDoc = useCallback(
+    (doc: RichDoc) => {
+      const content = forStorage(doc);
+      const text = docToText(content);
+      latest.current = { ...latest.current, body: text, content };
+      setBody(text);
+      setPictures(imagePaths(content).length);
+      scheduleSave();
+    },
+    [scheduleSave],
+  );
+
+  const addImage = useCallback((image: Blob) => uploadNoteImage(noteId, image), [noteId]);
+
+  const pictureProblem = useCallback((message: string) => setPictureError(message), []);
 
   // Leaving the screen saves immediately rather than losing the pending debounce
   // — closing the tab mid-sentence is the normal way a lecture ends.
@@ -119,7 +156,11 @@ export default function NoteEditor() {
       if (timer.current) clearTimeout(timer.current);
       await deleteNote(noteId);
       await queryClient.invalidateQueries({ queryKey: ['notes'] });
-      router.back();
+      // Opened straight from a link or after a reload there is nothing to go
+      // back to, and `back()` did nothing: the note was gone and its screen
+      // stayed. Found by the §43 probe.
+      if (router.canGoBack()) router.back();
+      else router.replace('/notes');
     } catch {
       loaded.current = true;
       setSaveError(true);
@@ -146,7 +187,8 @@ export default function NoteEditor() {
   }
 
   const words = noteWordCount(body);
-  const ready = canMakeCards(body);
+  // Pictures are enough on their own: each one is read for cards.
+  const ready = canMakeCards(body) || pictures > 0;
   // `tick` is never read for its value: the setState alone re-renders, which is
   // what makes "Saved 3 minutes ago" age without a per-second counter.
   void tick;
@@ -157,38 +199,24 @@ export default function NoteEditor() {
       <Field
         label="Title"
         value={title}
-        onChangeText={(v) => edited({ title: v })}
+        onChangeText={editedTitle}
         placeholder="What is this about?"
         maxLength={200}
       />
 
-      <TextInput
-        value={body}
-        onChangeText={(v) => edited({ body: v })}
-        placeholder="Start typing…"
-        placeholderTextColor={t.textMuted}
-        multiline
-        maxLength={MAX_NOTE_CHARS}
-        // Landing straight in the body: the title is optional and the first
-        // line of the note becomes one anyway (see noteTitle).
-        autoFocus
-        style={{
-          borderWidth: 1,
-          borderColor: t.border,
-          backgroundColor: t.bg,
-          color: t.text,
-          borderRadius: 8,
-          padding: space.md,
-          // Tall enough to hold a lecture's worth without the page jumping
-          // every few lines.
-          minHeight: 320,
-          // Never below 16: iOS zooms the page when a smaller field is focused
-          // and does not zoom back. See INPUT_FONT_SIZE.
-          fontSize: INPUT_FONT_SIZE,
-          lineHeight: 24,
-          textAlignVertical: 'top',
-        }}
-      />
+      {openingDoc ? (
+        <RichNoteEditor
+          initialDoc={openingDoc}
+          onChange={editedDoc}
+          onAddImage={addImage}
+          onError={pictureProblem}
+          // Landing straight in the body: the title is optional and the first
+          // line of the note becomes one anyway (see noteTitle).
+          autoFocus
+        />
+      ) : (
+        <LoadingState />
+      )}
 
       {/* Two quiet facts, in the order they are wanted: is my work safe, and
           have I written enough to make cards yet. */}
@@ -196,6 +224,7 @@ export default function NoteEditor() {
         <Body muted>{savedLabel ?? ' '}</Body>
         <Body muted>
           {words} word{words === 1 ? '' : 's'}
+          {pictures > 0 ? ` · ${pictures} picture${pictures === 1 ? '' : 's'}` : ''}
         </Body>
       </View>
 
@@ -205,6 +234,7 @@ export default function NoteEditor() {
           keep typing; it will try again.
         </Notice>
       ) : null}
+      {pictureError ? <Notice tone="error">{pictureError}</Notice> : null}
 
       <Button
         label="Make flashcards from this"
@@ -220,7 +250,7 @@ export default function NoteEditor() {
       {!ready ? (
         <Body muted>
           Write about {Math.max(1, MIN_WORDS_FOR_CARDS - words)} more word
-          {MIN_WORDS_FOR_CARDS - words === 1 ? '' : 's'} and I can turn this into cards.
+          {MIN_WORDS_FOR_CARDS - words === 1 ? '' : 's'}, or add a picture, and I can turn this into cards.
         </Body>
       ) : null}
 
@@ -238,7 +268,7 @@ export default function NoteEditor() {
         <Card>
           <Body>Delete this note?</Body>
           <Body muted>
-            The note goes for good. Any cards you already made from it stay where they are.
+            The note and its pictures go for good. Any cards you already made from it stay where they are.
           </Body>
           <Button label="Yes, delete it" onPress={removeNote} />
           <Button label="Keep it" variant="secondary" onPress={() => setConfirmDelete(false)} />

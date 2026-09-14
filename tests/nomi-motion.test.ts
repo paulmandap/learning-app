@@ -144,11 +144,31 @@ describe('one-shots', () => {
 });
 
 describe('the states keep their roles', () => {
-  it('studying is idle at half amplitude, not a second set of numbers', () => {
-    const idle = motionFor('idle').tracks.find((t) => t.channel === 'lift')!;
-    const studying = motionFor('studying').tracks.find((t) => t.channel === 'lift')!;
-    expect(studying.frames.map((f) => f.at)).toEqual(idle.frames.map((f) => f.at));
-    studying.frames.forEach((f, i) => expect(f.value).toBeCloseTo(idle.frames[i]!.value / 2, 10));
+  it('studying reads — eyes down on the page, moving along a line, with a slow nod (NOTES §43)', () => {
+    // It was idle at half amplitude with the eyes a touch lower, and the owner
+    // never noticed it. The breathing is still idle's, halved, not a copy.
+    const studying = motionFor('studying');
+    const values = (channel: string) => studying.tracks.find((t) => t.channel === channel)!.frames.map((f) => f.value);
+    expect(Math.min(...values('lookY'))).toBeGreaterThanOrEqual(0.25);
+    expect(Math.max(...values('lookX')) - Math.min(...values('lookX'))).toBeGreaterThanOrEqual(0.3);
+    expect(Math.max(...values('tilt').map(Math.abs))).toBeGreaterThan(0);
+    const idleLift = motionFor('idle').tracks.find((t) => t.channel === 'lift')!.frames;
+    values('lift').forEach((v, i) => expect(v).toBeCloseTo(idleLift[i]!.value / 2, 10));
+  });
+
+  it('explaining raises a wing to make its point — pointing, not waving (NOTES §43)', () => {
+    const wing = motionFor('explaining').tracks.find((t) => t.channel === 'wingRight')!.frames.map((f) => f.value);
+    expect(Math.max(...wing)).toBeGreaterThanOrEqual(45);
+    expect(Math.max(...wing)).toBeLessThan(motionFor('greeting').tracks.find((t) => t.channel === 'wingRight')!.frames.reduce((m, f) => Math.max(m, f.value), 0));
+  });
+
+  it('success hops with both wings out, and encouraging nods — big enough to be seen (NOTES §43)', () => {
+    const success = motionFor('success');
+    expect(Math.min(...success.tracks.find((t) => t.channel === 'lift')!.frames.map((f) => f.value))).toBeLessThanOrEqual(-0.05);
+    for (const wing of ['wingLeft', 'wingRight']) {
+      expect(Math.max(...success.tracks.find((t) => t.channel === wing)!.frames.map((f) => f.value))).toBeGreaterThanOrEqual(30);
+    }
+    expect(motionFor('encouraging').tracks.find((t) => t.channel === 'lift')!.frames.filter((f) => f.value > 0)).toHaveLength(2);
   });
 
   it('thinking looks up and away, and blinks more slowly than idle', () => {

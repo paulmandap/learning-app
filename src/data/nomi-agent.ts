@@ -44,7 +44,7 @@ export async function carryOut(action: NomiAction, input: { apiKey: string }): P
       const { setId } = await startSet({
         setId: adding ? action.setId : undefined,
         title: adding ? action.setTitle : action.title,
-        source: { text: action.notes },
+        sources: [{ text: action.notes }],
         count: action.count,
         apiKey: input.apiKey,
       });
@@ -61,7 +61,7 @@ export async function carryOut(action: NomiAction, input: { apiKey: string }): P
       await saveNote({ id: note.id, title: action.title, body });
       const { setId } = await startSet({
         title: action.title,
-        source: { text: body },
+        sources: [{ text: body }],
         count: action.count,
         apiKey: input.apiKey,
       });

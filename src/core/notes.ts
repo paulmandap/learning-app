@@ -37,6 +37,25 @@ export function canMakeCards(body: string): boolean {
 }
 
 /**
+ * A line of a note's text without the marks the editor writes into `body`
+ * (NOTES §43): "# " before a heading, "- " or "1. " before a list item, "> "
+ * before a quote. A name or a preview reads the words, not the marks — found
+ * when a note whose first line was a heading was listed as "# Photosynthesis".
+ *
+ * "3.14 is roughly pi" and "*emphasis*" are left alone: a mark is followed by
+ * a space.
+ */
+export function withoutMarks(line: string): string {
+  return line
+    .trim()
+    .replace(/^#{1,6}(\s+|$)/, '')
+    .replace(/^>(\s+|$)/, '')
+    .replace(/^[-*•](\s+|$)(\[[ xX]\]\s+)?/, '')
+    .replace(/^\d+[.)](\s+|$)/, '')
+    .trim();
+}
+
+/**
  * What to call a note in a list.
  *
  * Falls back through: the title the student typed, then the note's own first
@@ -51,7 +70,7 @@ export function noteTitle(note: { title: string; body: string }): string {
 
   const firstLine = note.body
     .split('\n')
-    .map((line) => line.trim())
+    .map(withoutMarks)
     .find((line) => line.length > 0);
 
   if (!firstLine) return 'Untitled note';
@@ -66,7 +85,7 @@ export function noteTitle(note: { title: string; body: string }): string {
  * heading does not show that heading twice.
  */
 export function notePreview(note: { title: string; body: string }): string {
-  const lines = note.body.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+  const lines = note.body.split('\n').map(withoutMarks).filter((l) => l.length > 0);
   // If the title came from the body's first line, preview from the second.
   const skipFirst = note.title.trim().length === 0 && lines.length > 0;
   const rest = (skipFirst ? lines.slice(1) : lines).join(' ');

@@ -2,6 +2,7 @@ import { supabase, type Db } from './supabase';
 import type { Plan } from '../core/planner';
 import { isMissingColumn, isMissingTable } from '../core/db-errors';
 import { removeAvatarPhotos } from './profile';
+import { removeAllNoteImages } from './notes';
 
 /**
  * Study sets. RLS scopes every query to the signed-in user, so nothing here
@@ -179,6 +180,9 @@ export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
   } catch (err) {
     console.warn(`[sets] could not remove profile pictures: ${err instanceof Error ? err.message : String(err)}`);
   }
+  // And the pictures in notes, in their own folder (NOTES §43). Best effort
+  // inside, so it never throws and never stops the rest of this.
+  await removeAllNoteImages();
 
   const cleared = { gemini_api_key: null, display_name: null, avatar: null };
   let { error } = await supabase.from('profiles').update(cleared).eq('id', id);

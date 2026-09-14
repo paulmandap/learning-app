@@ -57,10 +57,19 @@
       }
     </style>
 
-    <!-- The splash (NOTES §42): Nomi, painted from this file alone, before the
-         JavaScript bundle has loaded — which is most of a cold start on a phone.
-         app/_layout.tsx fades it out once the app knows who is signed in.
-         The picture is made by scripts/make-splash.ts from Nomi's own layers.
+    <!-- The splash (NOTES §42, §43): Nomi, painted from this file alone, before
+         the JavaScript bundle has loaded — which is most of a cold start on a
+         phone — and DOING something: waving, studying, thinking or explaining,
+         a different one from last time on every load. Never idle; the owner
+         asked for Nomi being interactive.
+
+         The five layers in /nomi/ and the rig block below are written by
+         scripts/make-splash.ts from Nomi's own layers and NOMI_RIG, so the
+         splash owl moves about the same pivots as the app's. The motions follow
+         src/core/nomi-motion.ts: a wing positive-outward, the right wing turning
+         the other way, eyes blinking toward their own lines.
+
+         app/_layout.tsx fades the splash once the app knows who is signed in.
          Backgrounds match the body's above; keep them in step. -->
     <style id="splash-style">
       #splash {
@@ -75,11 +84,24 @@
         background-color: #f7f7f8;
         transition: opacity 280ms ease-out;
       }
-      #splash img {
-        width: 132px;
-        height: 177px;
-        animation: nomi-splash-float 2.4s ease-in-out infinite;
+      #splash .nomi-in { animation: nomi-in 360ms ease-out both; }
+      #splash .nomi {
+        position: relative;
+        width: var(--nomi-width);
+        height: var(--nomi-height);
+        transform-origin: 50% 100%;
       }
+      #splash .nomi img {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #splash .wing-left { transform-origin: var(--wing-left-x) var(--wing-left-y); }
+      #splash .wing-right { transform-origin: var(--wing-right-x) var(--wing-right-y); }
+      #splash .eye-left { transform-origin: 50% var(--eye-left-line); }
+      #splash .eye-right { transform-origin: 50% var(--eye-right-line); }
       #splash .name {
         font: 600 30px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
         color: #4a2f22;
@@ -88,27 +110,121 @@
         opacity: 0;
         pointer-events: none;
       }
-      @keyframes nomi-splash-float {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-6px); }
+
+      @keyframes nomi-in {
+        from { opacity: 0; transform: translateY(10px) scale(0.92); }
+        to { opacity: 1; transform: none; }
       }
+      @keyframes nomi-blink {
+        0%, 88%, 100% { transform: scaleY(1); }
+        91% { transform: scaleY(0.1); }
+      }
+
+      /* Greeting: one wave, twice over, the way the app's greeting waves. */
+      #splash.v-greeting .wing-right { animation: nomi-wave 2.4s ease-in-out infinite; }
+      #splash.v-greeting .eye-left,
+      #splash.v-greeting .eye-right { animation: nomi-blink 2.4s linear infinite; }
+      @keyframes nomi-wave {
+        0%, 12% { transform: rotate(0deg); }
+        28% { transform: rotate(-135deg); }
+        38% { transform: rotate(-112deg); }
+        48% { transform: rotate(-135deg); }
+        64%, 100% { transform: rotate(0deg); }
+      }
+
+      /* Studying: eyes down on the page, a slow reading nod, a blink between lines. */
+      #splash.v-studying .nomi { animation: nomi-nod 3.2s ease-in-out infinite; }
+      #splash.v-studying .eye-left,
+      #splash.v-studying .eye-right { animation: nomi-read 3.2s ease-in-out infinite; }
+      @keyframes nomi-nod {
+        0%, 100% { transform: rotate(0deg) translateY(0); }
+        30% { transform: rotate(1.5deg) translateY(2px); }
+        60% { transform: rotate(-1deg) translateY(1px); }
+      }
+      @keyframes nomi-read {
+        0% { transform: translate(calc(var(--eye-radius) * -0.15), calc(var(--eye-radius) * 0.35)) scaleY(1); }
+        45% { transform: translate(calc(var(--eye-radius) * 0.2), calc(var(--eye-radius) * 0.35)) scaleY(1); }
+        58% { transform: translate(calc(var(--eye-radius) * 0.2), calc(var(--eye-radius) * 0.35)) scaleY(1); }
+        61% { transform: translate(calc(var(--eye-radius) * 0.2), calc(var(--eye-radius) * 0.35)) scaleY(0.1); }
+        64% { transform: translate(calc(var(--eye-radius) * 0.2), calc(var(--eye-radius) * 0.35)) scaleY(1); }
+        100% { transform: translate(calc(var(--eye-radius) * -0.15), calc(var(--eye-radius) * 0.35)) scaleY(1); }
+      }
+
+      /* Thinking: a slow head tilt, eyes up and away. */
+      #splash.v-thinking .nomi { animation: nomi-tilt 2.8s ease-in-out infinite; }
+      #splash.v-thinking .eye-left,
+      #splash.v-thinking .eye-right { animation: nomi-ponder 2.8s ease-in-out infinite; }
+      @keyframes nomi-tilt {
+        0%, 100% { transform: rotate(0deg); }
+        25% { transform: rotate(-4deg); }
+        75% { transform: rotate(4deg); }
+      }
+      @keyframes nomi-ponder {
+        0%, 80%, 100% { transform: translate(calc(var(--eye-radius) * 0.22), calc(var(--eye-radius) * -0.22)) scaleY(1); }
+        84% { transform: translate(calc(var(--eye-radius) * 0.22), calc(var(--eye-radius) * -0.22)) scaleY(0.1); }
+        88% { transform: translate(calc(var(--eye-radius) * 0.22), calc(var(--eye-radius) * -0.22)) scaleY(1); }
+      }
+
+      /* Explaining: a wing raised to make a point, a small lean in as it lands. */
+      #splash.v-explaining .wing-right { animation: nomi-point 2.2s ease-in-out infinite; }
+      #splash.v-explaining .nomi { animation: nomi-lean 2.2s ease-in-out infinite; }
+      #splash.v-explaining .eye-left,
+      #splash.v-explaining .eye-right { animation: nomi-blink 2.2s linear infinite; }
+      @keyframes nomi-point {
+        0%, 10% { transform: rotate(0deg); }
+        26% { transform: rotate(-58deg); }
+        40% { transform: rotate(-42deg); }
+        54% { transform: rotate(-58deg); }
+        76%, 100% { transform: rotate(0deg); }
+      }
+      @keyframes nomi-lean {
+        0%, 10%, 76%, 100% { transform: scale(1); }
+        26% { transform: scale(1.04); }
+      }
+
       @media (prefers-color-scheme: dark) {
         #splash { background-color: #111318; }
         #splash .name { color: #f2e3cc; }
       }
       @media (prefers-reduced-motion: reduce) {
-        #splash img { animation: none; }
-        #splash { transition: none; }
+        #splash *, #splash { animation: none !important; transition: none !important; }
       }
     </style>
+    <!-- NOMI SPLASH RIG START: written by scripts/make-splash.ts, do not edit by hand -->
+    <style id="splash-rig">
+      #splash { --nomi-width: 132px; --nomi-height: 177px; --wing-left-x: 17.71%; --wing-left-y: 57.61%; --wing-right-x: 79.84%; --wing-right-y: 63.29%; --eye-left-line: 33.55%; --eye-right-line: 40.55%; --eye-radius: 18.43px; }
+    </style>
+    <!-- NOMI SPLASH RIG END -->
   </head>
 
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="splash" aria-hidden="true">
-      <img src="/nomi-splash.webp" alt="" width="132" height="177" />
+      <div class="nomi-in">
+        <div class="nomi">
+          <img class="body" src="/nomi/body.webp" alt="" />
+          <img class="eye-left" src="/nomi/eye-left.webp" alt="" />
+          <img class="eye-right" src="/nomi/eye-right.webp" alt="" />
+          <img class="wing-left" src="/nomi/wing-left.webp" alt="" />
+          <img class="wing-right" src="/nomi/wing-right.webp" alt="" />
+        </div>
+      </div>
       <div class="name">Nomi</div>
     </div>
+    <!-- Which one this load: any variant but the last one shown. Plain script,
+         run as the page parses, so the choice is made before the first paint.
+         The list is SPLASH_VARIANTS in src/core/splash.ts. -->
+    <script>
+      (function () {
+        var variants = ['greeting', 'studying', 'thinking', 'explaining'];
+        var last = null;
+        try { last = localStorage.getItem('nomi-splash-last'); } catch (e) {}
+        var choices = variants.filter(function (v) { return v !== last; });
+        var pick = choices[Math.floor(Math.random() * choices.length)];
+        try { localStorage.setItem('nomi-splash-last', pick); } catch (e) {}
+        document.getElementById('splash').className = 'v-' + pick;
+      })();
+    </script>
     <div id="root"></div>
 
     <!-- A white screen tells you nothing. If the app fails to start, show why.

@@ -5768,6 +5768,184 @@ the two probes above against the live database, before and after · the splash
 rendered alone and checked in the built app. **Not deployed.**
 
 
+## 43. Round eight: a notebook like Notion with pictures, a splash that moves, and Nomi seen reacting (2026-09-14)
+
+The owner deployed §42 and answered §42.4: a real editor (*"go with A"*), and
+pictures in notes together with cards made from them. Two more asks came with
+it: the splash should animate — *"different animations everytime it loads up?
+don't do idle"* — and *"i never see nomi doing the interactions like explaining,
+encouraging, success, studying/focused."* Asked where Nomi should celebrate, they
+chose **the end of a deck or quiz**; asked whether the quiet motions should be
+made clearer, **yes**.
+
+### 43.1 Notes with formatting: Tiptap, fetched when a note opens
+
+**A dependency, so measured first** (HANDOFF). Tiptap 3.31.3 — MIT, ProseMirror
+underneath: `@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`,
+`@tiptap/extension-image`, `@tiptap/extensions`. The alternative, a toolbar that
+writes markdown into the plain box, shows `**bold**` as asterisks and cannot put
+a picture in the text; the owner chose the editor.
+
+```
+                                   entry file (every start)     editor file (first note opened)
+before                             2255 KB   558 KB compressed   —
+Tiptap imported directly           2757 KB   704 KB  (+26%)      —
+Tiptap fetched with import()       2268 KB   560 KB  (+2 KB)     492 KB   145 KB
+```
+
+So `src/ui/rich-note-editor.web.tsx` only fetches `tiptap-note-editor.tsx`, and
+`tests/screens.test.ts` fails an ordinary import of either Tiptap or that file.
+If the file will not download — offline, or the app left open across an update,
+so the file name it asks for is gone — it says so with "Try again". It does NOT
+fall back to a plain box, which would save the note without its pictures.
+
+**What is stored.** `notes.content` (0018) is the editor's own document. `body`
+stays, written from it on every save by `docToText` (`src/core/rich-note.ts`):
+headings as `# `, bullets as `- `, numbers as `1. `, quotes as `> ` — the shapes
+the planner already reads — so cards, the Notes list, word counts and Nomi keep
+reading exactly what they read. A note from before opens from `body` through
+`textToDoc` and gains `content` the first time it is edited.
+
+**Pictures** are kept by path (`<user>/<note>/image-<time>.jpg`, private bucket
+`note-images`), shrunk on the phone to 1600px JPEG first (`src/ui/shrink-image.ts`),
+up to 12 a note; paste and drop add them too. Links are signed for an hour when
+the note opens and stripped before every save (`forStorage`), so a saved note
+never holds a link that expires. Deleting a note removes its pictures; Delete my
+data removes them all.
+
+**Before 0018:** reading or saving `content` is refused as a missing column
+(42703 on a read, PGRST204 on a write), retried without it and logged once, so
+the words save; a picture says "Pictures in notes aren't switched on yet."
+
+The 50,000-character ceiling the plain box had is kept (`CharacterCount`). The
+non-web `rich-note-editor.tsx` is a plain box so a native build still compiles;
+it cannot show pictures, and a native app would need a real editor first.
+
+### 43.2 Cards from a note's pictures — after fixing how pages are numbered
+
+"Make flashcards" from a note now reads its text and then **each picture as its
+own image document** (`startSet` takes `sources`). A card made from a picture
+shows that picture, because the flashcard screen already shows an image
+document's picture beside its cards (Phase 7a). The pictures are copied into the
+set, so they count against the storage allowance. One that cannot be read costs
+its own cards and is logged; if nothing at all is read, the first failure shows.
+
+**That made §37.11's fault the normal case.** The card-maker keyed every page by
+its own document's page number, so a note with two pictures made a set with
+three page 0s, and each card was checked against — and filed under — whichever
+came last. It now works in **set page numbers** (`numberSetPages`,
+`src/core/set-pages.ts`): each document's pages follow the one before it, in the
+order they were added. Plan, prompts and checks use them; `insertItems` writes
+each card back with its own document and that document's page. The first
+document keeps its numbers, so **a set with one document is numbered exactly as
+before** and its stored plan still means the same pages (tested). The rubric
+check had the same fault and now looks pages up by document and page. Adding
+notes to an existing set plans all the new documents together
+(`extendPlanForDocuments`), with section ids still namespaced.
+
+Not repaired: cards stored earlier in a set with several documents may name the
+wrong one. A set with several documents that was part-way through being made
+when this ships would plan its remaining sections with the new numbers; none is
+known.
+
+### 43.3 The splash moves, differently each time
+
+The one composed picture became the five layers (`public/nomi/*.webp`), animated
+by CSS in `public/index.html`. `scripts/make-splash.ts` copies the layers and
+writes their positions between two markers from `src/ui/nomi-rig.ts`
+(`src/core/splash.ts`), so the splash owl moves about the same joints as the
+app's. Four animations — **greeting** (the §35 wave), **studying** (a reading nod,
+eyes down and moving along a line), **thinking** (a tilt, eyes up and away),
+**explaining** (a wing out to point, and a lean) — picked at random on each load
+and never the one shown last (`nomi-splash-last` on the device). Idle is never
+one. It now stays at least 1.4s, up from 0.7s, so a wave finishes. Reduce motion
+holds it still. `tests/splash.test.ts` holds the list, the markers, the files and
+the reduce-motion rule.
+
+### 43.4 Nomi reacting where it can be seen
+
+**Why the owner never saw them.** `encouraging` and `success` were deliberately
+unused (§35.5, with a guard). `explaining` was a 5% swell for 0.7s and
+`studying` was idle at half size with the eyes a seventh of a radius lower — at
+84–150px, nothing anyone would notice.
+
+**The owner's decision, reversing §35.5 for one place:** Nomi reacts at the end
+of a flashcard deck, a quiz and a round of blanks (`src/ui/nomi-finish.tsx`) —
+`success` at 70% right or more (`CELEBRATE_FROM`, `src/core/celebrate.ts`),
+`encouraging` below it, with one line that does not repeat the score beside it.
+Never after a single answer; the pet keeps the streak. The guard now allows that
+one file and checks all three screens use it.
+
+**Made clearer** (`src/core/nomi-motion.ts`), all still ending at rest and still
+off under reduce motion: `explaining` raises the wing to 58° twice with a lean
+(1.4s); `studying` looks down a third of a radius and moves along a line and
+back, with a slow ±1.5° nod; `success` is two hops of 7% of its height with both
+wings out; `encouraging` is two nods and a pat of the other wing.
+
+### 43.5 Migration 0018 — written; not applied when this was written
+
+Additive: `notes.content`, the private `note-images` bucket (5 MB, JPEG/WebP/PNG)
+and four own-folder policies. Checked live as the test user on 2026-09-14:
+`content` missing (42703), bucket not found. Once the owner applies it: the same
+check, the note probe, and `scripts/isolation-test.ts`, which now checks the new
+bucket the way it checks `avatars` (download, list, write — 27 checks).
+
+**Applied by the owner later the same day** ("Success. No rows returned") and
+checked at once as the test user: `content` present; an upload into the user's
+own folder, a signed link, a listing and a removal all work, and an upload into
+another's folder is refused by row-level security; isolation **27/27**.
+
+### 43.6 Found by looking, and fixed
+
+- **A note that starts with a heading was listed as "# Photosynthesis"**, and
+  Make cards named its set the same way, because `body` carries the heading's
+  mark. `noteTitle` and `notePreview` now read each line through `withoutMarks`
+  (`src/core/notes.ts`). Cards still get the marks, which the planner reads.
+- **Deleting a note opened straight from a link left it on screen.** It was
+  deleted, then `router.back()` had nowhere to go. It now goes to Notes. Older
+  than this round — the plain editor did the same.
+- **The probe harness could not type into the editor.** Text set from page code
+  (`execCommand('insertText')`) went in without running one shortcut, which read
+  as "the shortcuts are broken". `openPage` now has `type()` and `press()`, which
+  send key events through Chrome the way a keyboard does.
+
+### 43.7 Verified
+
+typecheck clean · **985 tests**, 3 skipped (+31) · `expo export` (two files,
+sizes as §43.1) · boot · then against the build, as the test user:
+
+- **Splash:** 10 loads, never the same animation twice running and never idle;
+  each of the four moving (6–8 different poses in 8 samples over 1.6s); under
+  reduce motion no animation runs; each photographed.
+- **Notes:** the editor file not fetched at start and fetched when a note opens;
+  `# `, `- `, `1. `, `**bold**` and `> ` typed as key presses each make what they
+  say; the toolbar makes a list and shows bold as on; it saves, and reopens with
+  its heading and list; the Notes list and the set name have no "#"; Make cards
+  gets the text with its marks; a picture pasted before 0018 says pictures are
+  not switched on; deleting lands on Notes. Probe notes deleted.
+- **Finishing a deck:** "Got it" on every card → Nomi hopping (8 poses in 12
+  samples) beside "Every one! Nicely done."; "Missed" on every card → nodding
+  (11 in 12) beside the tough-round line; both photographed. Probe set deleted.
+
+After the owner applied 0018:
+
+- **A picture in a note**, pasted in the built app: kept at
+  `<user>/<note>/image-….jpg` as a 35 KB JPEG; shown through a signed link; the
+  saved `content` holds the path and bold and heading, never the link; `body`
+  is plain text; it shows again on reopening; Make cards says the picture will be
+  read too; deleting the note left 0 files in its folder.
+- **Cards from a note's text and picture**, through `startSet` and `generateSet`
+  with real Gemini, asked for 10: two documents, planned as set pages 0 and 1;
+  **10 of 10 made — 6 from the text, 4 from the picture — and every card filed
+  under the document and page its excerpt is in** (0 misfiled). 117s, 4 model
+  requests, 1 duplicate dropped. Probe set and note deleted.
+
+A picture's page is Gemini's reading of it, which describes the drawing as well
+as its labels, so a card can ask what the picture looks like ("a green oval").
+Left as it is; the first real diagram the owner adds will say whether it matters.
+**Not deployed.**
+
+
 ## Sources
 
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)

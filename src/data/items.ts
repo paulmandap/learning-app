@@ -79,7 +79,13 @@ async function currentUserId(): Promise<string> {
  */
 export async function insertItems(
   studySetId: string,
-  documentIdByPage: Map<number, string>,
+  /**
+   * The document, and its own page number, behind the SET page a card cites
+   * (NOTES §43). The card-maker numbers pages across the whole set; a card is
+   * stored against the page as its own document numbers it, which is what
+   * "open the page" and a picture on the card read.
+   */
+  locate: (setPage: number) => { documentId: string; pageIndex: number } | null,
   sectionTitle: string,
   items: ValidatedItem[],
 ): Promise<number> {
@@ -89,8 +95,8 @@ export async function insertItems(
   const rows = items.map((item) => ({
     user_id,
     study_set_id: studySetId,
-    document_id: documentIdByPage.get(item.page_index) ?? null,
-    page_index: item.page_index,
+    document_id: locate(item.page_index)?.documentId ?? null,
+    page_index: locate(item.page_index)?.pageIndex ?? item.page_index,
     section_title: sectionTitle,
     kind: item.kind,
     level: item.level,
@@ -160,6 +166,8 @@ export async function countItems(studySetId: string): Promise<number> {
 export interface ExistingCardRow {
   prompt: string;
   answer: string;
+  /** With `page_index`, where the card came from — its own document's page (NOTES §43). */
+  document_id: string | null;
   page_index: number | null;
   source_excerpt: string;
   hidden: boolean;
@@ -178,7 +186,7 @@ export async function existingCards(studySetId: string): Promise<ExistingCardRow
     // count: a short read here does not look broken, it silently WEAKENS
     // dedup — cards it never saw cannot be compared against, so generation
     // writes duplicates of cards that already exist.
-    .select('prompt, answer, page_index, source_excerpt, hidden', { count: 'exact' })
+    .select('prompt, answer, document_id, page_index, source_excerpt, hidden', { count: 'exact' })
     .eq('study_set_id', studySetId);
 
   if (error) throw new Error(error.message);

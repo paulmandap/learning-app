@@ -26,6 +26,7 @@ import { useAssistantContext } from '../../../src/data/assistant-context';
 import { reviewStatesForSet } from '../../../src/data/review';
 import { isDue, studyOrder } from '../../../src/core/schedule';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
+import { NomiFinish } from '../../../src/ui/nomi-finish';
 import type { Level } from '../../../src/core/planner';
 
 const ITEM = { id: (i: StudyItem) => i.id, level: (i: StudyItem) => i.level };
@@ -340,6 +341,8 @@ export default function Flashcards() {
         </Card>
       ) : finished ? (
         <Card>
+          {/* Nomi reacts to the finished deck (NOTES §43). */}
+          <NomiFinish right={items.length - missed.size} total={items.length} />
           <Body>
             Done — {items.length - missed.size} of {items.length} got right.
           </Body>

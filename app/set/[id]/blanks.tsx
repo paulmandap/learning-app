@@ -16,6 +16,7 @@ import {
 } from '../../../src/ui/components';
 import { gradeFeedback, primeFeedback } from '../../../src/ui/feedback';
 import { space, type, useTheme } from '../../../src/ui/theme';
+import { NomiFinish } from '../../../src/ui/nomi-finish';
 import { listItems, type StudyItem } from '../../../src/data/items';
 import { missedItemIds } from '../../../src/data/attempts';
 import { useStudySession } from '../../../src/data/study-session';
@@ -291,6 +292,8 @@ export default function Blanks() {
         </Card>
       ) : finished ? (
         <Card>
+          {/* Nomi reacts to the finished round (NOTES §43). */}
+          <NomiFinish right={got} total={answered} />
           <Body>
             Done — {got} of {answered} filled in correctly.
           </Body>

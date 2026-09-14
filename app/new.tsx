@@ -7,12 +7,13 @@ import { INPUT_FONT_SIZE, useTheme } from '../src/ui/theme';
 import { fetchProfile } from '../src/data/profile';
 import { storageUsedBytes } from '../src/data/documents';
 import { checkUpload } from '../src/core/storage';
-import { type FileSource } from '../src/data/pipeline';
+import { type FileSource, type PasteSource } from '../src/data/pipeline';
 import { startSet } from '../src/data/start-set';
 import { CARD_COUNTS } from '../src/core/nomi-actions';
 import { extractHeadings } from '../src/ai/gemini';
-import { fetchNote, linkNoteToSet } from '../src/data/notes';
+import { downloadNoteImages, fetchNote, linkNoteToSet } from '../src/data/notes';
 import { noteTitle } from '../src/core/notes';
+import { imagePaths } from '../src/core/rich-note';
 
 /** The same four Nomi chooses between, so the two can never offer different counts. */
 const COUNTS = CARD_COUNTS;
@@ -83,7 +84,10 @@ export default function NewSet() {
   }, [note]);
 
   const apiKey = profile?.gemini_api_key ?? '';
-  const hasInput = text.trim().length > 0 || file !== null;
+  // A note's pictures are read for cards as well (NOTES §43), so a note that is
+  // only pictures is still something to make cards from.
+  const notePictures = fromNote && note?.content ? imagePaths(note.content) : [];
+  const hasInput = text.trim().length > 0 || file !== null || notePictures.length > 0;
 
   function pickFile() {
     if (Platform.OS !== 'web') return;
@@ -117,25 +121,31 @@ export default function NewSet() {
       setError('Add your Gemini key in Settings first.');
       return;
     }
-    // Backstop. The check at pick time uses whatever usage figure had loaded by
-    // then, and if that query was still in flight it saw 0 — so a large file
-    // could clear a per-user test it should have failed.
-    if (file) {
-      const fresh = await storageUsedBytes();
-      const verdict = checkUpload({ fileBytes: file.blob.size, usedBytes: fresh });
-      if (!verdict.ok) {
-        setError(verdict.message);
-        return;
-      }
-    }
-
     setBusy(true);
     setError(null);
 
     try {
+      // The note's pictures, fetched now rather than when the note loaded: most
+      // visits to this screen never press the button.
+      const pictures = notePictures.length > 0 ? await downloadNoteImages(notePictures) : [];
+
+      // Backstop. The check at pick time uses whatever usage figure had loaded by
+      // then, and if that query was still in flight it saw 0 — so a large file
+      // could clear a per-user test it should have failed. A note's pictures are
+      // copied into the set, so they count as well.
+      const addingBytes = (file?.blob.size ?? 0) + pictures.reduce((sum, p) => sum + p.blob.size, 0);
+      if (addingBytes > 0) {
+        const fresh = await storageUsedBytes();
+        const verdict = checkUpload({ fileBytes: addingBytes, usedBytes: fresh });
+        if (!verdict.ok) {
+          setError(verdict.message);
+          return;
+        }
+      }
+
       const heading = extractHeadings(text)[0];
       const setName = title.trim() || heading || file?.name || 'My notes';
-      const source: { text: string } | FileSource = file
+      const main: PasteSource | FileSource = file
         ? {
             kind: file.mime.startsWith('image/') ? 'image' : 'pdf',
             file: file.blob,
@@ -143,12 +153,18 @@ export default function NewSet() {
             filename: file.name,
           }
         : { text };
+      const pictureSources: FileSource[] = pictures.map((p, i) => ({
+        kind: 'image',
+        file: p.blob,
+        mime: p.blob.type || 'image/jpeg',
+        filename: `picture-${i + 1}.jpg`,
+      }));
 
       // The same way Nomi starts a set, so the two cannot drift (NOTES §37).
       const { setId: targetId } = await startSet({
         setId: addingToExisting ? existingSetId : undefined,
         title: setName,
-        source,
+        sources: [main, ...pictureSources],
         count,
         apiKey,
         onStatus: setStatus,
@@ -214,6 +230,12 @@ export default function NewSet() {
         <Body muted>or</Body>
         <Button label="Choose a file (PDF, picture, or .txt)" variant="secondary" onPress={pickFile} />
         {file ? <Notice tone="ok">{file.name}</Notice> : null}
+        {notePictures.length > 0 ? (
+          <Body muted>
+            {notePictures.length === 1 ? 'The picture' : `The ${notePictures.length} pictures`} in your note
+            will be read for cards too.
+          </Body>
+        ) : null}
         <Body muted>
           Your notes are sent to Google to make your cards. Someone at Google may read them, so
           please don't add anything private.

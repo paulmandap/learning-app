@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **954 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **985 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§42 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§43 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -57,7 +57,11 @@ under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 17; all applied and verified
+### Migrations — 18; all applied and verified
+
+0018 was applied by the owner on 2026-09-14 and verified the same day:
+`notes.content` present, the `note-images` bucket takes an upload into the
+user's own folder and refuses one into another's, isolation 27/27 (NOTES §43.5).
 
 0016 and 0017 were applied by the owner on 2026-09-13 and verified the same day:
 isolation 24/24, `avatar-probe` OK on every save, `nomi-chat-probe` saves the
@@ -75,7 +79,8 @@ and `study_items.form` (applied 2026-09-12 — and it took production down for
 hours, see NOTES §31 before applying anything like it) · `0016`
 `profiles.avatar`, the private `avatars` bucket, `nomi_conversations` and
 `nomi_messages` (NOTES §36) · `0017` `profiles.privacy_accepted_at`, for the
-one-time privacy notice (NOTES §37). Both additive; applied 2026-09-13.
+one-time privacy notice (NOTES §37). Both additive; applied 2026-09-13 ·
+`0018` `notes.content` and the private `note-images` bucket (NOTES §43).
 
 ## Rules — these are not negotiable
 
@@ -88,8 +93,11 @@ one-time privacy notice (NOTES §37). Both additive; applied 2026-09-13.
 - **Deterministic logic lives in `src/core/**` and must NOT import react-native
   or expo-\*.** This is what makes Vitest work at all and what lets `scripts/`
   drive the real pipeline from Node. Do not erode it.
-- Don't add dependencies without a measured reason. There are still none beyond
-  the framework — no charting library, no image library, no Playwright.
+- Don't add dependencies without a measured reason. There is one beyond the
+  framework: **Tiptap, for the note editor** (NOTES §43), measured at +146 KB
+  compressed on every start when imported, so it is fetched only when a note
+  opens. Keep it out of the first download — `tests/screens.test.ts` fails an
+  ordinary import. Still no charting library, no image library, no Playwright.
 - **The prompt asks; the validator checks.** A prompt rule with no deterministic
   check behind it is a wish.
 - **No technical jargon in user-facing text.** Never: OCR, pipeline, chunk,
@@ -182,6 +190,16 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     signed out (NOTES §40): 18 and over, Philippine law, text in
     `src/core/legal.ts` with its checkable claims in `tests/legal.test.ts`.
     D13's one-time notice is kept and is not replaced by them.
+20. **Nomi celebrates the end of a round** (NOTES §43, the owner's decision,
+    reversing §35.5 for one place): `success` or `encouraging` when a flashcard
+    deck, a quiz or a round of blanks ends, from `src/ui/nomi-finish.tsx` only.
+    Never after a single answer; the pet still keeps the streak.
+21. **A note's `body` is derived; `content` is the note** (NOTES §43). Every save
+    writes both, `body` by `docToText`, so everything that reads notes reads
+    plain text as before. Pictures are stored by path, never by link.
+22. **The card-maker works in set page numbers** (NOTES §43), and each card is
+    stored with its own document and that document's page. A set with one
+    document is numbered as it always was.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -284,7 +302,13 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   something that can only be true afterwards — `location.pathname` changing, not
   words that may already be on the previous screen (NOTES §19.7).
 - `--click` matches an accessibility label as well as visible text, for
-  icon-only controls.
+  icon-only controls. Exactly: the Notes button is "+ New note".
+- **The note editor is not a field.** `fill()` cannot type into it. Use
+  `page.type()` and `page.press('Enter')`, which send real key events.
+  `document.execCommand('insertText')` puts the words in but runs none of the
+  editor's shortcuts, so "- " stays a dash and a working shortcut looks broken
+  (NOTES §43.6). `document.querySelector('.ProseMirror').editor` is the Tiptap
+  editor, for reading its state.
 
 **Anything that fails silently will cost you a wrong conclusion.** It has now
 happened four times. Log fallbacks and best-effort failures.
@@ -315,7 +339,7 @@ npm test                    447 tests, no network
 npm run typecheck
 npm run export:web
 npm run screenshot -- /progress out.png --width 393 --dark
-npx tsx --env-file=.env scripts/isolation-test.ts   24/24 cross-user RLS assertions (needs TEST_USER_A/B_* env vars; `npm run test:isolation` does not load .env)
+npx tsx --env-file=.env scripts/isolation-test.ts   27/27 cross-user RLS assertions (needs TEST_USER_A/B_* env vars; `npm run test:isolation` does not load .env)
 npm run backup
 npx tsx --env-file=.env scripts/deploy-status.ts   what is live, and is it behind a migration
 npx tsx --env-file=.env scripts/notes-probe.ts [--generate]
@@ -324,7 +348,7 @@ npx tsx --env-file=.env scripts/seed-progress.ts [--days 30] [--clear]
 npx tsx scripts/make-pet-assets.ts            # cuts every assets/*-stages.*
 npx tsx scripts/make-nomi-assets.ts [--debug <dir>]   # Nomi's five layers + src/ui/nomi-rig.ts, from design-reference/nomi-updated-look-interactions-references.png (gitignored)
 npx tsx scripts/make-icons.ts [--preview <dir>]       # every app icon size, from design-reference/nomi-app-icon.png (gitignored)
-npx tsx scripts/make-splash.ts                         # public/nomi-splash.webp from assets/nomi-*.webp — rerun after make-nomi-assets
+npx tsx scripts/make-splash.ts                         # Nomi's layers into public/nomi/ and their positions into public/index.html — rerun after make-nomi-assets
 npx tsx --env-file=.env scripts/nomi-chat-probe.ts    # Nomi's brain + one real Gemini reply + what was saved
 npx tsx --env-file=.env scripts/reviewer-probe.ts [--runs 3] [--only rename] [--counts 20,60] [--out r.txt]   # patterns vs Gemini's topic/title, and written reviewers
 npx tsx --env-file=.env scripts/nomi-offer-probe.ts --out <dir>   # Nomi's offers in the built app, photographed; checks a refused reviewer saved nothing

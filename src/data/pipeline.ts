@@ -28,8 +28,10 @@ import {
 } from '../core/coverage';
 import { normalize, splitSentences } from '../core/text';
 import { summariseDrops, validateItems, type DroppedItem, type ExistingCard } from '../core/validate';
+import { numberSetPages, type SetPage, type SetPages } from '../core/set-pages';
 import {
   createDocument,
+  listDocuments,
   markDocumentFailed,
   pagesForSet,
   storeReadResult,
@@ -171,18 +173,30 @@ export async function addDocumentToSet(input: {
   }
 }
 
+/**
+ * The set's pages, numbered across its documents (NOTES §43).
+ *
+ * Every page number the card-maker plans, asks and checks with is a SET page
+ * number from here, and `insertItems` writes each card back with its own
+ * document and that document's page. A set with one document is numbered as it
+ * always was. See `src/core/set-pages.ts` for what went wrong before.
+ */
+async function setPages(setId: string): Promise<SetPages> {
+  const [docs, pages] = await Promise.all([listDocuments(setId), pagesForSet(setId)]);
+  return numberSetPages(
+    docs.map((d) => d.id),
+    pages,
+  );
+}
+
+function plannerPage(p: SetPage): PageInput {
+  return { page_index: p.set_page, text: p.text, readability: p.readability, headings: p.headings };
+}
+
 /** Build and persist the plan for everything currently in the set. */
 export async function planSet(setId: string, requestedCount: number): Promise<StoredPlan> {
-  const pages = await pagesForSet(setId);
-
-  const pageInputs: PageInput[] = pages.map((p) => ({
-    page_index: p.page_index,
-    text: p.text,
-    readability: p.readability,
-    headings: p.headings,
-  }));
-
-  const plan = buildPlan(pageInputs, requestedCount);
+  const { pages } = await setPages(setId);
+  const plan = buildPlan(pages.map(plannerPage), requestedCount);
   const stored: StoredPlan = {
     ...plan,
     completedSectionIds: [],
@@ -194,43 +208,40 @@ export async function planSet(setId: string, requestedCount: number): Promise<St
 }
 
 /**
- * Extend an existing set's plan to cover ONE newly added document.
+ * Extend an existing set's plan to cover newly added documents — one, or a
+ * note's text and each of its pictures (NOTES §43).
  *
  * Phase 4 acceptance criterion: "adding a document to an existing set generates
  * only for the new document." That is achieved by planning over the new
- * document's pages alone and appending those sections, while every section
+ * documents' pages alone and appending those sections, while every section
  * already generated stays in `completedSectionIds` — so the resume logic skips
  * them exactly as it would after a refresh. Nothing is regenerated, and no
  * existing card is touched.
  */
-export async function extendPlanForDocument(input: {
+export async function extendPlanForDocuments(input: {
   setId: string;
-  documentId: string;
+  documentIds: string[];
   requestedCount: number;
 }): Promise<StoredPlan> {
-  const { setId, documentId, requestedCount } = input;
+  const { setId, documentIds, requestedCount } = input;
 
   const set = await getSet(setId);
   const existing = set?.plan ?? null;
 
-  const allPages = await pagesForSet(setId);
-  const newPages = allPages.filter((p) => p.document_id === documentId);
+  const adding = new Set(documentIds);
+  const newPages = (await setPages(setId)).pages.filter((p) => adding.has(p.document_id));
 
-  const pageInputs: PageInput[] = newPages.map((p) => ({
-    page_index: p.page_index,
-    text: p.text,
-    readability: p.readability,
-    headings: p.headings,
-  }));
+  const addition = buildPlan(newPages.map(plannerPage), requestedCount);
 
-  const addition = buildPlan(pageInputs, requestedCount);
-
-  // Section ids are derived from page index, so a second document could collide
-  // with the first document's ids. Namespacing by document keeps "already done"
-  // meaningful — without this, a new section could be skipped as complete.
+  // Section ids are derived from page index. Set page numbers no longer collide
+  // with an earlier document's, but a plan stored before §43 numbered every
+  // document from 0 — so ids stay namespaced by document, and "already done"
+  // keeps meaning what it did. Without it a new section could be skipped as
+  // complete.
+  const namespace = (documentIds[0] ?? 'added').slice(0, 8);
   const namespaced = addition.sections.map((s) => ({
     ...s,
-    id: `${documentId.slice(0, 8)}:${s.id}`,
+    id: `${namespace}:${s.id}`,
   }));
 
   const merged: StoredPlan = {
@@ -312,9 +323,11 @@ export async function generateSet(input: {
   if (!set?.plan) throw new Error('This set has no plan yet.');
 
   const plan = set.plan;
-  const pages = await pagesForSet(setId);
-  const pageText = new Map(pages.map((p) => [p.page_index, p.text]));
-  const documentIdByPage = new Map(pages.map((p) => [p.page_index, p.document_id]));
+  // Keyed by SET page (NOTES §43). Keyed by each document's own page number, a
+  // note's text and its pictures all had a page 0, and every card was checked
+  // against — and filed under — whichever of them came last.
+  const numbered = await setPages(setId);
+  const pageText = new Map(numbered.pages.map((p) => [p.set_page, p.text]));
 
   const done = new Set(plan.completedSectionIds ?? []);
   const pending = plan.sections.filter((s) => !done.has(s.id));
@@ -396,7 +409,7 @@ export async function generateSet(input: {
     dropped.push(...lost);
 
     const dbStart = Date.now();
-    const inserted = await insertItems(setId, documentIdByPage, section.title, kept);
+    const inserted = await insertItems(setId, numbered.locate, section.title, kept);
     dbMs += Date.now() - dbStart;
     itemsCreated += inserted;
     return inserted;
@@ -442,10 +455,12 @@ export async function generateSet(input: {
   const allSectionsDone = plan.sections.every((s) => done.has(s.id));
   if (allSectionsDone && failure === null) {
     const citedLine = (card: ExistingCardRow): SentenceRef | null => {
-      if (card.page_index === null) return null;
-      const text = pageText.get(card.page_index);
+      // A stored card holds its own document's page; the plan speaks in set pages.
+      const page = numbered.setPageOf(card.document_id, card.page_index);
+      if (page === null) return null;
+      const text = pageText.get(page);
       const sentence = text === undefined ? -1 : locateExcerpt(text, card.source_excerpt);
-      return sentence < 0 ? null : { page: card.page_index, sentence };
+      return sentence < 0 ? null : { page, sentence };
     };
     const inSection = (section: PlannedSection, ref: SentenceRef) =>
       section.pages.includes(ref.page) && (!section.span || inSpan(ref, section.span));

@@ -7,13 +7,15 @@
  * state by name. Visual state and animation state stay separate: a screen says
  * "thinking", and never sees a rotation.
  *
- * ## Nomi guides, the pet celebrates
+ * ## Nomi celebrates a finished round; the pet keeps the streak
  *
- * `encouraging` and `success` are built and deliberately UNUSED by any screen.
- * The streak pet (`src/ui/pet.tsx`) already owns encouragement, by the owner's
- * own request, and two animals cheering the same answer would make them the
- * same thing. The capability exists so that decision can change without a
- * rebuild; `tests/screens.test.ts` keeps it from changing by accident.
+ * `encouraging` and `success` were built and deliberately unused, with the
+ * streak pet (`src/ui/pet.tsx`) owning encouragement (NOTES §35.5). The owner
+ * reversed that on 2026-09-14 — *"i never see nomi doing the interactions like
+ * explaining, encouraging, success, studying/focused"* — for the END of a
+ * flashcard deck, a quiz or a round of blanks, and no further: `src/core/
+ * celebrate.ts` picks which, `src/ui/nomi-finish.tsx` is the only surface that
+ * may ask for either, and `tests/screens.test.ts` holds every other file to it.
  *
  * ## Units that do not know the size
  *
@@ -30,7 +32,8 @@
  * something. At 140° it sits up beside the head, feather tips high, which is
  * what the reference sheet's own greeting draws — and it still reads as
  * attached, because the pivot is at the shoulder and the body behind the wing
- * was rebuilt by `scripts/make-nomi-assets.ts`.
+ * was rebuilt by `scripts/make-nomi-assets.ts`. Pointing is what `explaining`
+ * now does on purpose, at under 60°.
  */
 
 export const NOMI_STATES = [
@@ -157,8 +160,8 @@ const IDLE: Motion = {
 /**
  * Move every value in a motion toward rest by `factor`.
  *
- * Exists so `studying` can BE idle at half amplitude, literally, rather than a
- * second set of numbers that says so in a comment and drifts.
+ * Exists so a calmer state can be idle at a smaller amplitude, literally,
+ * rather than a second set of numbers that says so in a comment and drifts.
  */
 export function scaleAmplitude(motion: Motion, factor: number): Motion {
   return {
@@ -176,11 +179,41 @@ export function scaleAmplitude(motion: Motion, factor: number): Motion {
 const MOTIONS: Record<NomiState, Motion> = {
   idle: IDLE,
 
-  /** Calmer than idle, eyes down on the page. For a deck screen. */
+  /**
+   * Reading, for a deck screen: eyes down on the page and moving along a line,
+   * a slow nod, the breathing of idle at half its size.
+   *
+   * It was only that last part, with the eyes a seventh of a radius lower, and
+   * the owner never once noticed it (NOTES §43). Now it reads.
+   */
   studying: {
-    ...scaleAmplitude(IDLE, 0.5),
     state: 'studying',
-    tracks: [...scaleAmplitude(IDLE, 0.5).tracks, hold('lookY', 0.14, IDLE.duration)],
+    duration: IDLE.duration,
+    loop: true,
+    tracks: [
+      ...scaleAmplitude(IDLE, 0.5).tracks,
+      {
+        channel: 'tilt',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 1200, value: 1.5, easing: 'inOut' },
+          { at: 2400, value: -1, easing: 'inOut' },
+          { at: 3600, value: 0, easing: 'inOut' },
+        ],
+      },
+      {
+        channel: 'lookX',
+        frames: [
+          { at: 0, value: -0.2 },
+          { at: 2600, value: 0.25, easing: 'inOut' },
+          { at: 3000, value: 0.25 },
+          { at: 3600, value: -0.2, easing: 'inOut' },
+        ],
+      },
+      hold('lookY', 0.3, IDLE.duration),
+    ],
+    next: null,
+    blink: EVERYDAY_BLINK,
   },
 
   /** A slow head tilt, eyes up and away. While a question is being answered. */
@@ -245,18 +278,34 @@ const MOTIONS: Record<NomiState, Motion> = {
     blink: null,
   },
 
-  /** A small settle as an answer lands — "here it is", once. */
+  /**
+   * A wing raised to make a point, twice, and a small lean in as the answer
+   * lands. It was a 5% bounce lasting 0.7s, which the owner never saw (NOTES §43).
+   */
   explaining: {
     state: 'explaining',
-    duration: 700,
+    duration: 1400,
     loop: false,
     tracks: [
       {
         channel: 'scale',
         frames: [
           { at: 0, value: 1 },
-          { at: 180, value: 1.05, easing: 'out' },
+          { at: 260, value: 1.05, easing: 'out' },
           { at: 700, value: 1, easing: 'inOut' },
+          { at: 1400, value: 1 },
+        ],
+      },
+      {
+        channel: 'wingRight',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 120, value: 0 },
+          { at: 420, value: 58, easing: 'out' },
+          { at: 620, value: 42, easing: 'inOut' },
+          { at: 820, value: 58, easing: 'inOut' },
+          { at: 1200, value: 0, easing: 'inOut' },
+          { at: 1400, value: 0 },
         ],
       },
     ],
@@ -264,21 +313,30 @@ const MOTIONS: Record<NomiState, Motion> = {
     blink: EVERYDAY_BLINK,
   },
 
-  /** Two small nods. Built, deliberately unused — see the file note. */
+  /** Two nods and a pat of the wing: "keep going". A rough round's end. */
   encouraging: {
     state: 'encouraging',
-    duration: 1000,
+    duration: 1400,
     loop: false,
     tracks: [
       {
         channel: 'lift',
         frames: [
           { at: 0, value: 0 },
-          { at: 180, value: 0.02, easing: 'out' },
-          { at: 380, value: 0, easing: 'inOut' },
-          { at: 560, value: 0.02, easing: 'out' },
-          { at: 760, value: 0, easing: 'inOut' },
-          { at: 1000, value: 0 },
+          { at: 200, value: 0.025, easing: 'out' },
+          { at: 420, value: 0, easing: 'inOut' },
+          { at: 640, value: 0.025, easing: 'out' },
+          { at: 860, value: 0, easing: 'inOut' },
+          { at: 1400, value: 0 },
+        ],
+      },
+      {
+        channel: 'wingLeft',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 860, value: 0 },
+          { at: 1060, value: 28, easing: 'out' },
+          { at: 1400, value: 0, easing: 'inOut' },
         ],
       },
     ],
@@ -286,19 +344,21 @@ const MOTIONS: Record<NomiState, Motion> = {
     blink: EVERYDAY_BLINK,
   },
 
-  /** A lift with both wings out. Built, deliberately unused — see the file note. */
+  /** Two hops with both wings out. A round that went well. */
   success: {
     state: 'success',
-    duration: 1100,
+    duration: 1400,
     loop: false,
     tracks: [
       {
         channel: 'lift',
         frames: [
           { at: 0, value: 0 },
-          { at: 300, value: -0.05, easing: 'out' },
-          { at: 700, value: 0, easing: 'inOut' },
-          { at: 1100, value: 0 },
+          { at: 260, value: -0.07, easing: 'out' },
+          { at: 520, value: 0, easing: 'in' },
+          { at: 760, value: -0.05, easing: 'out' },
+          { at: 1000, value: 0, easing: 'in' },
+          { at: 1400, value: 0 },
         ],
       },
       ...(['wingLeft', 'wingRight'] as const).map(
@@ -306,9 +366,11 @@ const MOTIONS: Record<NomiState, Motion> = {
           channel,
           frames: [
             { at: 0, value: 0 },
-            { at: 300, value: 35, easing: 'out' },
-            { at: 700, value: 0, easing: 'inOut' },
-            { at: 1100, value: 0 },
+            { at: 260, value: 40, easing: 'out' },
+            { at: 520, value: 12, easing: 'inOut' },
+            { at: 760, value: 36, easing: 'out' },
+            { at: 1100, value: 0, easing: 'inOut' },
+            { at: 1400, value: 0 },
           ],
         }),
       ),

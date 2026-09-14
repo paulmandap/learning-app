@@ -11,7 +11,8 @@
  *     chat_usage (0010), study_days (0009), and Nomi's saved conversations,
  *     nomi_conversations and nomi_messages (0016)
  *   - B writing a message into A's conversation, which RLS must refuse
- *   - storage objects under A's prefix in BOTH buckets: documents and avatars
+ *   - storage objects under A's prefix in every bucket: documents, avatars and
+ *     note-images (each checked once its migration is applied)
  *   - item_stats and topic_stats  <-- the views, tested in their own right
  *   - storage objects under A's prefix
  *   - profiles.gemini_api_key specifically
@@ -270,6 +271,14 @@ async function main() {
   const avatarsSeeded = !avatarUpload.error;
   if (!avatarsSeeded) console.log(`  (avatar seed note: ${avatarUpload.error?.message})`);
 
+  // Pictures in notes (0018): photos of someone's own notes and diagrams.
+  const notePicturePath = `${A.userId}/isolation-probe/picture.jpg`;
+  const notePictureUpload = await A.client.storage
+    .from('note-images')
+    .upload(notePicturePath, new Blob(['probe'], { type: 'image/jpeg' }), { upsert: true });
+  const notePicturesSeeded = !notePictureUpload.error;
+  if (!notePicturesSeeded) console.log(`  (note picture seed note: ${notePictureUpload.error?.message})`);
+
   const storagePath = `${A.userId}/${doc?.id ?? 'x'}/probe.txt`;
   const upload = await A.client.storage
     .from('documents')
@@ -426,6 +435,25 @@ async function main() {
     console.log('  ----  avatars — bucket not present (migration 0016), not checked');
   }
 
+  // A picture in a note is a photo of someone's own notes. Same three checks, third bucket.
+  if (notePicturesSeeded) {
+    const npDl = await B.client.storage.from('note-images').download(notePicturePath);
+    if (npDl.data) fail('note-images download', "B downloaded a picture from A's note");
+    else ok('note-images download', 'blocked');
+
+    const npLs = await B.client.storage.from('note-images').list(A.userId);
+    if ((npLs.data?.length ?? 0) > 0) fail('note-images list', "B listed A's note pictures");
+    else ok('note-images list', 'nothing visible');
+
+    const npWr = await B.client.storage
+      .from('note-images')
+      .upload(`${A.userId}/intruder/picture.jpg`, new Blob(['x'], { type: 'image/jpeg' }));
+    if (!npWr.error) fail('note-images write', "B wrote into A's note pictures");
+    else ok('note-images write', 'blocked');
+  } else {
+    console.log('  ----  note-images — bucket not present (migration 0018), not checked');
+  }
+
   // -------------------------------------------------------------- heartbeat --
   console.log('\nHeartbeat table is RPC-only:');
   const hbDirect = await B.client.from('heartbeat').insert({});
@@ -448,6 +476,7 @@ async function main() {
   // schedules. Matched by title rather than by the id from this run, so a
   // sweep also collects what earlier runs left.
   await A.client.storage.from('documents').remove([storagePath]);
+  if (notePicturesSeeded) await A.client.storage.from('note-images').remove([notePicturePath]);
   if (avatarsSeeded) await A.client.storage.from('avatars').remove([avatarPath]);
   // Messages cascade from the conversation.
   if (nomiSeeded) await A.client.from('nomi_conversations').delete().eq('title', 'probe conversation');

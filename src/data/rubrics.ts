@@ -3,6 +3,7 @@ import { CallQueue } from '../core/queue';
 import { rubricVerdict, shouldVerifyRubric } from '../core/rubric';
 import { itemsNeedingRubricCheck, promptFor, saveRubricVerdict } from './items';
 import { pagesForSet } from './documents';
+import { numberSetPages } from '../core/set-pages';
 
 export interface RubricPassResult {
   checked: number;
@@ -68,10 +69,19 @@ export async function verifyRubrics(input: {
   // resolved sentence flagged 4 of 4 real rubrics wrongly on the first live run
   // — the rubric was written from the section, so that is what it must be
   // checked against. See buildRubricCheckPrompt.
-  let pageText = new Map<number, string>();
+  //
+  // Found by each card's own document AND page: a set holding a note and its
+  // pictures has a page 0 in every one of them (NOTES §43).
+  let pageText: (item: { document_id: string | null; page_index: number | null }) => string | undefined = () =>
+    undefined;
   try {
     const pages = await pagesForSet(input.setId);
-    pageText = new Map(pages.map((p) => [p.page_index, p.text]));
+    const numbered = numberSetPages([], pages);
+    const bySetPage = new Map(numbered.pages.map((p) => [p.set_page, p.text]));
+    pageText = (item) => {
+      const page = numbered.setPageOf(item.document_id, item.page_index ?? 0);
+      return page === null ? undefined : bySetPage.get(page);
+    };
   } catch (err) {
     console.warn(
       `[rubric] could not load page text: ${err instanceof Error ? err.message : String(err)}`,
@@ -95,7 +105,7 @@ export async function verifyRubrics(input: {
             prompt: promptFor(item),
             rubric,
             sourceExcerpt: item.source_excerpt,
-            sourceText: pageText.get(item.page_index ?? 0) ?? item.source_excerpt,
+            sourceText: pageText(item) ?? item.source_excerpt,
           });
 
           // An unparseable second opinion is not evidence against the card.

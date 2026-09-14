@@ -19,6 +19,7 @@ import { GLYPH } from '../../../src/ui/glyphs';
 import { radius, space, type, useTheme } from '../../../src/ui/theme';
 import { SourcePanel } from '../../../src/ui/source';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
+import { NomiFinish } from '../../../src/ui/nomi-finish';
 import { listItems, promptFor, type StudyItem } from '../../../src/data/items';
 import { fetchProfile } from '../../../src/data/profile';
 import { missedItemIds } from '../../../src/data/attempts';
@@ -343,6 +344,9 @@ export default function Quiz() {
       <Screen>
         <Title>Results</Title>
         <Card>
+          {/* Nomi reacts to the finished quiz (NOTES §43). A part-right answer
+              is not a right one here, as in the score beside it. */}
+          <NomiFinish right={correct} total={answered.length} />
           <Body>
             {correct} of {answered.length} right
             {partial > 0 ? `, ${partial} partly right` : ''}.

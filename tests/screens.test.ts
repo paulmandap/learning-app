@@ -553,12 +553,8 @@ describe("the owner's third round (NOTES §37)", () => {
     expect(layout).toMatch(/const showAssistant =\s*signedIn &&/);
   });
 
-  it('the splash is in the page before any script, and the app takes it away (NOTES §42)', () => {
-    const html = read('public', 'index.html');
-    expect(html).toContain('id="splash"');
-    expect(html).toContain('src="/nomi-splash.webp"');
-    expect(html.indexOf('id="splash"')).toBeLessThan(html.indexOf('id="root"'));
-    expect(existsSync(join('public', 'nomi-splash.webp'))).toBe(true);
+  it('the app takes the splash away once it knows who is signed in (NOTES §42)', () => {
+    // What the splash draws is checked in tests/splash.test.ts.
     expect(code(read('app', '_layout.tsx'))).toMatch(/getElementById\('splash'\)[\s\S]*?classList\.add\('gone'\)/);
   });
 
@@ -606,18 +602,41 @@ describe("the owner's fourth round (NOTES §38)", () => {
   });
 });
 
-describe('Nomi guides, the pet celebrates', () => {
-  it('no screen asks Nomi to encourage or celebrate', () => {
-    // `encouraging` and `success` are built into src/core/nomi-motion.ts and
-    // deliberately unused. The streak pet owns encouragement; two animals
-    // cheering the same answer would make them the same thing. Using either
-    // is a decision to take on purpose, and this is where it gets noticed.
+describe('Nomi celebrates a finished round, never a single answer (NOTES §43)', () => {
+  it('only the finish reaction asks Nomi to encourage or celebrate', () => {
+    // `encouraging` and `success` were unused, with the streak pet doing the
+    // celebrating (NOTES §35.5). The owner reversed that for the END of a deck,
+    // a quiz or a round of blanks, and no further: reacting to each answer is
+    // still a decision to take on purpose, and this is where it gets noticed.
     const surfaces = [...tsxUnder('app'), ...tsxUnder(join('src', 'ui'))].filter(
-      (f) => !f.endsWith('nomi-character.tsx'),
+      (f) => !f.endsWith('nomi-character.tsx') && !f.endsWith('nomi-finish.tsx'),
     );
     for (const file of surfaces) {
       expect(code(readFileSync(file, 'utf8')), file).not.toMatch(/['"](encouraging|success)['"]/);
     }
+  });
+
+  it('every study screen shows it when a round ends', () => {
+    for (const screen of ['flashcards.tsx', 'quiz.tsx', 'blanks.tsx']) {
+      expect(code(read('app', 'set', '[id]', screen)), screen).toContain('<NomiFinish');
+    }
+  });
+});
+
+describe('the note editor stays out of the start of the app (NOTES §43)', () => {
+  it('only the editor file imports Tiptap, and that file is only ever fetched', () => {
+    // Imported directly, Tiptap added 146 KB compressed to every start of the
+    // app, for the one screen that edits a note. `import()` gives it a file of
+    // its own; one ordinary import anywhere puts it back in the first download.
+    const files = [...tsxUnder('app'), ...tsxUnder(join('src', 'ui'))].filter(
+      (f) => !f.endsWith('tiptap-note-editor.tsx'),
+    );
+    for (const file of files) {
+      const source = readFileSync(file, 'utf8');
+      expect(source, file).not.toMatch(/from ['"]@tiptap\//);
+      expect(source, file).not.toMatch(/from ['"][^'"]*tiptap-note-editor['"]/);
+    }
+    expect(read('src', 'ui', 'rich-note-editor.web.tsx')).toContain("import('./tiptap-note-editor')");
   });
 });
 
