@@ -6341,6 +6341,36 @@ offer, Settings with two photos and the Reminders card before 0020, and a deck
 with Nomi studying beside the count. **Not deployed. Migration 0020 not
 applied.**
 
+### 45.8 After the owner applied 0020 and deployed (2026-09-15)
+
+The owner applied 0020, set the secret's hash, added both GitHub secrets, and
+pushed and deployed `b926189`. Checked at once:
+
+- `scripts/deploy-status.ts`: production is exactly HEAD, no migration ahead of
+  it, bundle `f048f1754a97` live and local. CI passed on the push. `/sw.js` is
+  served as `application/javascript` with `max-age=0`. GitHub lists "Study
+  reminders" as an active workflow.
+- `scripts/isolation-test.ts`: **34/34**, the seven new checks included — B reads
+  none of A's devices or times, cannot write a device, and `reminders_to_send`
+  refuses B signed in (42501), and both sender functions refuse the publishable
+  key with a wrong secret.
+- `send-reminders --dry-run`, each time of day: answered with the real secret
+  (so the hash is right), 0 devices — the owner's iPhone had not turned
+  reminders on yet.
+- **`scripts/reminders-e2e-probe.ts`**, the built app against the live database,
+  as the test account — every step OK: turned on from Settings ("Reminders are
+  on. The next one is at 9 AM, unless you've studied by then."); the device and
+  all three times saved; the sender's dry run counted it and skipped it,
+  *studied today* — right, the account had answered cards that day;
+  `reminders_to_send` returned it (HTTP 200); one reminder to that device alone
+  was accepted by the push service (201) and shown by the service worker;
+  `reminders_sent` marked it (204) and the next dry run skipped it, *reminded in
+  the last 2 hours*; turned off from Settings, leaving no device row, no times
+  and no browser subscription.
+
+Not yet seen: a reminder through Apple's push service on the owner's iPhone, and
+a run of the workflow itself on GitHub (the first scheduled one is 01:07 UTC).
+
 
 ## Sources
 

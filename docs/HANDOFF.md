@@ -57,14 +57,13 @@ under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 20; 0020 written, NOT applied
+### Migrations — 20; all applied and verified
 
-**0020** (daily reminders, NOTES §45) was written on 2026-09-15 and is not
-applied. Additive: `push_subscriptions`, `reminder_settings`, `reminder_sender`
-and four functions. After applying it the owner inserts the sender secret's
-SHA-256 into `reminder_sender` (the SQL is in the migration's comments). Until
-then Settings says reminders aren't switched on yet, the isolation test reports
-the two tables as not present, and the workflow fails with PGRST202.
+**0020** (daily reminders, NOTES §45) was applied by the owner on 2026-09-15,
+with the sender secret's SHA-256 in `reminder_sender`, and verified the same
+day: isolation 34/34, the sender's dry run accepted by the database, and
+`scripts/reminders-e2e-probe.ts` OK end to end (NOTES §45.8). Additive:
+`push_subscriptions`, `reminder_settings`, `reminder_sender` and four functions.
 
 0019 (`documents.labels`) was applied by the owner on 2026-09-14 and covering
 was verified in the built app the same day (NOTES §44.5). Until a picture has
@@ -426,6 +425,7 @@ npx tsx --env-file=.env scripts/pasted-notes-probe.ts [--runs 3]      # does Gem
 npx tsx --env-file=.env scripts/push-probe.ts          # a real reminder through Google's push service to headless Chrome
 npx tsx --env-file=.env scripts/nomi-moves-probe.ts [--out <dir>]   # Nomi studying beside the count, hopping back on Home, waving — read from the layers
 npx tsx --env-file=.env scripts/send-reminders.ts --slot evening --dry-run   # who would get tonight's reminder (needs 0020)
+npx tsx --env-file=.env scripts/reminders-e2e-probe.ts [--out <dir>]    # on from Settings → saved → counted → sent to that device only → shown → marked → off
 ```
 
 ## What is genuinely open
