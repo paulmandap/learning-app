@@ -104,7 +104,8 @@ jobs:
       # Needed since the structure check stopped carrying its own list of
       # tables and started reading supabase/migrations/ instead. Before that
       # this job never touched the repository at all.
-      - uses: actions/checkout@v4
+      # v7: v4 declares Node 20, which GitHub deprecated (NOTES §45.9).
+      - uses: actions/checkout@v7
 
       - name: Dump schema and data
         env:

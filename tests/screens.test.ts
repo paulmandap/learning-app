@@ -629,7 +629,7 @@ describe('Nomi celebrates a finished round, never a single answer (NOTES §43)',
     // else may record one, so Home can never react to a single answer.
     expect(code(read('src', 'ui', 'nomi.tsx'))).toMatch(/returnReaction\(round, reactedAt/);
     const recorders = [...tsxUnder('app'), ...tsxUnder(join('src', 'ui'))].filter((f) =>
-      /\bfinished\(reaction\)/.test(readFileSync(f, 'utf8')),
+      /\bfinished\(reaction\b/.test(readFileSync(f, 'utf8')),
     );
     expect(recorders.map((f) => f.split(/[\\/]/).pop())).toEqual(['nomi-finish.tsx']);
   });

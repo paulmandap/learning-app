@@ -6371,6 +6371,64 @@ pushed and deployed `b926189`. Checked at once:
 Not yet seen: a reminder through Apple's push service on the owner's iPhone, and
 a run of the workflow itself on GitHub (the first scheduled one is 01:07 UTC).
 
+**The owner then ran the workflow by hand** (dry run, run #1 on `b926189`):
+success in 34 s — so both GitHub secrets are in place and the database accepted
+the secret from GitHub too. Its one annotation: `actions/checkout@v4` and
+`actions/setup-node@v4` declare Node 20, which GitHub has deprecated. See §45.9.
+
+### 45.9 What Nomi says when a round ends, and the workflows on Node 24
+
+*"it would be cool too if nomi has some comments after the user finished
+answering the flashcards. what nomi will say will vary per result. but if the
+user has a not so high passing score let's say <50% nomi will still be positive
+and cheer."*
+
+There were four fixed lines, as plain text beside the owl, which did not read as
+Nomi saying anything. Now (`src/core/celebrate.ts`):
+
+- **Six results** (`finishBand`): perfect, great (85% or more), good (70%),
+  halfway (50%), tough (below half, some right) and none right. The first three
+  are the rounds Nomi hops for, the last three the ones it nods for — the same
+  70% split as the reaction, which a test walks through every score out of 20.
+- **Four or five lines for each** (`FINISH_LINES`), picked at random and never
+  the line Nomi said when the last round ended (kept in `src/data/last-round.ts`).
+- **Below half, every line cheers**: *"Tough round, but you showed up and did it.
+  I'm proud of you!"*, *"That round put up a fight! You'll win the rematch."*
+  `tests/celebrate.test.ts` requires every tough and none line to exclaim and
+  to use none of bad, fail, poor, wrong, only, sadly, disappointing.
+- **No numbers, and nothing only flashcards could mean** — no "card", "deck",
+  "question" or "blank" — because the score is shown beside it and the quiz and
+  the blanks end with the same component.
+- **Said like Nomi says things on Home**: a speech bubble with Nomi's name, three
+  dots for a moment, then typed. `useTypedLine` and `SpeechBubble` were lifted
+  out of `NomiCard` into `src/ui/nomi.tsx`, unchanged, and both use them.
+
+**The workflows now use `actions/checkout@v7` and `actions/setup-node@v7`**, in
+`ci.yml`, `reminders.yml` and `backup.yml`. Checked before bumping (2026-09-15,
+the releases on GitHub): both v7 actions run on `node24`; checkout's v5–v7
+changes are the runtime, credentials kept in a separate file, and refusing a
+fork's code for `pull_request_target` and `workflow_run`, none of which these
+workflows use; setup-node's are automatic caching when `package.json` has a
+`packageManager` field — it has none, and `cache: npm` is set explicitly — then
+ESM inside the action. `node-version-file`, `cache` and `fetch-depth` are all
+still inputs. `upload-artifact` was already v7.
+
+**Measured in the built app** (`scripts/finish-lines-probe.ts`, test account,
+393 dark, a probe set of three flashcards, deleted after):
+
+```
+3 of 3         "Every single one! You really know these."                               perfect
+1 of 3         "You finished the whole round — that's what counts! The rest will come."  tough
+1 of 3 again   "Some are sticking already! Round two will feel easier, promise."         tough, not repeated
+0 of 3         "That round put up a fight! You'll win the rematch."                      none
+```
+
+Each photographed in its bubble beside Nomi. The workflows' bump is verified by
+the next push's CI run, not here.
+
+typecheck clean · **1061 tests**, 3 skipped · `expo export` · boot. **Not
+deployed.**
+
 
 ## Sources
 

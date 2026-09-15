@@ -43,11 +43,13 @@ const NATIVE = Platform.OS !== 'web';
  * coming back to Home after a round (`returnReaction`), and once the line has
  * been said, a wave at `nextGreetingDelay`.
  */
-type Saying = 'thinking' | 'typing' | 'said';
+export type Saying = 'thinking' | 'typing' | 'said';
 
-export function NomiCard({ line, onPress }: { line: string; onPress: () => void }) {
-  const t = useTheme();
-  const focused = useIsFocused();
+/**
+ * Nomi thinking for a moment, then typing a line letter by letter — Home's line
+ * (§37), and what Nomi says when a round ends (§45).
+ */
+export function useTypedLine(line: string, active: boolean): { saying: Saying; shown: number; chars: string[] } {
   const reduce = useReducedMotion();
   const chars = useMemo(() => Array.from(line), [line]);
   const schedule = useMemo(() => revealSchedule(line), [line]);
@@ -56,8 +58,8 @@ export function NomiCard({ line, onPress }: { line: string; onPress: () => void 
 
   useEffect(() => {
     // Nothing starts until the motion setting is known, and nothing runs while
-    // Home is not the screen in front. Coming back to it says the line again.
-    if (!focused || reduce === null) return;
+    // the screen is not in front. Coming back to it says the line again.
+    if (!active || reduce === null) return;
     if (reduce) {
       setSaying('said');
       setShown(chars.length);
@@ -82,7 +84,16 @@ export function NomiCard({ line, onPress }: { line: string; onPress: () => void 
       clearTimeout(think);
       if (tick) clearInterval(tick);
     };
-  }, [line, focused, reduce, schedule, chars.length]);
+  }, [line, active, reduce, schedule, chars.length]);
+
+  return { saying, shown, chars };
+}
+
+export function NomiCard({ line, onPress }: { line: string; onPress: () => void }) {
+  const t = useTheme();
+  const focused = useIsFocused();
+  const reduce = useReducedMotion();
+  const { saying, shown, chars } = useTypedLine(line, focused);
 
   // A one-shot over the resting pose: the reaction to a round, or a wave.
   const [gesture, setGesture] = useState<NomiState | null>(null);
@@ -145,51 +156,77 @@ export function NomiCard({ line, onPress }: { line: string; onPress: () => void 
           />
         </View>
 
-        <View style={{ flex: 1, marginBottom: space.lg }}>
-          {/* The tail, pointing at Nomi. A square turned 45° with two edges
-              drawn; the bubble covers its other half. */}
-          <View
-            style={{
-              position: 'absolute',
-              left: -6,
-              bottom: 22,
-              width: 14,
-              height: 14,
-              backgroundColor: t.card,
-              borderLeftWidth: 1,
-              borderBottomWidth: 1,
-              borderColor: t.border,
-              transform: [{ rotate: '45deg' }],
-            }}
-          />
-          <View
-            style={{
-              backgroundColor: t.card,
-              borderRadius: radius.lg,
-              borderWidth: 1,
-              borderColor: t.border,
-              paddingVertical: space.md,
-              paddingHorizontal: space.lg,
-              gap: space.hair,
-            }}
-          >
-            <Text style={[type.bodyStrong, { color: t.accent }]}>Nomi</Text>
-            <View>
-              {/* The whole line, invisible, holds the bubble at its finished
-                  size — so it does not grow a line at a time while Nomi types. */}
-              <Text style={[type.body, { color: t.text, opacity: 0 }]}>{line}</Text>
-              <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }}>
-                {saying === 'thinking' ? (
-                  <ThinkingDots />
-                ) : (
-                  <Text style={[type.body, { color: t.text }]}>{chars.slice(0, shown).join('')}</Text>
-                )}
-              </View>
-            </View>
+        <SpeechBubble line={line} saying={saying} shown={shown} chars={chars} surface={t.card} marginBottom={space.lg} />
+      </View>
+    </Pressable>
+  );
+}
+
+/**
+ * Nomi's words in a bubble, its tail pointing left at Nomi — on Home (§37) and
+ * when a round ends (§45). `surface` is the bubble's colour, set against
+ * whatever it sits on.
+ */
+export function SpeechBubble({
+  line,
+  saying,
+  shown,
+  chars,
+  surface,
+  marginBottom = 0,
+}: {
+  line: string;
+  saying: Saying;
+  shown: number;
+  chars: string[];
+  surface: string;
+  marginBottom?: number;
+}) {
+  const t = useTheme();
+  return (
+    <View style={{ flex: 1, marginBottom }}>
+      {/* The tail, pointing at Nomi. A square turned 45° with two edges
+          drawn; the bubble covers its other half. */}
+      <View
+        style={{
+          position: 'absolute',
+          left: -6,
+          bottom: 22,
+          width: 14,
+          height: 14,
+          backgroundColor: surface,
+          borderLeftWidth: 1,
+          borderBottomWidth: 1,
+          borderColor: t.border,
+          transform: [{ rotate: '45deg' }],
+        }}
+      />
+      <View
+        style={{
+          backgroundColor: surface,
+          borderRadius: radius.lg,
+          borderWidth: 1,
+          borderColor: t.border,
+          paddingVertical: space.md,
+          paddingHorizontal: space.lg,
+          gap: space.hair,
+        }}
+      >
+        <Text style={[type.bodyStrong, { color: t.accent }]}>Nomi</Text>
+        <View>
+          {/* The whole line, invisible, holds the bubble at its finished
+              size — so it does not grow a line at a time while Nomi types. */}
+          <Text style={[type.body, { color: t.text, opacity: 0 }]}>{line}</Text>
+          <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }}>
+            {saying === 'thinking' ? (
+              <ThinkingDots />
+            ) : (
+              <Text style={[type.body, { color: t.text }]}>{chars.slice(0, shown).join('')}</Text>
+            )}
           </View>
         </View>
       </View>
-    </Pressable>
+    </View>
   );
 }
 

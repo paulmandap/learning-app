@@ -56,9 +56,13 @@ jobs:
       EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
 
     steps:
-      - uses: actions/checkout@v4
+      # v7, not v4: v4 declares Node 20, which GitHub deprecated and force-runs
+      # on Node 24 with a warning on every run. Checked before bumping (NOTES
+      # §45.9): no input used here changed, and setup-node's automatic caching
+      # applies only with a packageManager field, which package.json has not got.
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # Reads .nvmrc, so CI and the owner's machine cannot drift apart.
           node-version-file: .nvmrc

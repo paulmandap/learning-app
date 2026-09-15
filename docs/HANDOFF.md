@@ -33,7 +33,7 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1058 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1061 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
   2026-09-06; Phases A-G and the NOTES §35–§45 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
@@ -209,7 +209,10 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     §45, at the owner's request:** Nomi on Home plays the same reaction on
     coming back within 30 minutes, once, and only for a round `NomiFinish`
     recorded; Nomi studies beside the count on all three study screens; and
-    Home's Nomi waves every 20–35 seconds while idle.
+    Home's Nomi waves every 20–35 seconds while idle. **And it says something**
+    (§45.9): one of several lines for how the round went, in a speech bubble,
+    never the same line twice running, and cheering below half — the owner's
+    words. `tests/celebrate.test.ts` holds the tough and none lines to that.
 21. **A note's `body` is derived; `content` is the note** (NOTES §43). Every save
     writes both, `body` by `docToText`, so everything that reads notes reads
     plain text as before. Pictures are stored by path, never by link.
@@ -426,6 +429,7 @@ npx tsx --env-file=.env scripts/push-probe.ts          # a real reminder through
 npx tsx --env-file=.env scripts/nomi-moves-probe.ts [--out <dir>]   # Nomi studying beside the count, hopping back on Home, waving — read from the layers
 npx tsx --env-file=.env scripts/send-reminders.ts --slot evening --dry-run   # who would get tonight's reminder (needs 0020)
 npx tsx --env-file=.env scripts/reminders-e2e-probe.ts [--out <dir>]    # on from Settings → saved → counted → sent to that device only → shown → marked → off
+npx tsx --env-file=.env scripts/finish-lines-probe.ts [--out <dir>]     # what Nomi says after 3/3, 1/3 twice and 0/3, photographed
 ```
 
 ## What is genuinely open
