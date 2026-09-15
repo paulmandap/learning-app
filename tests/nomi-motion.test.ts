@@ -3,7 +3,9 @@ import {
   CHANNELS,
   entryPose,
   motionFor,
+  IDLE_GREETING,
   nextBlinkDelay,
+  nextGreetingDelay,
   NOMI_STATES,
   REST,
   scaleAmplitude,
@@ -73,6 +75,24 @@ describe('every state is well formed', () => {
       const channels = m.tracks.map((t) => t.channel);
       expect(new Set(channels).size, m.state).toBe(channels.length);
     }
+  });
+});
+
+describe('a wave now and then on Home (NOTES §45)', () => {
+  it('the first within seconds of the line, then about every half minute', () => {
+    expect(nextGreetingDelay(true, () => 0)).toBe(IDLE_GREETING.firstMs[0]);
+    expect(nextGreetingDelay(true, () => 1)).toBe(IDLE_GREETING.firstMs[1]);
+    expect(nextGreetingDelay(false, () => 0.5)).toBe((IDLE_GREETING.gapMs[0] + IDLE_GREETING.gapMs[1]) / 2);
+    expect(IDLE_GREETING.firstMs[1]).toBeLessThanOrEqual(10_000);
+    expect(IDLE_GREETING.gapMs[0]).toBeGreaterThanOrEqual(15_000);
+  });
+
+  it('a wave played from rest never blinks Nomi out, and comes back to rest', () => {
+    // A one-shot starts each track from wherever the channel already is, so
+    // replaying the greeting over idle must only ever move opacity toward 1.
+    const opacity = motionFor('greeting').tracks.find((t) => t.channel === 'opacity')!;
+    expect(segments(opacity).every((s) => s.toValue === 1)).toBe(true);
+    expect(motionFor('greeting').next).toBe('idle');
   });
 });
 

@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { isValidAvatarValue, parseAvatar, photoPath, photoValue } from '../core/avatar';
+import { isValidAvatarValue, photoChoices, photoPath, photoValue } from '../core/avatar';
 import { isMissingColumn } from '../core/db-errors';
 
 /**
@@ -155,11 +155,14 @@ export async function saveAvatar(value: string | null): Promise<void> {
  * Upload a profile photo and make it the picture.
  *
  * The caller hands over an already-resized image (`src/ui/avatar.tsx` draws it
- * to 256px first). Order matters: upload, then point the profile at it, then
- * remove the previous photo — so a failure part-way leaves either the old
- * picture or the new one showing, never a profile pointing at nothing.
+ * to 256px first). Order matters: upload, then point the profile at it — so a
+ * failure part-way leaves either the old picture or the new one showing, never
+ * a profile pointing at nothing.
+ *
+ * The photo before it stays, as a choice beside the faces (NOTES §45); only
+ * photos past `MAX_KEPT_PHOTOS` are removed, the oldest first.
  */
-export async function uploadAvatarPhoto(image: Blob, previous: string | null): Promise<string> {
+export async function uploadAvatarPhoto(image: Blob): Promise<string> {
   const id = await currentUserId();
   const path = photoPath(id, Date.now());
 
@@ -174,13 +177,30 @@ export async function uploadAvatarPhoto(image: Blob, previous: string | null): P
   const value = photoValue(path);
   await saveAvatar(value);
 
-  const old = previous ? parseAvatar(previous, id) : null;
-  if (old?.kind === 'photo' && old.path !== path) {
-    // Best effort. An orphaned 30 KB picture is not worth failing a save over.
-    const { error } = await supabase.storage.from('avatars').remove([old.path]);
-    if (error) console.warn(`[profile] could not remove the old picture: ${error.message}`);
+  // Best effort. A 30 KB picture over the limit is not worth failing a save over.
+  const { data: files, error: listError } = await supabase.storage.from('avatars').list(id, { limit: 100 });
+  const { remove } = photoChoices(id, (files ?? []).map((f) => f.name), value);
+  if (listError) {
+    console.warn(`[profile] could not list your pictures: ${listError.message}`);
+  } else if (remove.length > 0) {
+    const { error } = await supabase.storage.from('avatars').remove(remove);
+    if (error) console.warn(`[profile] could not remove the oldest pictures: ${error.message}`);
   }
   return value;
+}
+
+/**
+ * The photos this person has uploaded, newest first — offered beside the faces
+ * (NOTES §45). Empty before the avatars bucket exists.
+ */
+export async function listAvatarPhotos(current: string | null): Promise<string[]> {
+  const id = await currentUserId();
+  const { data, error } = await supabase.storage.from('avatars').list(id, { limit: 100 });
+  if (error) {
+    if (/bucket not found/i.test(error.message)) return [];
+    throw new Error(error.message);
+  }
+  return photoChoices(id, (data ?? []).map((f) => f.name), current).keep;
 }
 
 /** A short-lived link to a profile photo. The bucket is private. */
@@ -188,6 +208,16 @@ export async function avatarPhotoUrl(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage.from('avatars').createSignedUrl(path, 60 * 60);
   if (error || !data) return null;
   return data.signedUrl;
+}
+
+/** Short-lived links to several photos in one request, by path. A photo with no link is left out. */
+export async function avatarPhotoUrls(paths: readonly string[]): Promise<Record<string, string>> {
+  if (paths.length === 0) return {};
+  const { data, error } = await supabase.storage.from('avatars').createSignedUrls([...paths], 60 * 60);
+  if (error || !data) return {};
+  const links: Record<string, string> = {};
+  for (const item of data) if (item.path && item.signedUrl && !item.error) links[item.path] = item.signedUrl;
+  return links;
 }
 
 /** Every photo this user has uploaded — for Delete my data. Best effort. */

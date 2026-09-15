@@ -37,7 +37,7 @@ export interface LegalDocument {
 
 export const OPERATOR = 'Paul Christian Mandap';
 export const CONTACT_EMAIL = 'paulmandap16@gmail.com';
-export const EFFECTIVE_DATE = 'September 14, 2026';
+export const EFFECTIVE_DATE = 'September 15, 2026';
 export const MINIMUM_AGE = 18;
 /** How long an encrypted backup is kept — `retention-days` in .github/workflows/backup.yml. */
 export const BACKUP_DAYS = 90;
@@ -69,6 +69,7 @@ export const PRIVACY_POLICY: LegalDocument = {
           'Your email address, which is how you sign in. We send a 6-digit code to it; there is no password.',
           'The name you want to be called, your profile picture (a photo you upload, or one of the built-in faces), and the study pet you choose.',
           'Your Gemini key, which Nomi needs to make cards and to chat.',
+          "If you turn on reminders: the times you want them, and an address for your device from Apple's or Google's notification service, so a reminder can reach it.",
         ],
         'What you study:',
         [
@@ -83,7 +84,7 @@ export const PRIVACY_POLICY: LegalDocument = {
           'A count of how many replies Nomi has given you each day, so the daily limit works.',
           'Standard web server logs kept by our hosting provider, such as IP addresses, browser type and the pages requested.',
         ],
-        "Stored on your device: your signed-in session, whether you have read the privacy notice, and a copy of your profile picture so it appears quickly. Nomi doesn't use cookies or any similar technology for advertising, or to follow you across other websites.",
+        "Stored on your device: your signed-in session, whether you have read the privacy notice, a copy of your profile picture so it appears quickly, and — if you turn on reminders — what your browser needs to receive them. Nomi doesn't use cookies or any similar technology for advertising, or to follow you across other websites.",
       ],
     },
     {
@@ -92,6 +93,7 @@ export const PRIVACY_POLICY: LegalDocument = {
         [
           'To run Nomi: signing you in, making flashcards and quizzes from your notes, marking your written answers, scheduling reviews, showing your progress and streak, and letting you chat with Nomi.',
           'To send your study material and questions to Google\'s Gemini AI service when you make cards, answer written questions or chat — see "Google Gemini: where your notes go" below.',
+          "To send the study reminders you turn on: up to three a day, saying how many cards are due and how long your streak is, and none on a day you've already studied.",
           'To keep Nomi working and secure: preventing misuse, applying daily limits, fixing problems, and keeping backups.',
           'To reply when you contact us.',
         ],
@@ -128,7 +130,8 @@ export const PRIVACY_POLICY: LegalDocument = {
           'Supabase — our database, file storage and sign-in, including sending your sign-in codes.',
           'Cloudflare — hosts the Nomi web app.',
           "Google — the Gemini AI service, as described above, through your own key.",
-          'GitHub — stores an encrypted monthly backup of the database.',
+          'GitHub — stores an encrypted monthly backup of the database, and runs the job that sends reminders.',
+          "Apple or Google — if you turn on reminders, their notification service delivers each one to your device. It carries what the reminder says: how many cards are due and your streak.",
         ],
         'We may also share information if the law requires it, to answer a lawful request from public authorities, or to protect the rights, safety or property of Nomi, its users or others.',
       ],
@@ -144,7 +147,7 @@ export const PRIVACY_POLICY: LegalDocument = {
       body: [
         [
           'Your profile, study material, answers, notes and conversations are kept until you delete them or use Delete my data.',
-          "Delete my data removes your sets, uploaded files, cards, answers, review schedule, the days you studied, the daily count of Nomi's replies, your notes, your conversations with Nomi and your profile picture, and clears your name and Gemini key. It does not remove your account itself — your email address and sign-in record. To remove those too, email us.",
+          "Delete my data removes your sets, uploaded files, cards, answers, review schedule, the days you studied, the daily count of Nomi's replies, your notes, your conversations with Nomi, your reminders and your profile pictures, and clears your name and Gemini key. It does not remove your account itself — your email address and sign-in record. To remove those too, email us.",
           `Backups are encrypted, and each one is kept for ${BACKUP_DAYS} days, so something you delete can remain in a backup for up to ${BACKUP_DAYS} days before it is gone.`,
           "What Google receives through your key is kept according to Google's terms, and server logs according to our providers' own policies.",
         ],
@@ -223,7 +226,7 @@ export const TERMS_OF_USE: LegalDocument = {
     {
       heading: 'What Nomi does',
       body: [
-        'Nomi turns your notes and files into flashcards and quizzes, marks your written answers, schedules reviews, tracks your progress, lets you chat with Nomi, a study companion, and can write a reviewer on a topic you name. Nomi is free. We may add, change or remove features at any time.',
+        'Nomi turns your notes and files into flashcards and quizzes, marks your written answers, schedules reviews, tracks your progress, lets you chat with Nomi, a study companion, can write a reviewer on a topic you name, and can remind you to study. Nomi is free. We may add, change or remove features at any time.',
       ],
     },
     {

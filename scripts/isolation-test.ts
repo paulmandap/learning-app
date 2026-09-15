@@ -11,6 +11,9 @@
  *     chat_usage (0010), study_days (0009), and Nomi's saved conversations,
  *     nomi_conversations and nomi_messages (0016)
  *   - B writing a message into A's conversation, which RLS must refuse
+ *   - reminders (0020): push_subscriptions and reminder_settings, a direct
+ *     write of a device, and the sender's functions refusing anyone without
+ *     its secret
  *   - storage objects under A's prefix in every bucket: documents, avatars and
  *     note-images (each checked once its migration is applied)
  *   - item_stats and topic_stats  <-- the views, tested in their own right
@@ -264,6 +267,18 @@ async function main() {
     console.log(`  (nomi tables not seeded: ${convo.error?.message} — is 0016 applied?)`);
   }
 
+  // 0020: a device that gets A's reminders, and when. An address that puts a
+  // notification on A's phone, and the hours A wants to be reminded.
+  const reminderEndpoint = 'https://push.example.test/isolation-probe';
+  const deviceKeys = { p_p256dh: `B${'A'.repeat(86)}`, p_auth: 'A'.repeat(22) };
+  const deviceSeed = await A.client.rpc('save_push_subscription', { p_endpoint: reminderEndpoint, ...deviceKeys });
+  const remindersSeeded = !deviceSeed.error;
+  if (remindersSeeded) {
+    await A.client.from('reminder_settings').upsert({ user_id: A.userId, slots: ['evening'] }, { onConflict: 'user_id' });
+  } else {
+    console.log(`  (reminders not seeded: ${deviceSeed.error?.message} — is 0020 applied?)`);
+  }
+
   const avatarPath = `${A.userId}/avatar-probe.jpg`;
   const avatarUpload = await A.client.storage
     .from('avatars')
@@ -312,11 +327,19 @@ async function main() {
     // 0016. What a student said to Nomi, and the names of those conversations.
     'nomi_conversations',
     'nomi_messages',
+    // 0020. An address that puts a notification on someone's phone, and when
+    // they want to be reminded to study.
+    'push_subscriptions',
+    'reminder_settings',
   ] as const;
 
   for (const table of tables) {
     if ((table === 'nomi_conversations' || table === 'nomi_messages') && !nomiSeeded) {
       console.log(`  ----  ${table} — not present (migration 0016), not checked`);
+      continue;
+    }
+    if ((table === 'push_subscriptions' || table === 'reminder_settings') && !remindersSeeded) {
+      console.log(`  ----  ${table} — not present (migration 0020), not checked`);
       continue;
     }
     const { data, error } = await B.client.from(table).select('*');
@@ -340,6 +363,36 @@ async function main() {
     });
     if (!intrusion.error) fail('nomi_messages write', "B wrote a message into A's conversation");
     else ok('nomi_messages write', `blocked (${intrusion.error.code ?? 'error'})`);
+  }
+
+  // 0020. A device is added only through save_push_subscription, and the
+  // sender's functions answer only to its secret — never to a signed-in person,
+  // and never to the publishable key with a guess.
+  if (remindersSeeded) {
+    const direct = await B.client
+      .from('push_subscriptions')
+      .insert({ user_id: A.userId, endpoint: 'https://push.example.test/intruder', p256dh: deviceKeys.p_p256dh, auth: deviceKeys.p_auth });
+    if (!direct.error) fail('push_subscriptions write', "B wrote a device into A's reminders");
+    else ok('push_subscriptions write', `blocked (${direct.error.code ?? 'error'})`);
+
+    const asPerson = await B.client.rpc('reminders_to_send', { p_secret: 'a guess', p_slot: 'evening' });
+    if (!asPerson.error) fail('reminders_to_send as B', 'a signed-in person read who gets reminders');
+    else ok('reminders_to_send as B', `blocked (${asPerson.error.code ?? 'error'})`);
+
+    const anon = createClient(url!, publishable!, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const guessed = await anon.rpc('reminders_to_send', { p_secret: 'a guess', p_slot: 'evening' });
+    if (!guessed.error) fail('reminders_to_send without the secret', 'answered a wrong secret');
+    else ok('reminders_to_send without the secret', `refused (${guessed.error.code ?? 'error'})`);
+
+    const marked = await anon.rpc('reminders_sent', { p_secret: 'a guess', p_sent: [], p_gone: [] });
+    if (!marked.error) fail('reminders_sent without the secret', 'answered a wrong secret');
+    else ok('reminders_sent without the secret', `refused (${marked.error.code ?? 'error'})`);
+
+    const hash = await B.client.from('reminder_sender').select('*');
+    if ((hash.data ?? []).length > 0) fail('reminder_sender', "the sender's secret hash is readable");
+    else ok('reminder_sender', 'nothing readable');
   }
 
   // ------------------------------------------------------------ profiles --
@@ -478,6 +531,10 @@ async function main() {
   await A.client.storage.from('documents').remove([storagePath]);
   if (notePicturesSeeded) await A.client.storage.from('note-images').remove([notePicturePath]);
   if (avatarsSeeded) await A.client.storage.from('avatars').remove([avatarPath]);
+  if (remindersSeeded) {
+    await A.client.from('push_subscriptions').delete().eq('endpoint', reminderEndpoint);
+    await A.client.from('reminder_settings').delete().eq('user_id', A.userId);
+  }
   // Messages cascade from the conversation.
   if (nomiSeeded) await A.client.from('nomi_conversations').delete().eq('title', 'probe conversation');
   await A.client.from('notes').delete().eq('title', 'probe note title');

@@ -10,7 +10,6 @@ import {
   Field,
   LoadingState,
   Notice,
-  ProgressBar,
   Screen,
   Title,
 } from '../../../src/ui/components';
@@ -20,6 +19,7 @@ import { radius, space, type, useTheme } from '../../../src/ui/theme';
 import { SourcePanel } from '../../../src/ui/source';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import { NomiFinish } from '../../../src/ui/nomi-finish';
+import { StudyProgress } from '../../../src/ui/nomi-studying';
 import { listItems, promptFor, type StudyItem } from '../../../src/data/items';
 import { fetchProfile } from '../../../src/data/profile';
 import { missedItemIds } from '../../../src/data/attempts';
@@ -435,7 +435,8 @@ export default function Quiz() {
         </Card>
       ) : item ? (
         <>
-          <ProgressBar value={index} total={items.length} />
+          {/* With Nomi reading beside the count (NOTES §45). */}
+          <StudyProgress value={index} total={items.length} />
 
           <Card>
             <Body>{promptFor(item)}</Body>

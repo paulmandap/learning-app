@@ -91,7 +91,7 @@ function provider(reply: (input: ChatInput) => Promise<string | Partial<ChatRepl
     chat: vi.fn(async (input: ChatInput): Promise<ChatReply | null> => {
       const r = await reply(input);
       if (r === null) return null;
-      const blank: ChatReply = { answer: '', reviewerTopic: null, setTitle: null };
+      const blank: ChatReply = { answer: '', reviewerTopic: null, setTitle: null, pastedNotes: false };
       return typeof r === 'string' ? { ...blank, answer: r } : { ...blank, ...r };
     }),
   };
@@ -256,7 +256,7 @@ describe('sendToNomi — Nomi offers to act, and never acts on its own (NOTES §
     const { db, calls } = fakeDb();
     const gemini = provider();
 
-    const reply = await sendToNomi({ ...base, text: notes }, { db, provider: gemini, run: now });
+    const reply = await sendToNomi({ ...base, text: `Make flashcards from this:\n${notes}` }, { db, provider: gemini, run: now });
 
     expect(reply).toMatchObject({
       ok: true,
@@ -271,14 +271,16 @@ describe('sendToNomi — Nomi offers to act, and never acts on its own (NOTES §
     }
   });
 
-  it('saves a paste as how much was pasted, not the whole page', async () => {
+  it('keeps a paste whole, and shows it as how much was pasted (NOTES §45)', async () => {
     const { db, calls } = fakeDb();
-    const reply = await sendToNomi({ ...base, text: notes }, { db, provider: provider(), run: now });
+    // Over 1,000 characters: a paste, not a chat message.
+    const paste = `${notes}\n${notes}`;
+    const reply = await sendToNomi({ ...base, text: paste }, { db, provider: provider(), run: now });
 
     const saved = insertsInto(calls, 'nomi_messages').map((c) => (c.body as { content: string }).content);
-    expect(saved[0]).toMatch(/^Pasted notes, \d+ words: "Photosynthesis/);
-    expect(saved[0]!.length).toBeLessThan(notes.length);
-    expect(reply.said).toBe(saved[0]);
+    expect(saved[0]).toBe(paste);
+    expect(reply.said).toMatch(/^Pasted notes, \d+ words: "Photosynthesis/);
+    expect(reply).toMatchObject({ ok: true, proposal: { kind: 'make_set', title: 'Photosynthesis' } });
   });
 
   it('an ordinary question carries no offer', async () => {
@@ -288,6 +290,58 @@ describe('sendToNomi — Nomi offers to act, and never acts on its own (NOTES §
       { db, provider: provider(async () => 'It carries water.'), run: now },
     );
     expect(reply).toMatchObject({ ok: true, source: 'gemini', proposal: null, said: 'what does xylem do?' });
+  });
+});
+
+describe('sendToNomi — a message about their day, and a paste Nomi can still read (NOTES §45)', () => {
+  const aboutMyDay =
+    "hi nomi, so today was really tiring. our teacher in computer programming gave us a surprise quiz and i think i did badly because i didn't review last night. i'm kinda stressed because midterms are next week and i still have so many topics to cover, like loops, arrays and functions. can you give me some tips on how to manage my time so i can study everything before the exam?";
+  const notes = `Photosynthesis\n${Array.from(
+    { length: 12 },
+    (_, i) => `Plants turn light into sugar in step ${i} of the process.`,
+  ).join(' ')}`;
+
+  it('answers a long message about their day as a message: whole, to Gemini, with no offer', async () => {
+    const { db, calls } = fakeDb({ 'POST rpc/claim_chat_message': { value: 50 } });
+    const gemini = provider(async () => 'That sounds like a lot. Start with loops tonight.');
+
+    const reply = await sendToNomi({ ...base, text: aboutMyDay }, { db, provider: gemini, run: now });
+
+    expect(reply).toMatchObject({ ok: true, source: 'gemini', proposal: null, said: aboutMyDay });
+    expect(gemini.chat.mock.calls[0]![0].turns.at(-1)).toEqual({ role: 'user', text: aboutMyDay });
+    const saved = insertsInto(calls, 'nomi_messages').map((c) => (c.body as { content: string }).content);
+    expect(saved[0]).toBe(aboutMyDay);
+  });
+
+  it("offers a set when Gemini says a paste that fits a message is notes, in the offer's own words", async () => {
+    const { db } = fakeDb({ 'POST rpc/claim_chat_message': { value: 50 } });
+    const gemini = provider(async () => ({ answer: 'Nice notes!', pastedNotes: true }));
+
+    const reply = await sendToNomi({ ...base, text: notes }, { db, provider: gemini, run: now });
+
+    expect(reply).toMatchObject({
+      ok: true,
+      source: 'gemini',
+      proposal: { kind: 'make_set', title: 'Photosynthesis', count: 10 },
+    });
+    expect(reply.ok && reply.text).toMatch(/^Want me to make a new set, "Photosynthesis"/);
+    expect(gemini.chat.mock.calls[0]![0].system).toContain('pasted_notes');
+  });
+
+  it('sends the notes of a paste with the next message, not only its preview', async () => {
+    const { db } = fakeDb({ 'POST rpc/claim_chat_message': { value: 50 } });
+    const paste = `${notes}\n${notes}\nThe last step releases oxygen through the stomata.`;
+    const history: ChatTurn[] = [
+      { role: 'user', text: paste },
+      { role: 'nomi', text: 'Want me to make a new set, "Photosynthesis", with 10 cards?' },
+    ];
+    const gemini = provider(async () => 'They are about how plants make sugar.');
+
+    await sendToNomi({ ...base, history, text: 'what are those notes about?' }, { db, provider: gemini, run: now });
+
+    const sent = gemini.chat.mock.calls[0]![0].turns;
+    expect(sent[0]!.text).toContain('releases oxygen through the stomata');
+    expect(sent.at(-1)).toEqual({ role: 'user', text: 'what are those notes about?' });
   });
 });
 

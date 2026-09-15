@@ -33,3 +33,32 @@ export function finishLine(reaction: FinishReaction, right: number, total: numbe
   }
   return right === 0 ? "A tough one. Let's go again — it sticks the second time." : 'Good effort. The ones you missed will come back round.';
 }
+
+// ---------------------------------------------------- back on the Nomi tab --
+
+/**
+ * How long after a round ends Nomi on Home still reacts to it (NOTES §45).
+ *
+ * The owner: *"if i recently finished a flashcard, when i get back to nomi tab,
+ * nomi will do success animation."* Asked whether Nomi should always celebrate
+ * or match how the round went, they chose to match it — the same reaction the
+ * end-of-round screen shows. Once per round, and only while it is "just now".
+ */
+export const RETURN_REACTION_MS = 30 * 60 * 1000;
+
+export interface FinishedRound {
+  reaction: FinishReaction;
+  /** When it ended, epoch ms. */
+  at: number;
+}
+
+/**
+ * The reaction for Nomi on Home to play now, or null: only for a round that
+ * ended within `RETURN_REACTION_MS` and that Home has not reacted to yet.
+ */
+export function returnReaction(round: FinishedRound | null, reactedAt: number | null, now: number): FinishReaction | null {
+  if (!round) return null;
+  if (reactedAt !== null && reactedAt >= round.at) return null;
+  if (now < round.at || now - round.at > RETURN_REACTION_MS) return null;
+  return round.reaction;
+}

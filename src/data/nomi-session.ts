@@ -11,7 +11,7 @@ import { reasonToMessage } from '../core/ai-errors';
 import { GeminiBusyError } from '../core/queue';
 import { EMPTY_SNAPSHOT } from '../core/nomi-brain';
 import { compactForChat, type NomiAction } from '../core/nomi-actions';
-import type { AssistantContext, ChatTurn } from '../core/chat';
+import { messageToKeep, type AssistantContext, type ChatTurn } from '../core/chat';
 
 /**
  * The conversation the student is having with Nomi, wherever they are.
@@ -117,7 +117,9 @@ export function useNomiConversation(context: AssistantContext) {
           pending: useNomiSession.getState().pending,
         });
 
-        const said: ChatTurn = { role: 'user', text: reply.said };
+        // The whole message, as it was saved — what the next message sends
+        // Gemini. The screen shows a paste shortened (`shown`, below).
+        const said: ChatTurn = { role: 'user', text: messageToKeep(text) };
         const answered: ChatTurn[] = reply.ok ? [{ role: 'nomi', text: reply.text }] : [];
 
         if (reply.conversationId) {
@@ -228,7 +230,11 @@ export function useNomiConversation(context: AssistantContext) {
     [setSession],
   );
 
-  const shown: ChatTurn[] = waiting ? [...turns, { role: 'user', text: waiting }] : turns;
+  // A conversation keeps each message whole and shows a paste as how much was
+  // pasted (NOTES §45); `turns` is what goes with the next message.
+  const shown: ChatTurn[] = [...turns, ...(waiting ? [{ role: 'user' as const, text: waiting }] : [])].map((turn) =>
+    turn.role === 'user' ? { ...turn, text: compactForChat(turn.text) } : turn,
+  );
 
   return {
     conversationId,

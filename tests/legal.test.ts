@@ -48,11 +48,17 @@ describe('the Terms of Use and the Privacy Policy', () => {
 
   it('describe Delete my data the way the code does it', () => {
     const sets = readFileSync('src/data/sets.ts', 'utf8');
-    for (const table of ['nomi_conversations', 'notes', 'study_days', 'chat_usage']) {
+    for (const table of ['nomi_conversations', 'notes', 'study_days', 'chat_usage', 'push_subscriptions', 'reminder_settings']) {
       expect(sets, table).toContain(`'${table}'`);
     }
     expect(sets).toContain('removeAvatarPhotos(');
     expect(text(PRIVACY_POLICY)).toMatch(/does not remove your account itself/);
+    expect(text(PRIVACY_POLICY)).toMatch(/Delete my data removes[^.]*your reminders/);
+  });
+
+  it('say who delivers reminders, and what a reminder tells them (NOTES §45)', () => {
+    expect(text(PRIVACY_POLICY)).toMatch(/Apple or Google[^.]*reminders/);
+    expect(text(PRIVACY_POLICY)).toMatch(/how many cards are due/);
   });
 
   it('give the backup the days the backup workflow keeps it', () => {

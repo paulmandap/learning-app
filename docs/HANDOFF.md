@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1003 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1058 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§44 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§45 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -57,7 +57,14 @@ under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 19; all applied and verified
+### Migrations — 20; 0020 written, NOT applied
+
+**0020** (daily reminders, NOTES §45) was written on 2026-09-15 and is not
+applied. Additive: `push_subscriptions`, `reminder_settings`, `reminder_sender`
+and four functions. After applying it the owner inserts the sender secret's
+SHA-256 into `reminder_sender` (the SQL is in the migration's comments). Until
+then Settings says reminders aren't switched on yet, the isolation test reports
+the two tables as not present, and the workflow fails with PGRST202.
 
 0019 (`documents.labels`) was applied by the owner on 2026-09-14 and covering
 was verified in the built app the same day (NOTES §44.5). Until a picture has
@@ -85,7 +92,8 @@ hours, see NOTES §31 before applying anything like it) · `0016`
 `nomi_messages` (NOTES §36) · `0017` `profiles.privacy_accepted_at`, for the
 one-time privacy notice (NOTES §37). Both additive; applied 2026-09-13 ·
 `0018` `notes.content` and the private `note-images` bucket (NOTES §43) ·
-`0019` `documents.labels`, where a picture's labels are (NOTES §44).
+`0019` `documents.labels`, where a picture's labels are (NOTES §44) ·
+`0020` reminders: devices, chosen times, and the sender's secret (NOTES §45).
 
 ## Rules — these are not negotiable
 
@@ -198,7 +206,11 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 20. **Nomi celebrates the end of a round** (NOTES §43, the owner's decision,
     reversing §35.5 for one place): `success` or `encouraging` when a flashcard
     deck, a quiz or a round of blanks ends, from `src/ui/nomi-finish.tsx` only.
-    Never after a single answer; the pet still keeps the streak.
+    Never after a single answer; the pet still keeps the streak. **Widened in
+    §45, at the owner's request:** Nomi on Home plays the same reaction on
+    coming back within 30 minutes, once, and only for a round `NomiFinish`
+    recorded; Nomi studies beside the count on all three study screens; and
+    Home's Nomi waves every 20–35 seconds while idle.
 21. **A note's `body` is derived; `content` is the note** (NOTES §43). Every save
     writes both, `body` by `docToText`, so everything that reads notes reads
     plain text as before. Pictures are stored by path, never by link.
@@ -212,6 +224,24 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     37 of 37 labels and the backup rung 39 of 58. Never let a ladder or a
     different model place labels without re-running
     `scripts/label-cover-probe.ts` against it.
+24. **A message that asks for nothing is notes only when it is too long to be a
+    chat message** (NOTES §45), reversing §37's 50-word rule, which offered a
+    71-word message about the owner's day as a set. Up to 1,000 characters,
+    Gemini decides (`pasted_notes`, 24 of 24 once rule 7 named lyrics) and
+    `proposeNotesSet` checks. Messages are saved whole; only a paste is shown
+    shortened, and Gemini gets the latest paste's notes (`turnsForModel`).
+25. **A service worker exists — for reminders only** (NOTES §45), against spec
+    §5's "no service worker". `public/sw.js` has no fetch handler and caches
+    nothing. Do not add caching to it without deciding offline on its own merits.
+26. **The reminders workflow uses the publishable key and a secret, not the
+    database password** (NOTES §45). `reminders_to_send` and `reminders_sent`
+    answer only to `REMINDER_SENDER_SECRET`, compared by SHA-256. Web Push is
+    ~100 lines on Node's crypto (`scripts/web-push.ts`), not the `web-push`
+    package, held to RFC 8291's example in `tests/web-push.test.ts`.
+27. **The splash waits for the first screen's data** (NOTES §45), up to 5 s
+    after the app knows who is signed in, and still stays at least 1.4 s.
+28. **Uploaded photos stay as choices**, six at most, the oldest removed after an
+    upload but never the picture in use (NOTES §45).
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -313,6 +343,22 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 - **A wait that passes instantly is a test that stopped testing.** Wait on
   something that can only be true afterwards — `location.pathname` changing, not
   words that may already be on the previous screen (NOTES §19.7).
+- **`waitFor` and `evaluate` without `awaitPromise` return an async expression's
+  Promise, which is truthy.** `scripts/push-probe.ts` "saw" a notification that
+  way before it had looked. Have the page write what it found to a variable, and
+  wait on the variable (NOTES §45).
+- **`page.goto()` reloads the page**, and a reload forgets everything held in
+  memory — the Zustand stores, the query cache. To test anything that must
+  survive moving between screens, move within the app (`history.pushState` and
+  a `popstate` event, then `history.back()`) and leave a marker on `window` to
+  prove no reload happened (NOTES §45.6).
+- **Nomi's layers on the web:** each picture sits inside the Image's own div, so
+  a layer's transform is on the first ancestor that has one, not the picture's
+  parent (NOTES §45.6).
+- **`openPage` serves `dist/` compressed now**, as Cloudflare does. Uncompressed,
+  a throttled cold load measured four times the bytes (NOTES §45).
+- **Never take test vectors from the web-fetch tool's summary.** It added a
+  character to RFC 8291's ciphertext. Download the raw text and copy from that.
 - `--click` matches an accessibility label as well as visible text, for
   icon-only controls. Exactly: the Notes button is "+ New note".
 - **The note editor is not a field.** `fill()` cannot type into it. Use
@@ -329,7 +375,12 @@ happened four times. Log fallbacks and best-effort failures.
 
 All in `.env` (gitignored — read it, never commit or print it):
 `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
-`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `GEMINI_API_KEY`.
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `GEMINI_API_KEY`, and since
+§45 `VAPID_PRIVATE_KEY` and `REMINDER_SENDER_SECRET` — both also GitHub Actions
+secrets for `reminders.yml`. Their public halves are in the repo:
+`VAPID_PUBLIC_KEY` in `src/core/reminders.ts`, and only the secret's SHA-256 in
+the database. Replacing the VAPID pair means every device turns reminders on
+again.
 
 - The owner is fine with the Gemini key in `.env` and in transcripts. **Do not nag.**
 - Test users: `iso-a@example.test` / `iso-b@example.test`, password
@@ -369,6 +420,12 @@ npx tsx --env-file=.env scripts/avatar-probe.ts       # save faces and photos tw
 npx tsx --env-file=.env scripts/label-cover-probe.ts [--runs=3] [--model=<id>] [--only=alu-block]   # can a model place labels well enough to cover an answer? drawn diagrams, known truth
 npx tsx scripts/palette-check.ts              # contrast + colour-blindness gate, both modes
 npx tsx --env-file=.env scripts/verify-phase2.ts --pdf <file>
+npx tsx --env-file=.env scripts/splash-probe.ts [--runs 3] [--phone]   # what is on screen when the splash goes; --phone throttles (NOTES §45)
+npx tsx --env-file=.env scripts/chat-length-probe.ts [--out <dir>]    # a long message and a paste in the built app: shown, offered, saved
+npx tsx --env-file=.env scripts/pasted-notes-probe.ts [--runs 3]      # does Gemini tell notes from a message? real calls
+npx tsx --env-file=.env scripts/push-probe.ts          # a real reminder through Google's push service to headless Chrome
+npx tsx --env-file=.env scripts/nomi-moves-probe.ts [--out <dir>]   # Nomi studying beside the count, hopping back on Home, waving — read from the layers
+npx tsx --env-file=.env scripts/send-reminders.ts --slot evening --dry-run   # who would get tonight's reminder (needs 0020)
 ```
 
 ## What is genuinely open

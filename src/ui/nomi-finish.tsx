@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import { Text, View } from 'react-native';
 import { NomiCharacter } from './nomi-character';
 import { space, type, useTheme } from './theme';
 import { finishLine, finishReaction } from '../core/celebrate';
+import { useLastRound } from '../data/last-round';
 
 /**
  * Nomi's reaction when a flashcard deck, a quiz or a round of blanks ends
@@ -12,10 +14,17 @@ import { finishLine, finishReaction } from '../core/celebrate';
  * `tests/screens.test.ts` holds every other file to that — so Nomi reacts to a
  * finished round and never to a single answer, which is what the owner chose.
  * Nothing at all for a round with nothing answered.
+ *
+ * It also records the round, so Nomi on Home reacts the same way when the
+ * student goes back to it (NOTES §45).
  */
 export function NomiFinish({ right, total }: { right: number; total: number }) {
   const t = useTheme();
   const reaction = finishReaction(right, total);
+  const finished = useLastRound((s) => s.finished);
+  useEffect(() => {
+    if (reaction) finished(reaction);
+  }, [reaction, finished]);
   if (!reaction) return null;
 
   return (

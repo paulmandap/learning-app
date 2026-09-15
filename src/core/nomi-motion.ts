@@ -467,3 +467,22 @@ export function nextBlinkDelay(blink: Blink, random: () => number): number {
   const r = Math.min(1, Math.max(0, random()));
   return Math.round(blink.minGapMs + (blink.maxGapMs - blink.minGapMs) * r);
 }
+
+/**
+ * When Nomi on Home waves again, standing idle beside its line (NOTES §45).
+ *
+ * The owner: *"for the nomi tab, could you make nomi idle, and doing greeting
+ * from time-to-time?"* The first wave comes a few seconds after the line is
+ * said, so a visit of any length sees one; after that roughly every half
+ * minute, at a random gap so it never looks like clockwork.
+ */
+export const IDLE_GREETING = {
+  firstMs: [5000, 9000],
+  gapMs: [20000, 35000],
+} as const;
+
+export function nextGreetingDelay(first: boolean, random: () => number): number {
+  const [min, max] = first ? IDLE_GREETING.firstMs : IDLE_GREETING.gapMs;
+  const r = Math.min(1, Math.max(0, random()));
+  return Math.round(min + (max - min) * r);
+}

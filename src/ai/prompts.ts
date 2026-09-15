@@ -478,6 +478,12 @@ export function buildNomiSystemPrompt(input: {
     '   the topic in "reviewer_topic", in a few words ("computer parts"), and keep "answer" to one short',
     '   sentence. The app writes the reviewer: never write it in "answer", and never tell them to paste',
     '   notes for it. Leave "reviewer_topic" out when they only ask a question about a topic.',
+    '7. Set "pasted_notes" to true only when their latest message IS study material they pasted to learn',
+    '   from — lecture notes, a textbook passage, a list of facts or definitions — and they ask nothing about',
+    '   it. Lines of a song or a poem with nothing else around them are pasted notes too: students learn lyrics',
+    '   and poems for class. Keep "answer" to one short sentence then; the app offers to make cards from it.',
+    '   A message telling you about their day, their feelings, their plans or their classes is never pasted',
+    '   notes, however long it is, and neither is any message that asks you something.',
     '',
     input.brief,
   ];

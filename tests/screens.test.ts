@@ -556,6 +556,8 @@ describe("the owner's third round (NOTES §37)", () => {
   it('the app takes the splash away once it knows who is signed in (NOTES §42)', () => {
     // What the splash draws is checked in tests/splash.test.ts.
     expect(code(read('app', '_layout.tsx'))).toMatch(/getElementById\('splash'\)[\s\S]*?classList\.add\('gone'\)/);
+    // …and once the first screen has its data behind it, not onto "Loading…" (§45).
+    expect(code(read('app', '_layout.tsx'))).toMatch(/queryClient\.isFetching\(\)[\s\S]*?shouldHideSplash\(/);
   });
 
   it('Add notes and Nomi start a set the same way', () => {
@@ -619,6 +621,24 @@ describe('Nomi celebrates a finished round, never a single answer (NOTES §43)',
   it('every study screen shows it when a round ends', () => {
     for (const screen of ['flashcards.tsx', 'quiz.tsx', 'blanks.tsx']) {
       expect(code(read('app', 'set', '[id]', screen)), screen).toContain('<NomiFinish');
+    }
+  });
+
+  it('Home reacts only to a round NomiFinish recorded as over (NOTES §45)', () => {
+    // The owner asked for Nomi on the Nomi tab to react after a round. Nothing
+    // else may record one, so Home can never react to a single answer.
+    expect(code(read('src', 'ui', 'nomi.tsx'))).toMatch(/returnReaction\(round, reactedAt/);
+    const recorders = [...tsxUnder('app'), ...tsxUnder(join('src', 'ui'))].filter((f) =>
+      /\bfinished\(reaction\)/.test(readFileSync(f, 'utf8')),
+    );
+    expect(recorders.map((f) => f.split(/[\\/]/).pop())).toEqual(['nomi-finish.tsx']);
+  });
+
+  it('every study screen shows Nomi studying beside the count (NOTES §45)', () => {
+    for (const screen of ['flashcards.tsx', 'quiz.tsx', 'blanks.tsx']) {
+      const source = code(read('app', 'set', '[id]', screen));
+      expect(source, screen).toContain('<StudyProgress');
+      expect(source, screen).not.toContain('<ProgressBar');
     }
   });
 });

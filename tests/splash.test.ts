@@ -2,7 +2,17 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { NOMI_RIG } from '../src/ui/nomi-rig';
-import { SPLASH_VARIANTS, splashRigBlock, withSplashRig } from '../src/core/splash';
+import {
+  shouldHideSplash,
+  SPLASH_DATA_WAIT_MS,
+  SPLASH_MIN_MS,
+  SPLASH_NOTHING_TO_LOAD_MS,
+  SPLASH_SETTLE_MS,
+  SPLASH_VARIANTS,
+  splashRigBlock,
+  withSplashRig,
+  type SplashMoment,
+} from '../src/core/splash';
 
 /**
  * The splash in public/index.html (NOTES §42, §43).
@@ -45,5 +55,42 @@ describe('the splash', () => {
 
   it('refuses a page without its markers rather than quietly writing nothing', () => {
     expect(() => withSplashRig('<html><head></head></html>', NOMI_RIG)).toThrow(/markers/);
+  });
+});
+
+describe('when the splash goes (NOTES §45)', () => {
+  // Signed in, the first screen's data just in: the moment it should go.
+  const settled: SplashMoment = {
+    sinceLoad: 2000,
+    sinceReady: 600,
+    signedIn: true,
+    fetching: 0,
+    idleFor: SPLASH_SETTLE_MS,
+    sawWork: true,
+  };
+
+  it('goes once the first screen has what it asked for', () => {
+    expect(shouldHideSplash(settled)).toBe(true);
+  });
+
+  it('stays while the first screen is still loading — the "Loading…" it used to reveal', () => {
+    expect(shouldHideSplash({ ...settled, fetching: 3, idleFor: 0 })).toBe(false);
+    // The moment between one answer and the request it starts.
+    expect(shouldHideSplash({ ...settled, idleFor: SPLASH_SETTLE_MS - 1 })).toBe(false);
+  });
+
+  it('stays until the app knows who is signed in, and for one whole gesture', () => {
+    expect(shouldHideSplash({ ...settled, sinceReady: null })).toBe(false);
+    expect(shouldHideSplash({ ...settled, sinceLoad: SPLASH_MIN_MS - 1 })).toBe(false);
+  });
+
+  it('never holds anyone on a slow network past its limit', () => {
+    expect(shouldHideSplash({ ...settled, fetching: 2, idleFor: 0, sinceReady: SPLASH_DATA_WAIT_MS })).toBe(true);
+  });
+
+  it('does not wait for data that sign-in, or a screen with nothing to load, never asks for', () => {
+    expect(shouldHideSplash({ ...settled, signedIn: false, sawWork: false, idleFor: 0, sinceReady: 0 })).toBe(true);
+    expect(shouldHideSplash({ ...settled, sawWork: false, sinceReady: SPLASH_NOTHING_TO_LOAD_MS - 1 })).toBe(false);
+    expect(shouldHideSplash({ ...settled, sawWork: false, sinceReady: SPLASH_NOTHING_TO_LOAD_MS })).toBe(true);
   });
 });

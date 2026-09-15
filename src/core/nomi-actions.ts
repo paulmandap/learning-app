@@ -41,7 +41,7 @@
 import { supportedFor } from './planner';
 import { normalize, splitSentences, wordCount } from './text';
 import { FACE_COUNT } from './avatar';
-import { MAX_QUESTION_CHARS } from './chat';
+import { MAX_NOTES_CHARS, MAX_QUESTION_CHARS, trimNotes, type ChatTurn } from './chat';
 import { TOPIC_CARD_COUNT, topicTitle } from './reviewer';
 import type { PetSpecies } from './pet';
 import type { AppSnapshot, BrainSet } from './nomi-brain';
@@ -524,9 +524,32 @@ export function proposeAction(message: string, snapshot: AppSnapshot): Proposal 
     return propose({ kind: 'save_note', title: readTitle(instruction) ?? suggestTitle(notes), body: notes });
   }
 
+  // A message that asks for nothing is taken for notes only when it is too long
+  // to be a chat message (NOTES §45). Anything shorter used to be notes from 50
+  // words, so the owner telling Nomi about their day in 71 was offered a set
+  // called "hi nomi, so today was really". No pattern tells a paragraph of notes
+  // from a paragraph about someone's day. Gemini, reading it in the
+  // conversation, can — and says so, which comes back through `proposeNotesSet`.
+  if (!instruction && !long) return null;
   if (!long && wordCount(notes) < NOTES_MIN_WORDS) return null;
   if (!instruction && ASK.test(text)) return null;
 
+  return offerForNotes(instruction, notes, snapshot);
+}
+
+/**
+ * The offer for a message Gemini said is study material pasted to learn from
+ * (NOTES §45): the same split, title, count and words as a request Nomi
+ * recognised itself. Null when there is too little to make cards from.
+ */
+export function proposeNotesSet(message: string, snapshot: AppSnapshot): Proposal | null {
+  const { instruction, notes } = splitMessage(message);
+  if (wordCount(notes) < NOTES_MIN_WORDS) return null;
+  return offerForNotes(instruction, notes, snapshot);
+}
+
+/** A new set from notes, or the notes added to the set the instruction names. */
+function offerForNotes(instruction: string, notes: string, snapshot: AppSnapshot): Proposal {
   const stated = instruction ? statedCount(instruction) : null;
   const count = stated ?? chooseCardCount(notes);
 
@@ -712,14 +735,45 @@ export function actionCard(action: NomiAction): { heading: string; detail: strin
  * How a pasted page of notes appears in the conversation.
  *
  * The instruction, and how much was pasted with a glimpse of it — not the whole
- * page as a chat bubble, which would bury everything around it, and not a copy
- * in the saved history, which is for what was SAID.
+ * page as a chat bubble, which would bury everything around it.
+ *
+ * Only a paste: a message that fits a chat message is shown as typed, however
+ * many words it has. From 50 words it used to become "Pasted notes, 71 words:
+ * …" too, cut mid-sentence, and the owner could not read back what they had
+ * said to Nomi (NOTES §45). What the conversation KEEPS is the whole message
+ * (`messageToKeep`); this is only what it shows.
  */
 export function compactForChat(message: string): string {
   const text = message.trim();
+  if (text.length <= MAX_QUESTION_CHARS) return text;
   const { instruction, notes } = splitMessage(text);
-  const words = wordCount(notes);
-  if (text.length <= MAX_QUESTION_CHARS && words < NOTES_MIN_WORDS) return text;
   const preview = notes.replace(/\s+/g, ' ').slice(0, 140).replace(/\s+\S*$/, '');
-  return `${instruction ? `${instruction}\n` : ''}Pasted notes, ${words} words: "${preview}…"`;
+  return `${instruction ? `${instruction}\n` : ''}Pasted notes, ${wordCount(notes)} words: "${preview}…"`;
+}
+
+/**
+ * The conversation as Gemini is sent it (NOTES §45).
+ *
+ * Everything that fits a chat message goes as it was typed. The latest paste
+ * goes as a page of its notes, so Nomi can say what they are about — it was
+ * sent only the 140-character preview, and could not. Older pastes go as their
+ * preview, so a conversation with three songs pasted into it does not send all
+ * three with every message.
+ */
+export function turnsForModel(turns: readonly ChatTurn[]): ChatTurn[] {
+  let latestPaste = -1;
+  turns.forEach((turn, i) => {
+    if (turn.role === 'user' && turn.text.length > MAX_QUESTION_CHARS) latestPaste = i;
+  });
+  return turns.map((turn, i) => {
+    if (turn.role !== 'user' || turn.text.length <= MAX_QUESTION_CHARS) return turn;
+    if (i !== latestPaste) return { ...turn, text: compactForChat(turn.text) };
+    const { instruction, notes } = splitMessage(turn.text);
+    const page = trimNotes(notes, MAX_NOTES_CHARS);
+    const part = page.length < notes.trim().length ? ', the first part of them' : '';
+    return {
+      ...turn,
+      text: `${instruction ? `${instruction}\n` : ''}Pasted notes, ${wordCount(notes)} words${part}:\n${page}`,
+    };
+  });
 }

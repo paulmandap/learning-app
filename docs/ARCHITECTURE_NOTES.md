@@ -6056,8 +6056,296 @@ probe of §43 still passes whole.
   often a picture gets covered rather than moved to the answer side.
 
 
+## 45. Round ten: a message taken for notes, a splash that waits for the screen, reminders, and photos kept (2026-09-15)
+
+The owner sent six things from using the app: a message of "more than 80 words,
+no matter the context" offered as flashcards; the same message cut to "…" and
+Nomi not knowing what it said; a daily reminder to study; the app loading
+during the splash "saving users time"; an uploaded photo kept as a choice; and
+the sign-in email still saying "Study". One needed decisions only the owner
+could make, and they were asked (§45.3).
+
+### 45.1 "More than 80 words, no matter the context" — and the "…"
+
+**Reproduced first, with messages of the same shape.** The owner's own
+conversation cannot be read from here: sign-in is by email code only (D10), and
+no service-role key is ever used. Two messages about a school day, with no
+request in either:
+
+```
+71 words   offer: make_set "hi nomi, so today was really", 10 cards
+           shown and saved as: Pasted notes, 71 words: "hi nomi, so today was really tiring. … because i didn't…"
+65 words   offer: make_set "nomi kinakabahan ako for our midterms", 10 cards
+```
+
+**Two causes, and the second is the owner's item 2.** `proposeAction` took any
+message of 50 words or more that asked for nothing as notes (§37), so length
+alone decided. And `compactForChat` shortened the same messages to a
+140-character preview — which is what the conversation SAVED, and therefore what
+every later message sent Gemini as history. After the "…", Nomi had been given
+only the preview.
+
+**What changed** (`src/core/nomi-actions.ts`, `src/data/nomi-chat.ts`,
+`src/data/nomi-session.ts`):
+
+- A message that asks for nothing is an offer by pattern only when it is too
+  long to be a chat message — over `MAX_QUESTION_CHARS`, 1,000 characters,
+  which could not go to Gemini as a question anyway. Anything shorter goes to
+  Gemini with the conversation, and the reply has a third optional field,
+  `pasted_notes`. When it is true, `proposeNotesSet` makes the offer a request
+  would — same split, title and count, 50 words at least — in the offer's own
+  words (§39.3's rule: the model names, the app checks). A message with a
+  request in it ("make flashcards from this: …") is handled exactly as before.
+- Only a paste, over 1,000 characters, is shown shortened. Everything else is
+  shown as typed.
+- A conversation keeps each message whole (`messageToKeep`), up to 0016's own
+  8,000-character limit, cut at a sentence past it. Gemini is sent
+  `turnsForModel`: messages as typed, the latest paste as up to a page of its
+  notes (`MAX_NOTES_CHARS`, 4,000), older pastes as their preview — so a
+  conversation with three songs in it does not send all three with every
+  message. The worst request grows from 20 × 1,000 characters to that plus 4,000.
+
+**What it costs.** A short paste with no request spends one of the day's 60
+replies to be recognised, and needs a key — without one the student is told to
+add a key, which making the cards needed anyway. A message over 1,000
+characters is still offered as notes without asking Gemini, so one about
+someone's day that long still gets an offer, which "Not now" dismisses. Reopen
+if the owner hits it. Old conversations keep the previews they saved.
+
+**Measured, Gemini** (`scripts/pasted-notes-probe.ts`, 2026-09-15, on
+`GEMINI_API_KEY`; gemini-3.6-flash unavailable for most calls, which were served
+by 3.8-flash and 3.5-flash-lite):
+
+```
+                                                  pasted_notes, 3 runs    Nomi's patterns
+about their day, English, 71 words                 false false false        nothing
+about their day, Taglish, 56 words, no "?"         false false false        nothing
+notes pasted with a question about them            false false false        nothing
+lecture notes, one paragraph                       true  true  true         nothing
+notes as bullets                                   true  true  true         nothing
+notes in Taglish                                   true  true  true         nothing
+song lines (§37's stand-in ballad)                 true  true  false        nothing
+                                                   20 of 21 right
+```
+
+The one miss is the safe way round: no offer, and "make flashcards from this"
+still makes one.
+
+**In the built app** (`scripts/chat-length-probe.ts`, test account, 393 dark):
+the 71-word message shown whole, with no offer, sent to Gemini (refused on the
+account's placeholder key, as expected — the point is where it went), and saved
+whole; a 1,429-character paste with no request shown as "Pasted notes, 285
+words" with the offer, and saved whole. Both chats deleted.
+
+### 45.2 "While in a splash, the app itself will load too"
+
+**Measured before changing anything** (`scripts/splash-probe.ts`). A recorder
+installed before any of the page's scripts logs, from the start of the load,
+when Home drew, when "Loading…", the sets, the Continue card and Nomi's line
+appeared, and what was on screen the moment the fade began. The app already
+loaded behind the splash: the bundle, the session and Home's requests all ran
+under it. What was wrong is what the splash waited for — only whether anyone is
+signed in.
+
+**The harness was wrong first.** It served the bundle uncompressed — 2.3 MB
+where Cloudflare sends about 560 KB — and the first throttled run put the app's
+first drawing at 12 seconds. `openPage`'s server now compresses as Cloudflare
+does, and HEAD's `app/_layout.tsx` was built again and measured under the same
+conditions as the change:
+
+```
+phone: no cache, 4× CPU, 150 ms and 1.6 Mb/s     the fade starts            on screen then            Home complete
+  before (HEAD)                                  3,630 / 3,614 / 3,736 ms   Loading…                  4,180 / 4,119 / 4,438 ms, after the splash
+  after                                          4,463 / 4,561 / 5,050 ms   sets, Continue, Nomi      4,270 / 4,349 / 4,858 ms, behind it
+desktop: warm cache
+  before and after                               1,412 – 1,420 ms           everything                about 1,000 ms
+```
+
+Before, the splash went onto "Loading…" and the screen filled in 0.4–0.8 s
+later. Now it goes about 0.2 s after the screen is complete — the 150 ms settle
+and the 50 ms check.
+
+**A warm launch is held by the minimum, not by loading.** Home is complete at
+about 1.0 s and the splash stays to 1.4 s (`SPLASH_MIN_MS`, set in §43 so one
+gesture finishes). That is 0.4 s of splash on every warm start; lowering it is
+the owner's call.
+
+**The rule** (`shouldHideSplash`, `src/core/splash.ts`): the splash goes once
+the app knows who is signed in, one gesture has played, and nothing has been
+loading for 150 ms after something was. Signed out, it goes at once. It never
+waits longer than 5 s after the app knew who is signed in, so a slow network
+shows what it has. `app/_layout.tsx` checks `queryClient.isFetching()` every
+50 ms while the splash is up, and stops when it goes.
+
+### 45.3 Reminders: a phone notification, what's waiting, at most three a day
+
+**Asked, because it needs things only the owner can set up.** Offered a phone
+notification, a calendar reminder or an email, they chose **a phone
+notification**; asked what it says, **what's waiting**. Offered a time each
+person picks, they read "the job runs every hour" as a notification every hour —
+*"i think that's way too much. ideal would be a max of 3 per day"* — so it is
+three fixed times, each one a person can turn off.
+
+**What was built.**
+
+- **When** (`REMINDER_TIMES`, `src/core/reminders.ts`): 9 AM, 3 PM and 8 PM in the
+  Philippines — 01:07, 07:07 and 12:07 UTC, seven past because GitHub's
+  scheduler runs late on the hour. One UTC schedule is right all year: the
+  Philippines has no daylight saving. `tests/reminders.test.ts` holds the list,
+  the workflow's schedule and the migration's check to one another.
+- **What it says** (`reminderMessage`): "8 cards due today · Keep your 3-day
+  streak going.", "1 card due today · A few minutes now keeps them fresh.",
+  "Studied yet today? · Keep your 5-day streak going." — and **nothing at all
+  once they have studied that day**. Counted by Home's rules (`reminderCounts`:
+  UTC days from `study_days`; due by the start of today, from `review_state`, on
+  cards not hidden). Each replaces the last on the lock screen; a newer one
+  replaces one not yet delivered; none goes within two hours of the last; one
+  not delivered in three hours is dropped.
+- **Sent** by `.github/workflows/reminders.yml`, which runs
+  `scripts/send-reminders.ts`, which uses `scripts/web-push.ts`. **No
+  dependency**: `web-push` on npm would do it, but RFC 8291's encryption and RFC
+  8292's signature are about a hundred lines on Node's own crypto, and
+  `tests/web-push.test.ts` reproduces RFC 8291's worked example byte for byte,
+  decrypts fresh messages as a device does, and verifies the signature with the
+  public key.
+- **Reaching the database with no service-role key and no database password.**
+  The workflow uses the publishable key, as keepalive does, and calls two
+  functions (migration 0020) that answer only to `REMINDER_SENDER_SECRET`,
+  compared by SHA-256 with the one row of `reminder_sender` (RLS on, no
+  policies). They return, per device, only what a reminder needs. The log prints
+  counts, never a person or an address: the repository is public.
+- **On the device**: `public/sw.js`, a service worker that shows a push and opens
+  Nomi when it is tapped. **It has no fetch handler and caches nothing** — the
+  app loads exactly as before, and spec §5's "no offline" stands. It is
+  registered only when someone turns reminders on. Settings has a Reminders card
+  after the pet: the three times to pick, and "Turn on reminders", which asks for
+  permission before awaiting anything, because an iPhone asks only in answer to
+  a tap. It says plainly when Nomi must be added to the Home Screen first, when
+  notifications were refused, and before 0020. Signing out removes the device
+  first; a device belongs to whoever signed in on it last
+  (`save_push_subscription`). Delete my data removes both new tables.
+- **The Privacy Policy** now says what is collected (the times, and a device
+  address from Apple's or Google's service), what a reminder carries, who
+  delivers it, and that GitHub runs the job. Effective September 15, 2026.
+
+**Measured.**
+
+- `scripts/push-probe.ts`, the built app in headless Chrome: registered
+  `sw.js` and subscribed with the app's key at fcm.googleapis.com; the sender's
+  encrypted, signed reminder was accepted with **HTTP 201**, and the service
+  worker showed `{"title":"8 cards due today","body":"Keep your 3-day streak
+  going.","url":"/"}`. Apple's push service, which only an iPhone subscribes to,
+  cannot be reached from here.
+- **That probe's first run passed without looking.** `waitFor` was handed an
+  async function, got back a Promise — which is truthy — and returned at once,
+  printing `[object Object]`. The page now leaves what it saw in a variable, and
+  the probe refuses to start with a notification already showing.
+- **The RFC's example ciphertext came back from the web-fetch tool with one
+  extra character**, and the first test run failed on it. Taken again from the
+  RFC's raw text, every value in the test matches.
+- Before 0020: `send-reminders --dry-run` fails with the database's own
+  "PGRST202 … reminders_to_send", not silence; the isolation test passes 27/27
+  and reports the two new tables as not present.
+
+**The owner's steps, not done here:** apply 0020, set the secret's hash, add
+`REMINDER_SENDER_SECRET` and `VAPID_PRIVATE_KEY` as GitHub secrets, deploy, and
+turn reminders on from the Home Screen app. Then to verify: the isolation test's
+new checks, a dry run from the workflow, and one real send.
+
+GitHub turns off scheduled workflows in a public repository after 60 days with
+no commit.
+
+### 45.4 Uploaded photos kept as choices
+
+Each upload removed the photo before it, and a face chosen after a photo left
+that photo in storage with no way back to it. Now every upload stays, newest
+first, as "Your photos" above the faces — six at most (`MAX_KEPT_PHOTOS`). Past
+that the oldest is removed after an upload, never the picture in use
+(`photoChoices`). Only the app's own `avatar-<time>.jpg` files count. Delete my
+data already removed the whole folder.
+
+`scripts/avatar-probe.ts`: three faces, two photos, a face after them, **2 photos
+offered, back to photo #1** — OK at every step; restored and removed.
+
+### 45.5 The sign-in email still says "Study"
+
+As §42.3: it is the Supabase project's email template, set in the dashboard, and
+nothing in this repository sends it. The owner asked for the link and simple
+steps: https://supabase.com/dashboard/project/adznlxbrgtyteujcaqwg/auth/templates,
+where Supabase's own documentation (checked 2026-09-15) says the code sent by
+`signInWithOtp` comes from **"Magic link or OTP"**, and a new account's from
+**"Confirm sign up"** — so both, subject and body, with `{{ .Token }}` kept.
+
+### 45.6 Second pass: the owner's own conversation, lyrics, and Nomi seen moving
+
+**The owner's conversation arrived, from the live site** (still §44's code). A
+message shown as *Pasted notes, 80 words: "hey i did got up and it's been 2 hrs.
+i took a bath, ate breakfast, started doing my pre-interview task. but i feel so
+much heavy in my…"*; the offer of a set called "hey i did got up and"; *"i did
+not pasted a notes, it's just a long rant i typed"*; and, asked what the rest
+said, *"the rest of the text was cut off."* Both halves exactly as §45.1 found
+them. Its opening words, with an iPhone's curly apostrophes, are now a test, and
+went to Gemini three times: `pasted_notes` false, false, false. That
+conversation keeps its saved preview after this ships; a new one keeps
+messages whole.
+
+**Lyrics, measured again, were not reliable.** A second run of
+`pasted-notes-probe` recognised §37's ballad 1 time in 3 — 3 of 6 over the two
+runs. The miss is the safe direction, but the owner has pasted songs before. Rule
+7 now says in as many words that lines of a song or a poem with nothing around
+them are notes. After: **24 of 24** — the ballad 3 of 3, and the owner's message
+and both day messages still false every time.
+
+**Nomi studying, where it can be seen.** *"i still don't see the
+studying/focused animation."* It played only in the ✦ panel over an open card,
+which nobody opens while studying. Asked where, the owner chose **beside the
+cards**: `StudyProgress` (`src/ui/nomi-studying.tsx`) puts Nomi at 56 points
+beside the count on flashcards, the quiz and fill-in-the-blanks, reading. It does
+not react to answers, and it stops when the screen is not in front.
+
+**Nomi on Home: idle, a wave now and then, and the round just finished.**
+*"make nomi idle, and doing greeting from time-to-time. if i recently finished a
+flashcard, when i get back to nomi tab, nomi will do success animation."* Asked
+whether to always celebrate or to match how the round went, the owner chose **to
+match it**. So `NomiFinish` records the round as it ends (`src/data/last-round.ts`,
+in memory), and Home, coming into view, plays that round's own reaction — a hop
+at 70% or more, nods below — once, and only within 30 minutes
+(`returnReaction`, `src/core/celebrate.ts`). Once its line is said, Nomi waves 5–9
+seconds later, then every 20–35 seconds (`nextGreetingDelay`). Deviation 20 is
+widened for this one place, and `tests/screens.test.ts` holds that only
+`NomiFinish` can record a round, so Home can never react to a single answer.
+
+**Measured in the built app** (`scripts/nomi-moves-probe.ts`, test account, 393
+dark, reduce motion off; a probe set of three flashcards, deleted after):
+
+```
+beside the count          32 poses in 37 samples over 4 s, eyes down in all 37
+3 of 3 "Got it", back     no reload; Nomi's highest hop −6.3 px on a 92 px owl (success lifts 7%, 6.4 px)
+left on Home, 16 s        the wing raised to 135° — the wave
+```
+
+**The probe was wrong twice before it was right.** First it walked one layer
+short of the wing — react-native-web wraps each picture in the Image's own div —
+so it read the wing's fixed pivot offset, +12.2 px, as a hop, the wing as 0°, and
+the studying owl as one pose. It now climbs to the first ancestor that rotates,
+and prints one raw transform to check by eye. Then it opened the deck with
+`page.goto()`, which reloads the page and so forgets the round held in memory,
+and it reported no hop. It now moves within the app and checks a marker left on
+the page is still there when Home comes back.
+
+### 45.7 Verified
+
+typecheck clean · **1058 tests**, 3 skipped (+55) · `expo export` · boot · the
+probes above · screenshots at 393 dark of the long message, the paste with its
+offer, Settings with two photos and the Reminders card before 0020, and a deck
+with Nomi studying beside the count. **Not deployed. Migration 0020 not
+applied.**
+
+
 ## Sources
 
+- [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)
+- [RFC 8292 — VAPID for Web Push](https://www.rfc-editor.org/rfc/rfc8292)
 - [Gemini API models](https://ai.google.dev/gemini-api/docs/models)
 - [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
 - [Gemini API rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)

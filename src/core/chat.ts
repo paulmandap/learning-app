@@ -148,6 +148,24 @@ export const MAX_QUESTION_CHARS = 1000;
  */
 export const MAX_PASTE_CHARS = 20_000;
 
+/**
+ * The longest message a saved conversation keeps: `nomi_messages.content`'s own
+ * limit (migration 0016).
+ */
+export const MAX_SAVED_CHARS = 8000;
+
+/**
+ * A message as the conversation keeps it — the whole of it, up to what the
+ * database takes, cut at a sentence past that.
+ *
+ * A paste used to be kept as "Pasted notes, N words: …" and nothing else, so
+ * every later message sent Gemini that preview and Nomi could not say what the
+ * notes held (NOTES §45). How a paste is SHOWN is `compactForChat`.
+ */
+export function messageToKeep(message: string): string {
+  return trimNotes(message, MAX_SAVED_CHARS);
+}
+
 /** Remaining questions at or below which the screen starts saying so. */
 export const LOW_REMAINING = 5;
 

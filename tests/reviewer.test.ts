@@ -111,8 +111,17 @@ describe('what Gemini sends back', () => {
       answer: 'On it!',
       reviewerTopic: 'computer parts',
       setTitle: null,
+      pastedNotes: false,
     });
-    expect(parseChatResult({ answer: 'Hi!', set_title: '   ' })).toEqual({ answer: 'Hi!', reviewerTopic: null, setTitle: null });
+    expect(parseChatResult({ answer: 'Hi!', set_title: '   ' })).toEqual({
+      answer: 'Hi!',
+      reviewerTopic: null,
+      setTitle: null,
+      pastedNotes: false,
+    });
+    // NOTES §45: only a real true counts, and it is enough on its own.
+    expect(parseChatResult({ answer: '', pasted_notes: true })).toMatchObject({ pastedNotes: true });
+    expect(parseChatResult({ answer: 'Hi!', pasted_notes: 'yes' })).toBeNull();
     expect(parseChatResult({ answer: '', set_title: 'Bio 101' })).toMatchObject({ setTitle: 'Bio 101' });
     expect(parseChatResult({ answer: '' })).toBeNull();
     expect(parseChatResult('not json')).toBeNull();

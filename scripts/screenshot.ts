@@ -30,6 +30,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
+import { gzipSync } from 'node:zlib';
 
 const DIST = 'dist';
 
@@ -83,6 +84,15 @@ export interface Page {
   screenshot(file: string): Promise<void>;
   /** console.* and uncaught exceptions, in order. */
   logs(): string[];
+  /**
+   * Any DevTools command on this page — for what the helpers above do not
+   * cover: throttling, a script run before the page's own (NOTES §45).
+   */
+  cdp(method: string, params?: unknown): Promise<Record<string, unknown>>;
+  /** A DevTools command for the browser itself, such as granting a permission. */
+  browser(method: string, params?: unknown): Promise<Record<string, unknown>>;
+  /** Where the built app is being served, e.g. "http://127.0.0.1:52011". */
+  origin: string;
   close(): Promise<void>;
 }
 
@@ -94,8 +104,13 @@ function staticServer(): Promise<Server> {
     // route but "/" 404s and the screenshot is of nothing.
     if (!existsSync(file) || statSync(file).isDirectory()) file = join(DIST, 'index.html');
     const body = readFileSync(file);
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
-    res.end(body);
+    const type = MIME[extname(file)] ?? 'application/octet-stream';
+    // Compressed, as Cloudflare serves it. Sent whole, the bundle is four times
+    // the bytes, and a throttled cold load measured that instead of the app
+    // (NOTES §45).
+    const gzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? '')) && /^(text\/|application\/json)/.test(type);
+    res.writeHead(200, { 'Content-Type': type, ...(gzip ? { 'Content-Encoding': 'gzip' } : {}) });
+    res.end(gzip ? gzipSync(body) : body);
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
@@ -507,6 +522,9 @@ export async function openPage(options: {
     press,
     screenshot,
     logs: () => logs,
+    cdp: on,
+    browser: (method, params) => send(method, params),
+    origin,
     close: async () => {
       chrome.kill();
       server.close();

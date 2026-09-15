@@ -16,7 +16,8 @@
  * Needs TEST_USER_A_EMAIL / TEST_USER_A_PASSWORD.
  */
 import { supabase } from '../src/data/supabase';
-import { fetchProfile, saveAvatar, uploadAvatarPhoto } from '../src/data/profile';
+import { fetchProfile, listAvatarPhotos, saveAvatar, uploadAvatarPhoto } from '../src/data/profile';
+import { photoValue } from '../src/core/avatar';
 
 // A valid 1x1 JPEG.
 const JPEG_B64 =
@@ -48,9 +49,13 @@ async function main() {
   await step('face 2', () => saveAvatar('face:2'));
   await step('face 5', () => saveAvatar('face:5'));
   await step('face 9', () => saveAvatar('face:9'));
-  await step('photo #1', async () => uploadAvatarPhoto(jpeg(), (await fetchProfile())?.avatar ?? null));
-  await step('photo #2', async () => uploadAvatarPhoto(jpeg(), (await fetchProfile())?.avatar ?? null));
+  await step('photo #1', async () => uploadAvatarPhoto(jpeg()));
+  await step('photo #2', async () => uploadAvatarPhoto(jpeg()));
   await step('face 1 after a photo', () => saveAvatar('face:1'));
+  // NOTES §45: both photos are still there to go back to.
+  const offered = await listAvatarPhotos((await fetchProfile())?.avatar ?? null);
+  await step(`photos offered: ${offered.length}`, async () => offered.join(', '));
+  await step('back to photo #1', () => saveAvatar(photoValue(offered[1]!)));
 
   const { error: restoreError } = await supabase.from('profiles').update({ avatar: original }).eq('id', uid);
   const { data: files } = await supabase.storage.from('avatars').list(uid);

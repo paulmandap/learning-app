@@ -167,8 +167,9 @@ export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
   // studied and the daily count of Nomi's replies went the same way. Found
   // writing the privacy policy, which cannot say this removes what it did not.
   // Each table has a "delete own" policy (0009, 0010, 0012); one that does not
-  // exist yet has nothing in it to delete.
-  for (const table of ['notes', 'study_days', 'chat_usage'] as const) {
+  // exist yet has nothing in it to delete. Reminders too (0020, NOTES §45):
+  // which times, and every device they went to, so none arrives afterwards.
+  for (const table of ['notes', 'study_days', 'chat_usage', 'push_subscriptions', 'reminder_settings'] as const) {
     const { error: tableError } = await supabase.from(table).delete().eq('user_id', id);
     if (tableError && !isMissingTable(tableError)) throw new Error(tableError.message);
   }

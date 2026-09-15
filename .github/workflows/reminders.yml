@@ -1,0 +1,88 @@
+name: Study reminders
+
+# Nomi's daily reminders (NOTES §45): at most three a day, Philippine time, to
+# people who turned them on in Settings and have not studied yet that day.
+# What each one says is decided in src/core/reminders.ts.
+#
+# ---------------------------------------------------------------------------
+# CREDENTIALS — four repo secrets. None is a service-role key or the database
+# password: the script reaches the database only through two functions in
+# migration 0020, which answer only to REMINDER_SENDER_SECRET.
+#
+#   SUPABASE_URL              already set, for keepalive.yml
+#   SUPABASE_PUBLISHABLE_KEY  already set, for keepalive.yml
+#   REMINDER_SENDER_SECRET    only its SHA-256 is in the database
+#   VAPID_PRIVATE_KEY         signs every push; its public half is
+#                             VAPID_PUBLIC_KEY in src/core/reminders.ts
+#
+# Set them under: Settings → Secrets and variables → Actions
+# ---------------------------------------------------------------------------
+#
+# THIS REPOSITORY IS PUBLIC, and so is this log. The script prints counts only.
+#
+# GitHub turns scheduled workflows off in a public repository after 60 days
+# without a commit. If reminders stop, look for that banner under Actions.
+
+on:
+  schedule:
+    # REMINDER_TIMES in src/core/reminders.ts, in UTC. tests/reminders.test.ts
+    # fails if the two disagree.
+    - cron: '7 1 * * *' # morning, 9:07 AM in the Philippines
+    - cron: '7 7 * * *' # afternoon, 3:07 PM
+    - cron: '7 12 * * *' # evening, 8:07 PM
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: Which reminder to send now
+        type: choice
+        options: [morning, afternoon, evening]
+        default: evening
+      dry_run:
+        description: Only count who would get one, and send nothing
+        type: boolean
+        default: true
+
+# Never two sends at once: the second would find nothing marked sent yet.
+concurrency:
+  group: reminders
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Send
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          REMINDER_SENDER_SECRET: ${{ secrets.REMINDER_SENDER_SECRET }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_SLOT: ${{ inputs.slot }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          case "${SCHEDULE:-}" in
+            '7 1 * * *') slot=morning ;;
+            '7 7 * * *') slot=afternoon ;;
+            '7 12 * * *') slot=evening ;;
+            '') slot="${INPUT_SLOT}" ;;
+            *)
+              echo "::error::No reminder time for the schedule '${SCHEDULE}'."
+              exit 1
+              ;;
+          esac
+          dry=""
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then dry="--dry-run"; fi
+          npx tsx scripts/send-reminders.ts --slot "$slot" $dry

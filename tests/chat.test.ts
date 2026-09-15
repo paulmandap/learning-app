@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   conversationTitle,
@@ -11,10 +12,30 @@ import {
   MAX_NOTES_CHARS,
   MAX_QUESTION_CHARS,
   MAX_REPLY_TOKENS,
+  MAX_SAVED_CHARS,
+  messageToKeep,
   trimNotes,
   type ChatTurn,
 } from '../src/core/chat';
 import { buildNomiSystemPrompt } from '../src/ai/prompts';
+
+describe('what a conversation keeps, and what Gemini is told (NOTES §45)', () => {
+  it('keeps a message whole, up to what the database takes, cut at a sentence past that', () => {
+    const long = 'A sentence about cells. '.repeat(100).trim();
+    expect(messageToKeep(long)).toBe(long);
+    const huge = 'A sentence about cells. '.repeat(1000).trim();
+    expect(messageToKeep(huge).length).toBeLessThanOrEqual(MAX_SAVED_CHARS);
+    expect(messageToKeep(huge).endsWith('.')).toBe(true);
+    const sql = readFileSync('supabase/migrations/0016_profile_pictures_and_nomi_chats.sql', 'utf8');
+    expect(sql).toContain(`char_length(content) between 1 and ${MAX_SAVED_CHARS}`);
+  });
+
+  it('asks Gemini to say when a message is pasted notes, and says a message about their day never is', () => {
+    const p = buildNomiSystemPrompt({ brief: '', context: { kind: 'none' } });
+    expect(p).toContain('"pasted_notes"');
+    expect(p).toMatch(/about their day[\s\S]*never pasted\s+notes/);
+  });
+});
 
 describe('the budget', () => {
   it('keeps a worst-case day of Gemini replies under three study sets', () => {

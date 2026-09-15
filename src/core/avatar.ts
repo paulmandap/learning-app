@@ -76,6 +76,47 @@ export function photoValue(path: string): string {
 }
 
 /**
+ * How many uploaded photos are kept as choices (NOTES §45).
+ *
+ * The owner: *"if the user uploaded a photo (for their profile picture), save
+ * it as one of the choices too."* Each upload used to remove the photo before
+ * it, and a face chosen after a photo left that photo in storage with no way
+ * back to it. Six is a row in Settings at about 30 KB each; past that, the
+ * oldest goes.
+ */
+export const MAX_KEPT_PHOTOS = 6;
+
+/** The name `photoPath` gives an upload. */
+const UPLOAD_NAME = /^avatar-(\d{1,15})\.jpg$/;
+
+/**
+ * The photos to offer, newest first, and the ones past the limit to remove.
+ *
+ * `names` are the files in the person's folder. Only the app's own uploads
+ * count; anything else in the folder is left alone. The picture in use is
+ * always kept, however old.
+ */
+export function photoChoices(
+  userId: string,
+  names: readonly string[],
+  current: string | null,
+  max: number = MAX_KEPT_PHOTOS,
+): { keep: string[]; remove: string[] } {
+  const inUse = parseAvatar(current, userId);
+  const uploads = names
+    .map((name) => ({ name, at: Number(UPLOAD_NAME.exec(name)?.[1] ?? Number.NaN) }))
+    .filter((upload) => Number.isFinite(upload.at))
+    .sort((a, b) => b.at - a.at)
+    .map((upload) => `${userId}/${upload.name}`)
+    .filter((path) => PHOTO_PATTERN.test(`photo:${path}`));
+  let keep = uploads.slice(0, max);
+  if (inUse.kind === 'photo' && uploads.includes(inUse.path) && !keep.includes(inUse.path)) {
+    keep = [...uploads.slice(0, max - 1), inUse.path];
+  }
+  return { keep, remove: uploads.filter((path) => !keep.includes(path)) };
+}
+
+/**
  * The name to greet someone by — "Welcome back, Paul Christian".
  *
  * The whole name they gave, as they wrote it. It used to be the first word

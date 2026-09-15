@@ -8,6 +8,7 @@ import { HeaderBackButton } from '../src/ui/menu';
 import { StudyAssistant } from '../src/ui/assistant';
 import { PrivacyGate } from '../src/ui/privacy';
 import { useTheme } from '../src/ui/theme';
+import { shouldHideSplash, SPLASH_MIN_MS } from '../src/core/splash';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -63,19 +64,11 @@ function useResetCacheOnUserChange() {
 }
 
 /**
- * The shortest the splash stays, from the start of the page load.
- *
- * On a cached reload the app knows who is signed in within a few tens of
- * milliseconds, and a splash that blinks for one frame reads as a glitch, not
- * as Nomi saying hello. 1400ms since the splash started moving (NOTES §43): long
- * enough for one whole wave or gesture, which peaks a little after a second.
- */
-const SPLASH_MIN_MS = 1400;
-
-/**
- * Fade out the splash in `public/index.html` (NOTES §42) once the app knows
- * whether anyone is signed in — so the first screen it reveals is the right
- * one, never sign-in flashing before Home.
+ * Fade out the splash in `public/index.html` (NOTES §42) once the first screen
+ * is ready behind it (§45): the app knows whether anyone is signed in — so it
+ * is never sign-in flashing before Home — and the screen has the data it asked
+ * for, so what the splash reveals is the screen, not "Loading…".
+ * `shouldHideSplash` decides; this only watches.
  */
 function useHideSplash() {
   const ready = useSessionStore((s) => s.ready);
@@ -84,17 +77,36 @@ function useHideSplash() {
     if (!ready || Platform.OS !== 'web' || typeof document === 'undefined') return;
     const splash = document.getElementById('splash');
     if (!splash) return;
-    const sinceLoad = typeof performance === 'undefined' ? SPLASH_MIN_MS : performance.now();
-    let removal: ReturnType<typeof setTimeout> | undefined;
-    const fade = setTimeout(() => {
+    const clock = () => (typeof performance === 'undefined' ? Date.now() : performance.now());
+    const readyAt = clock();
+    let idleSince: number | null = null;
+    let sawWork = false;
+    // A check every 50ms for the second or two the splash is up — simpler than
+    // following every query's events, and it stops the moment the splash goes.
+    const watch = setInterval(() => {
+      const at = clock();
+      const fetching = queryClient.isFetching();
+      if (fetching > 0) {
+        sawWork = true;
+        idleSince = null;
+      } else if (idleSince === null) {
+        idleSince = at;
+      }
+      const hide = shouldHideSplash({
+        sinceLoad: typeof performance === 'undefined' ? SPLASH_MIN_MS : at,
+        sinceReady: at - readyAt,
+        signedIn: !!useSessionStore.getState().session,
+        fetching,
+        idleFor: idleSince === null ? 0 : at - idleSince,
+        sawWork,
+      });
+      if (!hide) return;
+      clearInterval(watch);
       splash.classList.add('gone');
       // After the 280ms fade in index.html; gone from the page, not merely invisible.
-      removal = setTimeout(() => splash.remove(), 320);
-    }, Math.max(0, SPLASH_MIN_MS - sinceLoad));
-    return () => {
-      clearTimeout(fade);
-      if (removal) clearTimeout(removal);
-    };
+      setTimeout(() => splash.remove(), 320);
+    }, 50);
+    return () => clearInterval(watch);
   }, [ready]);
 }
 

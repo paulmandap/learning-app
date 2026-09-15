@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { Image, Platform, Pressable, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { AVATAR_FACES } from '../core/palette';
-import { defaultFaceIndex, faceValue, parseAvatar } from '../core/avatar';
+import { defaultFaceIndex, faceValue, parseAvatar, photoValue } from '../core/avatar';
 import { avatarPhotoUrl } from '../data/profile';
 import { cachedAvatar, rememberAvatarPhoto, rememberAvatarValue } from '../data/avatar-cache';
 import { space, TOUCH_TARGET, useTheme } from './theme';
@@ -148,7 +148,6 @@ export function FacePicker({
   disabled?: boolean;
 }) {
   const t = useTheme();
-  const size = 48;
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
       {AVATAR_FACES.map((_, index) => {
@@ -160,23 +159,81 @@ export function FacePicker({
             accessibilityLabel={`Face ${index + 1}${isSelected ? ', chosen' : ''}`}
             accessibilityState={{ selected: isSelected, disabled: !!disabled }}
             onPress={() => !disabled && onPick(faceValue(index))}
-            style={{
-              width: Math.max(TOUCH_TARGET, size + 8),
-              height: Math.max(TOUCH_TARGET, size + 8),
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: (size + 8) / 2,
-              borderWidth: 2,
-              borderColor: isSelected ? t.accent : 'transparent',
-              opacity: disabled ? 0.6 : 1,
-            }}
+            style={choiceTile(isSelected, disabled, t.accent)}
           >
-            <Face index={index} size={size} />
+            <Face index={index} size={CHOICE_SIZE} />
           </Pressable>
         );
       })}
     </View>
   );
+}
+
+/**
+ * The photos they have uploaded, as choices beside the faces (NOTES §45) — the
+ * same tile and the same ring.
+ */
+export function PhotoPicker({
+  photos,
+  links,
+  selected,
+  onPick,
+  disabled,
+}: {
+  /** Paths, newest first. */
+  photos: readonly string[];
+  /** A signed link for each path that has one. */
+  links: Readonly<Record<string, string>>;
+  /** The path of the photo in use, or null when a face is. */
+  selected: string | null;
+  onPick: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const t = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+      {photos.map((path, index) => {
+        const isSelected = path === selected;
+        const link = links[path];
+        return (
+          <Pressable
+            key={path}
+            accessibilityRole="button"
+            accessibilityLabel={`Photo ${index + 1}${isSelected ? ', chosen' : ''}`}
+            accessibilityState={{ selected: isSelected, disabled: !!disabled }}
+            onPress={() => !disabled && onPick(photoValue(path))}
+            style={choiceTile(isSelected, disabled, t.accent)}
+          >
+            {link ? (
+              <Image
+                source={{ uri: link }}
+                style={{ width: CHOICE_SIZE, height: CHOICE_SIZE, borderRadius: CHOICE_SIZE / 2 }}
+              />
+            ) : (
+              // Until its link arrives, a plain circle the size of the photo.
+              <View style={{ width: CHOICE_SIZE, height: CHOICE_SIZE, borderRadius: CHOICE_SIZE / 2, backgroundColor: t.border }} />
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+const CHOICE_SIZE = 48;
+
+/** A picture to choose: a full touch target, ringed when it is the one in use. */
+function choiceTile(selected: boolean, disabled: boolean | undefined, accent: string) {
+  return {
+    width: Math.max(TOUCH_TARGET, CHOICE_SIZE + 8),
+    height: Math.max(TOUCH_TARGET, CHOICE_SIZE + 8),
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: (CHOICE_SIZE + 8) / 2,
+    borderWidth: 2,
+    borderColor: selected ? accent : 'transparent',
+    opacity: disabled ? 0.6 : 1,
+  } as const;
 }
 
 /**

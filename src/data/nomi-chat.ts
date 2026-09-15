@@ -12,6 +12,7 @@ import {
   historyWindow,
   isSendable,
   MAX_QUESTION_CHARS,
+  messageToKeep,
   type AssistantContext,
   type ChatTurn,
 } from '../core/chat';
@@ -20,8 +21,10 @@ import {
   amendProposal,
   compactForChat,
   proposeAction,
+  proposeNotesSet,
   proposeReviewer,
   retitle,
+  turnsForModel,
   type NomiAction,
   type Proposal,
 } from '../core/nomi-actions';
@@ -239,7 +242,8 @@ export async function sendToNomi(
   const text = input.text.trim();
   const pending = input.pending ?? null;
   let conversationId = input.conversationId;
-  // A pasted page of notes is shown, saved and titled as how much was pasted.
+  // A pasted page of notes is shown and titled as how much was pasted, and kept
+  // whole (NOTES §45).
   const said = compactForChat(text);
 
   if (!isSendable(text)) {
@@ -253,7 +257,7 @@ export async function sendToNomi(
   //    row would not write is the worse failure.
   try {
     if (!conversationId) conversationId = await createConversation(conversationTitle(said), db);
-    if (conversationId) await saveMessage(conversationId, 'user', said, db);
+    if (conversationId) await saveMessage(conversationId, 'user', messageToKeep(text), db);
   } catch (err) {
     console.warn(`[nomi] could not save that message: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -311,17 +315,19 @@ export async function sendToNomi(
 
   try {
     const provider = deps.provider ?? new GeminiBrowserProvider(input.apiKey);
-    const turns = historyWindow([...input.history, { role: 'user', text }]);
+    const turns = turnsForModel(historyWindow([...input.history, { role: 'user', text }]));
     const system = buildNomiSystemPrompt({ brief: modelBrief(input.snapshot), context: input.context, pending });
     const reply = await run(() => provider.chat({ system, turns }));
 
     // What Gemini read from a message Nomi's patterns missed (NOTES §39) — a
-    // new title for the offer on screen, or a topic to write a reviewer on —
-    // goes through the same checks as a typed request, and Nomi says the
-    // offer's own words rather than the model's promise of one.
+    // new title for the offer on screen, a topic to write a reviewer on, or
+    // notes pasted with no request (§45) — goes through the same checks as a
+    // typed request, and Nomi says the offer's own words rather than the
+    // model's promise of one.
     let offer: Proposal | null = null;
     if (reply?.setTitle && pending) offer = retitle(pending, reply.setTitle);
     if (!offer && reply?.reviewerTopic) offer = proposeReviewer(reply.reviewerTopic, text);
+    if (!offer && reply?.pastedNotes) offer = proposeNotesSet(text, input.snapshot);
     const answer = offer?.say ?? reply?.answer ?? '';
 
     if (!answer) {

@@ -9,7 +9,6 @@ import {
   Card,
   LoadingState,
   Notice,
-  ProgressBar,
   Screen,
   Title,
 } from '../../../src/ui/components';
@@ -27,6 +26,7 @@ import { reviewStatesForSet } from '../../../src/data/review';
 import { isDue, studyOrder } from '../../../src/core/schedule';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import { NomiFinish } from '../../../src/ui/nomi-finish';
+import { StudyProgress } from '../../../src/ui/nomi-studying';
 import { locatePictureLabels, pictureLabels } from '../../../src/data/picture-labels';
 import { placePicture } from '../../../src/core/label-cover';
 import type { Level } from '../../../src/core/planner';
@@ -406,7 +406,8 @@ export default function Flashcards() {
         </Card>
       ) : card ? (
         <>
-          <ProgressBar value={index} total={items.length} />
+          {/* With Nomi reading beside the count (NOTES §45). */}
+          <StudyProgress value={index} total={items.length} />
           {dueNow > 0 ? (
             <Body muted>
               {dueNow} due for review today — those come first.

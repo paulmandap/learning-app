@@ -95,10 +95,12 @@ export interface VariantResult {
  * `src/core/nomi-actions.ts` check them, and nothing happens without a tap.
  */
 export interface ChatReply {
-  /** Empty only when one of the other two is set. */
+  /** Empty only when one of the others is set. */
   answer: string;
   reviewerTopic: string | null;
   setTitle: string | null;
+  /** The message is study material pasted to learn from, not something said to Nomi (NOTES §45). */
+  pastedNotes: boolean;
 }
 
 /**

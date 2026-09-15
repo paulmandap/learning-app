@@ -8,12 +8,15 @@ import {
   doneLine,
   findSet,
   proposeAction,
+  proposeNotesSet,
   splitMessage,
   statedCount,
   suggestTitle,
+  turnsForModel,
   type NomiAction,
 } from '../src/core/nomi-actions';
 import { EMPTY_SNAPSHOT, type AppSnapshot } from '../src/core/nomi-brain';
+import { MAX_NOTES_CHARS, type ChatTurn } from '../src/core/chat';
 
 const snapshot: AppSnapshot = {
   ...EMPTY_SNAPSHOT,
@@ -33,7 +36,15 @@ function prose(n: number): string {
   return sentences.join(' ');
 }
 
+/** Short enough to be a chat message, about 860 characters. */
 const NOTES = `Photosynthesis\n${prose(120)}`;
+
+/** Too long to be a chat message — a paste, about 1,500 characters. */
+const LONG_NOTES = `Photosynthesis\n${prose(200)}`;
+
+/** The owner's kind of message (NOTES §45): 71 words about their day, and not notes. */
+const ABOUT_MY_DAY =
+  "hi nomi, so today was really tiring. our teacher in computer programming gave us a surprise quiz and i think i did badly because i didn't review last night. i'm kinda stressed because midterms are next week and i still have so many topics to cover, like loops, arrays and functions. can you give me some tips on how to manage my time so i can study everything before the exam?";
 
 describe('chooseCardCount — the largest count the notes hold (NOTES §37)', () => {
   it('picks from the four counts the app offers', () => {
@@ -100,8 +111,8 @@ describe('splitMessage', () => {
 });
 
 describe('proposeAction — pasted notes become a set', () => {
-  it('pasted notes alone: a new set, titled from the notes, count picked', () => {
-    const p = proposeAction(NOTES, snapshot)!;
+  it('a long paste alone: a new set, titled from the notes, count picked', () => {
+    const p = proposeAction(LONG_NOTES, snapshot)!;
     expect(p.action).toMatchObject({ kind: 'make_set', title: 'Photosynthesis', count: 10, countPicked: true });
     expect(p.say).toContain('I picked 10');
   });
@@ -145,6 +156,37 @@ describe('proposeAction — pasted notes become a set', () => {
   });
 });
 
+describe('a message that asks for nothing is not notes for being long (NOTES §45)', () => {
+  it("leaves the owner's kind of message — 71 words about their day — to the conversation", () => {
+    // It was offered as a set called "hi nomi, so today was really".
+    expect(proposeAction(ABOUT_MY_DAY, snapshot)).toBeNull();
+  });
+
+  it("leaves the owner's own message alone — about getting up, typed on an iPhone", () => {
+    // Its start is the owner's, as the saved preview kept it: "Pasted notes, 80
+    // words". Offered as a set "hey i did got up and", then cut, so Nomi said
+    // "the rest of the text was cut off". The rest here is in the same voice.
+    const rant =
+      "hey i did got up and it’s been 2 hrs. i took a bath, ate breakfast, started doing my pre-interview task. but i feel so much heavy in my chest and i don’t know why. i keep checking my phone and i can’t focus on anything for more than a few minutes. i still have so many things to finish today and it feels like i’m already behind before the day even started.";
+    expect(proposeAction(rant, snapshot)).toBeNull();
+    expect(compactForChat(rant)).toBe(rant);
+  });
+
+  it('leaves a paste that fits a chat message to Gemini, which can tell notes from a message', () => {
+    expect(proposeAction(NOTES, snapshot)).toBeNull();
+  });
+
+  it('offers the set once Gemini says it is notes, with the title and count a request would get', () => {
+    const p = proposeNotesSet(NOTES, snapshot)!;
+    expect(p.action).toMatchObject({ kind: 'make_set', title: 'Photosynthesis', notes: NOTES, count: 10, countPicked: true });
+    expect(p.say).toContain('I picked 10');
+  });
+
+  it('offers nothing when there is too little to make cards from, whatever Gemini says', () => {
+    expect(proposeNotesSet('The heart has four chambers.', snapshot)).toBeNull();
+  });
+});
+
 describe("proposeAction — the owner's own request (NOTES §38)", () => {
   // The shape of what the owner sent: an instruction typed straight into the
   // paste, on the same line as the first line of the song. The lines here are
@@ -185,7 +227,8 @@ describe("proposeAction — the owner's own request (NOTES §38)", () => {
   });
 
   it('does not take a first line of notes for an instruction because it names something', () => {
-    const action = proposeAction(`I said your name once like a word from another language\n${SONG}`, snapshot)!.action;
+    // Short enough to be a message, so it reaches an offer through Gemini saying it is notes (§45).
+    const action = proposeNotesSet(`I said your name once like a word from another language\n${SONG}`, snapshot)!.action;
     expect(action).toMatchObject({ kind: 'make_set', title: 'I said your name once like' });
   });
 });
@@ -292,12 +335,50 @@ describe('findSet and suggestTitle', () => {
 
 describe('compactForChat', () => {
   it('shows a paste as how much was pasted, not the whole page', () => {
-    const shown = compactForChat(`Make flashcards from this:\n${NOTES}`);
-    expect(shown).toMatch(/^Make flashcards from this:\nPasted notes, 121 words: "Photosynthesis word0/);
+    const shown = compactForChat(`Make flashcards from this:\n${LONG_NOTES}`);
+    expect(shown).toMatch(/^Make flashcards from this:\nPasted notes, 201 words: "Photosynthesis word0/);
     expect(shown.length).toBeLessThan(260);
   });
 
   it('leaves an ordinary message exactly as typed', () => {
     expect(compactForChat('what does xylem do?')).toBe('what does xylem do?');
+  });
+
+  it('shows anything that fits a chat message whole, however many words (NOTES §45)', () => {
+    // The owner's 71 words came back as "Pasted notes, 71 words: …", cut mid-sentence.
+    expect(compactForChat(ABOUT_MY_DAY)).toBe(ABOUT_MY_DAY);
+    expect(compactForChat(`Make flashcards from this:\n${NOTES}`)).toBe(`Make flashcards from this:\n${NOTES}`);
+  });
+});
+
+describe('turnsForModel — what Gemini is sent (NOTES §45)', () => {
+  it('sends a message that fits a chat message as it was typed', () => {
+    const turns: ChatTurn[] = [
+      { role: 'user', text: ABOUT_MY_DAY },
+      { role: 'nomi', text: 'That sounds like a lot.' },
+    ];
+    expect(turnsForModel(turns)).toEqual(turns);
+  });
+
+  it('sends the latest paste as its notes, so Nomi can say what they hold', () => {
+    const [sent] = turnsForModel([{ role: 'user', text: `Make flashcards from this:\n${LONG_NOTES}` }]);
+    expect(sent!.text).toMatch(/^Make flashcards from this:\nPasted notes, 201 words:\nPhotosynthesis/);
+    expect(sent!.text).toContain('word199.');
+  });
+
+  it('sends a page of a very long paste, and says it is the first part', () => {
+    const [sent] = turnsForModel([{ role: 'user', text: prose(2000) }]);
+    expect(sent!.text).toMatch(/^Pasted notes, 2000 words, the first part of them:\n/);
+    expect(sent!.text.length).toBeLessThan(MAX_NOTES_CHARS + 100);
+  });
+
+  it('sends an older paste as its preview only', () => {
+    const sent = turnsForModel([
+      { role: 'user', text: LONG_NOTES },
+      { role: 'nomi', text: 'Want me to make a set?' },
+      { role: 'user', text: prose(300) },
+    ]);
+    expect(sent[0]!.text).toMatch(/^Pasted notes, 201 words: "/);
+    expect(sent[2]!.text).toMatch(/^Pasted notes, 300 words:\n/);
   });
 });

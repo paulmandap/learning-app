@@ -3,15 +3,17 @@ import { Linking, Pressable, Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Body, Button, Card, Field, Label, Notice, Screen, Title } from '../../src/ui/components';
 import {
+  avatarPhotoUrls,
   AvatarsUnavailableError,
   fetchProfile,
+  listAvatarPhotos,
   saveAvatar,
   saveDisplayName,
   saveGeminiKey,
   savePetChoice,
   uploadAvatarPhoto,
 } from '../../src/data/profile';
-import { Avatar, FacePicker, pickProfilePhoto } from '../../src/ui/avatar';
+import { Avatar, FacePicker, PhotoPicker, pickProfilePhoto } from '../../src/ui/avatar';
 import { PrivacyNotice } from '../../src/ui/privacy';
 import { TextLink } from '../../src/ui/legal';
 import { forgetAvatar } from '../../src/data/avatar-cache';
@@ -20,6 +22,8 @@ import { parseAvatar } from '../../src/core/avatar';
 import { useSessionStore } from '../../src/data/session';
 import { space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
 import { PetChooser } from '../../src/ui/pet';
+import { RemindersCard } from '../../src/ui/reminders';
+import { forgetThisDevice } from '../../src/data/reminders';
 import { toPetSpecies, type PetSpecies } from '../../src/core/pet';
 import { deleteAllMyData } from '../../src/data/sets';
 import { supabase } from '../../src/data/supabase';
@@ -76,6 +80,20 @@ export default function Settings() {
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const avatar = parseAvatar(profile?.avatar, userId);
 
+  // Every photo they have uploaded, offered beside the faces (NOTES §45).
+  const { data: photos = [] } = useQuery({
+    queryKey: ['avatar-photos', profile?.avatar ?? null],
+    queryFn: () => listAvatarPhotos(profile?.avatar ?? null),
+    enabled: !!profile,
+  });
+  const { data: photoLinks = {} } = useQuery({
+    queryKey: ['avatar-photo-links', photos],
+    queryFn: () => avatarPhotoUrls(photos),
+    enabled: photos.length > 0,
+    // The links last an hour; refresh well before they lapse.
+    staleTime: 50 * 60 * 1000,
+  });
+
   useEffect(() => {
     if (profile?.display_name) setName(profile.display_name);
   }, [profile?.display_name]);
@@ -109,7 +127,8 @@ export default function Settings() {
       : "Couldn't save that picture just now. Try again in a moment.";
   }
 
-  async function chooseFace(value: string) {
+  /** A face or one of their photos. */
+  async function choosePicture(value: string) {
     setAvatarBusy(true);
     setAvatarError(null);
     try {
@@ -128,8 +147,9 @@ export default function Settings() {
       const image = await pickProfilePhoto();
       if (!image) return;
       setAvatarBusy(true);
-      await uploadAvatarPhoto(image, profile?.avatar ?? null);
+      await uploadAvatarPhoto(image);
       await queryClient.invalidateQueries({ queryKey: ['profile'] });
+      await queryClient.invalidateQueries({ queryKey: ['avatar-photos'] });
     } catch (err) {
       setAvatarError(describeAvatarError(err));
     } finally {
@@ -229,10 +249,22 @@ export default function Settings() {
         />
         <Button label="Save name" variant="secondary" onPress={saveName} busy={savingName} />
         {nameSaved ? <Notice tone="ok">Saved.</Notice> : null}
+        {photos.length > 0 ? (
+          <>
+            <Label>Your photos</Label>
+            <PhotoPicker
+              photos={photos}
+              links={photoLinks}
+              selected={avatar.kind === 'photo' ? avatar.path : null}
+              onPick={choosePicture}
+              disabled={!profile || avatarBusy}
+            />
+          </>
+        ) : null}
         <Label>Pick a face</Label>
         <FacePicker
           selected={avatar.kind === 'face' && avatar.chosen ? avatar.index : null}
-          onPick={chooseFace}
+          onPick={choosePicture}
           disabled={!profile || avatarBusy}
         />
         <Button label="Use a photo" variant="secondary" onPress={uploadPhoto} busy={avatarBusy} />
@@ -248,6 +280,10 @@ export default function Settings() {
         <PetChooser value={pet} onChange={choosePet} disabled={!profile} />
         {petError ? <Notice tone="error">{petError}</Notice> : null}
       </Card>
+
+      {/* --------------------------------------------------- reminders -- */}
+      {/* Up to three a day, saying what's due (NOTES §45). */}
+      <RemindersCard />
 
       {/* ---------------------------------------------------- key + test -- */}
       <Card>
@@ -310,7 +346,10 @@ export default function Settings() {
             // The picture kept on this device leaves with the session, so a
             // shared phone does not hold someone's photo after they go (NOTES §40).
             forgetAvatar(userId);
-            void supabase.auth.signOut();
+            // This device stops getting reminders first: removing it needs
+            // the session, and the next person on the phone must not be shown
+            // someone else's due cards (NOTES §45).
+            void forgetThisDevice().finally(() => supabase.auth.signOut());
           }}
         />
         {/* The privacy notice, to read again. It was shown once after signing

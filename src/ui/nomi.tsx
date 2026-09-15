@@ -9,7 +9,9 @@ import { Button } from './components';
 import { isSendable, MAX_PASTE_CHARS, type ChatTurn } from '../core/chat';
 import { actionCard, CARD_COUNTS, type NomiAction } from '../core/nomi-actions';
 import { revealedCount, revealSchedule, THINK_MS } from '../core/typing';
-import type { NomiState } from '../core/nomi-motion';
+import { nextGreetingDelay, type NomiState } from '../core/nomi-motion';
+import { returnReaction } from '../core/celebrate';
+import { useLastRound } from '../data/last-round';
 
 const NATIVE = Platform.OS !== 'web';
 
@@ -31,6 +33,15 @@ const NATIVE = Platform.OS !== 'web';
  * comes into view, and each time the line changes, Nomi thinks — three dots,
  * the owl in its thinking pose — then types the line (`src/core/typing.ts`).
  * With reduce motion on, the line is simply there. Tapping opens the chat.
+ *
+ * ## Idle, a wave now and then, and the round just finished (NOTES §45)
+ *
+ * *"make nomi idle, and doing greeting from time-to-time"*, and *"if i recently
+ * finished a flashcard, when i get back to nomi tab, nomi will do success
+ * animation"* — matching how the round went, the owner chose. Both are a
+ * one-shot played over the resting pose (`gesture`): the reaction first, on
+ * coming back to Home after a round (`returnReaction`), and once the line has
+ * been said, a wave at `nextGreetingDelay`.
  */
 type Saying = 'thinking' | 'typing' | 'said';
 
@@ -73,7 +84,37 @@ export function NomiCard({ line, onPress }: { line: string; onPress: () => void 
     };
   }, [line, focused, reduce, schedule, chars.length]);
 
-  const owl: NomiState = saying === 'thinking' ? 'thinking' : saying === 'typing' ? 'explaining' : 'idle';
+  // A one-shot over the resting pose: the reaction to a round, or a wave.
+  const [gesture, setGesture] = useState<NomiState | null>(null);
+  const waves = useRef(0);
+
+  // Coming back to Home: react to a round that ended recently, once.
+  useEffect(() => {
+    waves.current = 0;
+    if (!focused) {
+      setGesture(null);
+      return;
+    }
+    if (reduce === null) return;
+    const { round, reactedAt, reacted } = useLastRound.getState();
+    const reaction = returnReaction(round, reactedAt, Date.now());
+    if (!reaction) return;
+    reacted();
+    if (!reduce) setGesture(reaction);
+  }, [focused, reduce]);
+
+  // Idle once the line is said, with a wave now and then.
+  useEffect(() => {
+    if (!focused || reduce !== false || saying !== 'said' || gesture !== null) return;
+    const wave = setTimeout(() => {
+      waves.current += 1;
+      setGesture('greeting');
+    }, nextGreetingDelay(waves.current === 0, Math.random));
+    return () => clearTimeout(wave);
+  }, [focused, reduce, saying, gesture]);
+
+  const owl: NomiState =
+    gesture ?? (saying === 'thinking' ? 'thinking' : saying === 'typing' ? 'explaining' : 'idle');
 
   return (
     <Pressable
@@ -94,7 +135,14 @@ export function NomiCard({ line, onPress }: { line: string; onPress: () => void 
         }}
       >
         <View style={{ width: 84, alignItems: 'center' }}>
-          <NomiCharacter state={owl} settle="idle" size={92} active={focused} />
+          <NomiCharacter
+            state={owl}
+            settle="idle"
+            size={92}
+            active={focused}
+            // A finished gesture hands back to thinking, typing or idle.
+            onDone={(done) => setGesture((current) => (current === done ? null : current))}
+          />
         </View>
 
         <View style={{ flex: 1, marginBottom: space.lg }}>

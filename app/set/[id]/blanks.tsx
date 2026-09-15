@@ -10,13 +10,13 @@ import {
   Field,
   LoadingState,
   Notice,
-  ProgressBar,
   Screen,
   Title,
 } from '../../../src/ui/components';
 import { gradeFeedback, primeFeedback } from '../../../src/ui/feedback';
 import { space, type, useTheme } from '../../../src/ui/theme';
 import { NomiFinish } from '../../../src/ui/nomi-finish';
+import { StudyProgress } from '../../../src/ui/nomi-studying';
 import { listItems, type StudyItem } from '../../../src/data/items';
 import { missedItemIds } from '../../../src/data/attempts';
 import { useStudySession } from '../../../src/data/study-session';
@@ -311,7 +311,8 @@ export default function Blanks() {
         </Card>
       ) : current ? (
         <>
-          <ProgressBar value={index} total={queue.length} />
+          {/* With Nomi reading beside the count (NOTES §45). */}
+          <StudyProgress value={index} total={queue.length} />
 
           <Card>
             {/* The sentence, from the notes, with the gap in it. This IS the

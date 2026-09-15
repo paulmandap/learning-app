@@ -357,6 +357,7 @@ export const chatResultSchema = z.object({
   answer: z.string().default(''),
   reviewer_topic: z.string().optional(),
   set_title: z.string().optional(),
+  pasted_notes: z.boolean().optional(),
 });
 
 /**
@@ -366,6 +367,11 @@ export const chatResultSchema = z.object({
  * student wants a reviewer written on; `set_title` a new name for the offer
  * waiting on their tap. Both for wordings Nomi's patterns missed — Taglish,
  * mostly — and both only names: the checks and the tap stay in the app.
+ *
+ * A third since §45: `pasted_notes`, true when the message is study material
+ * rather than something said to Nomi. Only Gemini, reading the conversation,
+ * can tell a paragraph of notes from a paragraph about someone's day; the
+ * offer it leads to goes through the same checks as one Nomi recognised.
  *
  * An answer is prose, so wrapping it in JSON looks like waste — and the first
  * version of this file did exactly that reasoning and asked for plain text.
@@ -383,6 +389,7 @@ export const CHAT_RESPONSE_SCHEMA = {
     answer: { type: 'string' },
     reviewer_topic: { type: 'string' },
     set_title: { type: 'string' },
+    pasted_notes: { type: 'boolean' },
   },
   required: ['answer'],
 } as const;
@@ -396,8 +403,9 @@ export function parseChatResult(payload: unknown): import('./provider').ChatRepl
     answer: parsed.data.answer.trim(),
     reviewerTopic: named(parsed.data.reviewer_topic),
     setTitle: named(parsed.data.set_title),
+    pastedNotes: parsed.data.pasted_notes === true,
   };
-  return reply.answer || reply.reviewerTopic || reply.setTitle ? reply : null;
+  return reply.answer || reply.reviewerTopic || reply.setTitle || reply.pastedNotes ? reply : null;
 }
 
 // -------------------------------------------------------------- reviewer --

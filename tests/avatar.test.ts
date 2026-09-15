@@ -9,8 +9,10 @@ import {
   greetingName,
   isValidAvatarValue,
   MAX_CACHED_PHOTO_CHARS,
+  MAX_KEPT_PHOTOS,
   parseAvatar,
   PHOTO_PATTERN,
+  photoChoices,
   photoPath,
   photoValue,
   readCachedAvatar,
@@ -55,6 +57,40 @@ describe('what profiles.avatar means', () => {
     expect(isValidAvatarValue(photoValue(photoPath(USER, 1757750400000)))).toBe(true);
     expect(() => faceValue(FACE_COUNT)).toThrow();
     expect(() => photoValue('not-a-user/../x.jpg')).toThrow();
+  });
+});
+
+describe('uploaded photos stay as choices (NOTES §45)', () => {
+  const uploads = (n: number) => Array.from({ length: n }, (_, i) => photoPath(USER, 1757750400000 + i * 1000).split('/')[1]!);
+  const path = (i: number) => `${USER}/avatar-${1757750400000 + i * 1000}.jpg`;
+
+  it('offers every upload, newest first, and removes none', () => {
+    expect(photoChoices(USER, uploads(3), null)).toEqual({ keep: [path(2), path(1), path(0)], remove: [] });
+  });
+
+  it(`keeps ${MAX_KEPT_PHOTOS}, and removes the oldest past that`, () => {
+    const { keep, remove } = photoChoices(USER, uploads(MAX_KEPT_PHOTOS + 2), null);
+    expect(keep).toHaveLength(MAX_KEPT_PHOTOS);
+    expect(keep[0]).toBe(path(MAX_KEPT_PHOTOS + 1));
+    expect(remove).toEqual([path(1), path(0)]);
+  });
+
+  it('never removes the picture in use, however old', () => {
+    const { keep, remove } = photoChoices(USER, uploads(MAX_KEPT_PHOTOS + 2), photoValue(path(0)));
+    expect(keep).toHaveLength(MAX_KEPT_PHOTOS);
+    expect(keep).toContain(path(0));
+    expect(remove).toEqual([path(2), path(1)]);
+  });
+
+  it('leaves alone anything in the folder the app did not upload', () => {
+    expect(photoChoices(USER, ['avatar-probe.jpg', '.emptyFolderPlaceholder', ...uploads(1)], null)).toEqual({
+      keep: [path(0)],
+      remove: [],
+    });
+  });
+
+  it('every photo it offers is a value the database accepts', () => {
+    for (const kept of photoChoices(USER, uploads(3), null).keep) expect(isValidAvatarValue(photoValue(kept))).toBe(true);
   });
 });
 
