@@ -236,7 +236,12 @@ function SharedSetRow({
         <Text style={[type.bodyStrong, { color: t.textMuted, minWidth: 24 }]}>{rank}</Text>
       ) : null}
 
-      <PersonAvatar avatar={set.owner_avatar} userId={set.owner_id} size={32} />
+      <PersonAvatar
+        avatar={set.owner_avatar}
+        userId={set.owner_id}
+        name={authorName(set.owner_name)}
+        size={32}
+      />
 
       <Pressable
         accessibilityRole="button"
@@ -412,7 +417,7 @@ function Message({
 
   return (
     <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' }}>
-      <PersonAvatar avatar={avatar} userId={userId} size={32} />
+      <PersonAvatar avatar={avatar} userId={userId} name={mine ? undefined : name} size={32} />
       <View style={{ flex: 1, gap: 2 }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm }}>
           <Text style={[type.caption, { color: t.text, fontWeight: '700' }]}>

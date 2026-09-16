@@ -6658,6 +6658,147 @@ It now says:
 was written as prose between two code blocks. The step that matters most was the
 only one without a command beside it. Every step gets its command now.
 
+### 46.8 The first live isolation run, and a sentinel that was not one (2026-09-16)
+
+Deployed and verified, the isolation test ran against a real database for the
+first time: **58/59**, with one failure reading
+
+```
+FAIL  public_set_items (private set) — A'S PRIVATE CARD IS EXPOSED
+```
+
+It was the test, not the view. Proved before anything was changed, with tokens
+that cannot overlap:
+
+```
+rows B can see in public_set_items : 1
+contains the PRIVATE token         : no
+contains the SHARED token          : yes (correct)
+rows whose set is the private one  : 0
+```
+
+The check searched the serialized response for the private card's excerpt,
+`probe excerpt`. The shared card's excerpt is `shared probe excerpt`, which ENDS
+with it — serialized, `"source_excerpt":"shared probe excerpt"` contains
+`probe excerpt"`, closing quote and all. So the assertion fired on the shared
+card, the only row there, and named the private one.
+
+**A sentinel that can be a substring of the thing it is distinguished from is
+not a sentinel.** The private card now carries `private-only-a7f3c1`, which
+appears nowhere else, and the failure message prints what it actually found —
+the first version said only that a leak had happened, which cost a round trip to
+establish that one had not.
+
+Worth keeping: the instinct that saved this was refusing to edit the test until
+the view had been proved innocent. A failing security assertion is the one place
+where "fix the test" must be the last move considered, not the first.
+
+Also fixed on the same run: `community-probe.ts`, on its first outing ever,
+failed twice for reasons worth recording.
+
+- **A batch insert sends NULL for a key one row omits.** PostgREST builds one
+  INSERT for the array, so `hidden` present on the second row and absent from
+  the first arrived as NULL and hit the not-null constraint — it does not fall
+  back to the column default. Spell every column out on every row of a batch.
+- **`page.click(label)` matches the whole label, exactly.** A shared set's row is
+  labelled for a screen reader as `"<title>, by <who>, <n> stars"`, so clicking
+  by title timed out against a row that was on screen and correct. The probe
+  matches the start of the label instead; the label stays good.
+- Its cleanup sat after the try block, so the run that failed in the middle left
+  a shared set on the test account — **visible in the owner's live Community tab**,
+  which is how he found out about it. Cleanup moved into the `finally`.
+
+### 46.9 "my dp isn't shown hahaha, i want it shown" (2026-09-16)
+
+The owner, using the finished feature, reversing the identity decision he made
+before it was built. Migration **0023** shows the picture somebody is using.
+
+0021 had been built to make the old promise unbreakable: every cross-user view
+passed `profiles.avatar` through `case when p.avatar like 'face:%' then p.avatar
+else null end`, so a photo path could not escape even by accident, and
+`PersonAvatar` was written with no network call in it at all. That is why this
+took a migration rather than a flag — which is the right trade and would be
+worth making again.
+
+**What was kept while reversing it.** The obvious implementation is one line:
+grant the authenticated role select on the `avatars` bucket. It would also have
+published every photo anybody had ever uploaded — the bucket keeps up to six per
+person as choices (NOTES §45), including the ones they replaced *because they
+did not like them*. So `is_chosen_avatar` asks whether a path is the value in
+somebody's `profiles.avatar` right now, and the policy serves only that. Security
+definer, for the same reason as `can_star_set`: a policy's subquery runs as the
+querying user, and reading `profiles` there could never be true for anyone
+else's row.
+
+The bucket stays private — no public URL, nothing on the open internet — and the
+four own-row policies from 0016 are untouched, so writing into somebody else's
+folder is refused exactly as before.
+
+**The two assertions this created are the sharpest in the isolation test**, and
+they differ only in whether A is *using* the photo:
+
+```
+PASS  avatars download (not in use) — blocked
+PASS  avatars download (in use)     — B can see the picture A is using
+PASS  public_profiles (spare photo) — only the picture in use
+```
+
+A policy written as "any file in the avatars bucket" passes a test that checks
+only the second. A policy that serves nobody passes a test that checks only the
+first. Neither is caught without both.
+
+Safe to apply in either order with its deploy: an older build hands a photo path
+to `parseAvatar`, which falls back to a drawn face for anything it cannot use.
+
+### 46.10 0023 applied, and three more the tests were wrong about (2026-09-16)
+
+0023 applied and deployed. Isolation **61/61**, community probe **11/11** — the
+first end-to-end run of either. Three failures on the way, and all three were the
+test, which is worth recording because two of them looked like security bugs.
+
+**1. The seed overwrote itself.** `avatars download (in use)` and
+`public_profiles (picture)` both failed, the second saying *expected the chosen
+photo, got "face:3"*. The avatar block sets `profiles.avatar` to the uploaded
+photo at line 346; the community block set `avatar: 'face:3'` at line 405 and
+won. `is_chosen_avatar` then rightly answered false, the download was rightly
+refused, and two assertions accused a policy doing exactly its job. The community
+seed sets the NAME only now, and says why.
+
+**2. `avatars list` had to change, and the change is the finding.** It asserted
+"nothing visible" and failed. Listing is a SELECT on `storage.objects`, so
+serving a file necessarily makes its name listable — there is no way to hand out
+a photo and hide that it exists. What matters is whether the rest of the folder
+comes with it, because the filenames are `avatar-<timestamp>.jpg` and a full
+listing would say how many pictures somebody has tried and when they changed
+each one. Measured:
+
+```
+PASS  avatars list — only the picture in use
+```
+
+So the policy is as tight as it was designed to be, and that is now asserted
+rather than assumed — the old "nothing visible" would have passed just as
+happily against a policy that published the whole folder, had it been written
+before 0023 widened it.
+
+**3. The probe walked in the wrong door.** `community-probe.ts` opened
+`/set/<id>/flashcards` with no level and read "No cards at this level yet" as a
+shared set dealing nothing. A deck with no `?level=` in its link opens on
+**Understand** (`startingLevel`, src/core/deck.ts) and the probe's cards were all
+Remember. The screen was correct and said so plainly — *Remember 1 · Understand
+0 · Apply 0* — which is exactly what the counts on those buttons exist for
+(deliberate deviation 7). The probe passes `?level=remember`, as the set screen
+does when it knows where the work is.
+
+**And one real defect, found by looking at the picture.** The shared set screen
+told a visitor *"Add your Gemini key in Settings before making cards."* — an
+instruction they cannot act on, about a thing they will never do, since the
+pipeline is gated on `owned` anyway. Nothing in 1101 tests would have caught it.
+Verify UI changes by looking at them.
+
+typecheck clean · **1101 tests**, 3 skipped · isolation **61/61** and community
+probe **11/11** against the live project.
+
 
 ## Sources
 

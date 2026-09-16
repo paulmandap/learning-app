@@ -588,7 +588,12 @@ export default function SetScreen() {
 
       {error ? <Notice tone="error">{error}</Notice> : null}
 
-      {!apiKey && !isGenerating ? (
+      {/* Only on a set of your own. You never make cards for somebody else's
+          set — the pipeline is gated on `owned` too — so telling a visitor to
+          go and add a key is an instruction they cannot act on and would not
+          benefit from if they did. Found by photographing the shared set
+          screen; nothing else would have caught it. */}
+      {owned && !apiKey && !isGenerating ? (
         <Notice tone="error">Add your Gemini key in Settings before making cards.</Notice>
       ) : null}
 

@@ -115,20 +115,30 @@ describe('what the shared views may never expose', () => {
     }
   });
 
-  it('no view hands out an uploaded photo’s path — only a drawn face', () => {
-    // profiles.avatar holds either 'face:N' or 'photo:<user id>/<file>', and the
-    // photo lives in the PRIVATE avatars bucket. Every view that shows a face
-    // must pass the column through the CASE that lets only 'face:%' out. A view
-    // selecting `p.avatar` raw would publish the storage path of every uploaded
-    // picture in the app, and it would look exactly like working code.
-    for (const name of ALL_VIEWS) {
-      const body = view(name);
-      if (!body.includes('avatar')) continue;
-      expect(body, `${name} exposes avatar without the face-only guard`).toContain(
-        "case when p.avatar like 'face:%' then p.avatar else null end",
-      );
-      expect(body.match(/p\.avatar/g)?.length).toBe(2); // both inside that CASE
-    }
+  it('a picture is served only while it is the one that person is using', () => {
+    // 0021 turned an uploaded photo into null in every view; 0023 reverses that
+    // at the owner's request and the views now pass `p.avatar` through whole.
+    //
+    // The limit moved rather than disappearing, and this is where it lives now:
+    // the avatars bucket keeps up to six photos per person as choices (NOTES
+    // §45), and only the CURRENT one may be served. `is_chosen_avatar` asks
+    // exactly that. Granting the bucket wholesale would be one line shorter and
+    // would publish every photo anyone had ever uploaded, including the ones
+    // they replaced because they did not like them.
+    const later = readFileSync('supabase/migrations/0023_shared_profile_pictures.sql', 'utf8');
+    const sql = later.replace(/--[^\n]*/g, '');
+
+    expect(sql).toContain("where p.avatar = 'photo:' || object_name");
+    expect(sql).toContain('security definer');
+    expect(sql).toContain('public.is_chosen_avatar(name)');
+
+    // Read only, signed in only. The four own-row policies from 0016 are not
+    // touched, so writing into somebody else's folder is refused exactly as
+    // before — and nothing here makes the bucket public.
+    expect(sql).toContain('for select using');
+    expect(sql).not.toMatch(/for\s+(insert|update|delete)/i);
+    expect(sql).not.toMatch(/public\s*=\s*true/);
+    expect(sql).toContain('(select auth.uid()) is not null');
   });
 
   it('the cards of a shared set carry nothing that points at the owner’s files', () => {
@@ -188,9 +198,11 @@ describe('what people are told before they share', () => {
 
   it('promises only what the views actually do', () => {
     const facts = SHARING_FACTS.join(' ');
-    // "never a photo you uploaded"
-    expect(facts).toContain('never a photo you uploaded');
-    expect(view('public_sets')).toContain("like 'face:%'");
+    // "the picture you are using" — and 0023 serves only that one.
+    expect(facts).toContain('the picture you are using');
+    expect(
+      readFileSync('supabase/migrations/0023_shared_profile_pictures.sql', 'utf8'),
+    ).toContain("p.avatar = 'photo:' || object_name");
     // "cannot see your files, your notes, your other sets"
     expect(facts).toContain('cannot see your files, your notes, your other sets');
     expect(MIGRATION).not.toMatch(/create view public\.\w+[\s\S]*?from public\.notes\b/);

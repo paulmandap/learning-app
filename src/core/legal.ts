@@ -150,7 +150,7 @@ export const PRIVACY_POLICY: LegalDocument = {
         [
           'A set you share. Sets are private until you share one. When you do, anyone signed in to Nomi can find it, study its cards, and star it — and they see the questions, the answers, and the bit of your notes each card came from. They do not see the files you uploaded, your notes, your other sets, or how you are doing. You can stop sharing at any time, and it disappears from the list.',
           "What you say in the chat. Nomi has one room that everyone signed in shares. Anything you send there can be read by everyone. You can delete your own messages, but somebody may have read one already, so please don't put anything private in it.",
-          "Your name and face. Beside a set you share and beside anything you say in the chat, other people see the name you chose and one of the drawn faces. A photo you upload is never shown to anyone else — only you ever see it.",
+          'Your name and picture. Beside a set you share and beside anything you say in the chat, other people signed in to Nomi see the name you chose and the picture you are using — a drawn face, or a photo if you uploaded one. Only the picture you are using now: Nomi keeps your last few uploads so you can switch back to them, and the ones you are not using stay private. Nobody outside Nomi can see any of them, and your pictures are never on the open internet.',
         ],
         'Stars are counted but not named: people can see how many stars a set has, and nobody can see who gave one.',
         'We can remove a shared set or a message that breaks our Terms of Use, and we can stop an account from sharing.',

@@ -115,6 +115,22 @@ const CHAT_PROBE_A = 'isolation probe message from A';
 const CHAT_PROBE_B = 'isolation probe message from B';
 
 /**
+ * A token that appears ONLY on A's private card.
+ *
+ * It exists because the first version of this test searched the shared view's
+ * response for the private card's excerpt, `probe excerpt` — and the shared
+ * card's excerpt is `shared probe excerpt`, which ENDS with it. Serialized, the
+ * shared row reads `"source_excerpt":"shared probe excerpt"`, so a search for
+ * `probe excerpt"` matched the shared card's own closing quote and the test
+ * reported **A'S PRIVATE CARD IS EXPOSED** on 2026-09-16 against a view that was
+ * returning exactly one correct row (NOTES §46.8).
+ *
+ * A sentinel that can be a substring of the thing it is distinguished from is
+ * not a sentinel. This one cannot appear anywhere else.
+ */
+const PRIVATE_MARKER = 'private-only-a7f3c1';
+
+/**
  * The views this test covers, and the ones that may legitimately be gone.
  *
  * A view runs as its OWNER unless created with security_invoker, which would
@@ -214,7 +230,9 @@ async function main() {
       level: 'remember',
       prompt: 'probe prompt',
       answer: 'probe answer',
-      source_excerpt: 'probe excerpt',
+      // Carries PRIVATE_MARKER so the shared view can be searched for it — see
+      // the note on that constant for why it is not just 'probe excerpt'.
+      source_excerpt: `probe excerpt ${PRIVATE_MARKER}`,
       excerpt_verified: true,
       topic: 'probe topic',
     })
@@ -322,12 +340,32 @@ async function main() {
     console.log(`  (reminders not seeded: ${deviceSeed.error?.message} — is 0020 applied?)`);
   }
 
+  // TWO photos, and the difference between them is the whole point (0023): one
+  // A merely uploaded, one A is actually using. Only the second may be readable
+  // by anybody else.
   const avatarPath = `${A.userId}/avatar-probe.jpg`;
+  const chosenPath = `${A.userId}/avatar-probe-chosen.jpg`;
   const avatarUpload = await A.client.storage
     .from('avatars')
     .upload(avatarPath, new Blob(['probe'], { type: 'image/jpeg' }), { upsert: true });
   const avatarsSeeded = !avatarUpload.error;
   if (!avatarsSeeded) console.log(`  (avatar seed note: ${avatarUpload.error?.message})`);
+
+  let chosenAvatarPath: string | null = null;
+  if (avatarsSeeded) {
+    const chosenUpload = await A.client.storage
+      .from('avatars')
+      .upload(chosenPath, new Blob(['chosen'], { type: 'image/jpeg' }), { upsert: true });
+    if (!chosenUpload.error) {
+      // Only counts as "in use" once the profile actually points at it.
+      const { error } = await A.client
+        .from('profiles')
+        .update({ avatar: `photo:${chosenPath}` })
+        .eq('id', A.userId);
+      if (!error) chosenAvatarPath = chosenPath;
+      else console.log(`  (chosen avatar not set: ${error.message} — is 0023 applied?)`);
+    }
+  }
 
   // Pictures in notes (0018): photos of someone's own notes and diagrams.
   const notePicturePath = `${A.userId}/isolation-probe/picture.jpg`;
@@ -355,9 +393,16 @@ async function main() {
   const communitySeeded = !sharedErr && !!sharedSet;
   let sharedItemId: string | null = null;
   if (communitySeeded) {
-    // A name and a face on the profile, so public_profiles has something to
-    // show and "B sees A's name" is not vacuously true of an empty column.
-    await A.client.from('profiles').update({ display_name: 'Probe A', avatar: 'face:3' }).eq('id', A.userId);
+    // A name on the profile, so public_profiles has something to show and
+    // "B sees A's name" is not vacuously true of an empty column.
+    //
+    // It sets the NAME ONLY, and that is load-bearing. This block runs AFTER
+    // the avatar seeding above, so an `avatar:` here would overwrite the photo
+    // that block just pointed the profile at — and then `is_chosen_avatar` would
+    // rightly answer false, the download would be rightly refused, and the test
+    // would report two failures against a policy doing exactly its job.
+    // Measured 2026-09-16, on the first run after 0023 was applied.
+    await A.client.from('profiles').update({ display_name: 'Probe A' }).eq('id', A.userId);
 
     const { data: sharedItem } = await A.client
       .from('study_items')
@@ -609,9 +654,22 @@ async function main() {
         ok('public_set_items (as B)', `${rows.length} shared card(s) visible`);
       }
 
-      // A's private set's card must not be here.
-      if (rows.some((r) => r.study_set_id === set.id) || serialized.includes('probe excerpt"')) {
-        fail('public_set_items (private set)', "A'S PRIVATE CARD IS EXPOSED");
+      // A's private set's card must not be here — checked by the set's id AND
+      // by a marker that appears nowhere else, because the two answers failing
+      // together is much stronger evidence than either alone.
+      //
+      // Note what is NOT asserted: that every row belongs to A's probe set.
+      // public_set_items serves every shared set in the app, so on a database
+      // where somebody has really shared something, that would fail for the
+      // right reason and look like the wrong one.
+      const fromPrivate = rows.filter((r) => r.study_set_id === set.id);
+      const marked = serialized.includes(PRIVATE_MARKER);
+      if (fromPrivate.length > 0 || marked) {
+        fail(
+          'public_set_items (private set)',
+          `A'S PRIVATE CARD IS EXPOSED — ${fromPrivate.length} row(s) carry the private set's id` +
+            `${marked ? `, and ${PRIVATE_MARKER} is in the response` : ''}`,
+        );
       } else {
         ok('public_set_items (private set)', "A's private card not exposed");
       }
@@ -654,12 +712,13 @@ async function main() {
       } else {
         ok('public_profiles (key)', 'no Gemini key');
       }
-      // An uploaded photo's path must never leave the account — the avatars
-      // bucket is private and a path is all somebody would need to ask for it.
-      if (serialized.includes('photo:')) {
-        fail('public_profiles (photo)', "an uploaded photo's path is exposed");
+      // Since 0023 a photo path is SUPPOSED to be here — but only the one that
+      // person is using. A path A merely uploaded and replaced must not appear;
+      // `avatar-probe.jpg` is exactly that photo.
+      if (serialized.includes('avatar-probe.jpg')) {
+        fail('public_profiles (spare photo)', "a photo A is NOT using is exposed");
       } else {
-        ok('public_profiles (photo)', 'no uploaded photo path');
+        ok('public_profiles (spare photo)', 'only the picture in use');
       }
     }
 
@@ -738,10 +797,10 @@ async function main() {
       else if (fromA.author_name !== 'Probe A') fail('global_chat (as B)', 'a message with no name beside it');
       else ok('global_chat (as B)', "A's message readable, attributed to A");
 
-      if (JSON.stringify(rows).includes('photo:')) {
-        fail('global_chat (photo)', "an uploaded photo's path is exposed");
+      if (JSON.stringify(rows).includes('avatar-probe.jpg')) {
+        fail('global_chat (spare photo)', "a photo A is NOT using is exposed");
       } else {
-        ok('global_chat (photo)', 'no uploaded photo path');
+        ok('global_chat (spare photo)', 'only the picture in use');
       }
     }
 
@@ -859,21 +918,71 @@ async function main() {
   if (!wr.error) fail('storage write', "B wrote into A's prefix");
   else ok('storage write', 'blocked');
 
-  // A profile photo is a picture of a person. Same three checks, second bucket.
+  // A profile photo is a picture of a person.
+  //
+  // Since 0023 this is the sharpest pair of assertions in the file, because the
+  // two photos differ only in whether A is USING one of them. `avatarPath` is a
+  // spare upload; `chosenAvatarPath` is the value in A's profiles.avatar. The
+  // first must stay private and the second must be readable — if the policy
+  // were written as "any file in the avatars bucket" both would pass a naive
+  // test and every photo anybody had ever uploaded would be published,
+  // including the ones they replaced because they did not like them.
   if (avatarsSeeded) {
-    const avDl = await B.client.storage.from('avatars').download(avatarPath);
-    if (avDl.data) fail('avatars download', "B downloaded A's profile picture");
-    else ok('avatars download', 'blocked');
-
+    // Listing is a SELECT on storage.objects, so 0023's read policy necessarily
+    // makes the chosen photo listable — there is no way to serve a file and
+    // hide its name. What must not happen is the rest of the folder coming with
+    // it: the filenames are `avatar-<timestamp>.jpg`, so a full listing would
+    // say how many pictures somebody has tried and when they changed each one.
+    //
+    // Before 0023 this was "nothing visible", and that assertion failing on the
+    // first run after it was applied is the policy working, not leaking.
     const avLs = await B.client.storage.from('avatars').list(A.userId);
-    if ((avLs.data?.length ?? 0) > 0) fail('avatars list', "B listed A's pictures");
-    else ok('avatars list', 'nothing visible');
+    const listed = (avLs.data ?? []).map((f) => f.name);
+    const spares = listed.filter((n) => n !== chosenPath.split('/')[1]);
+    if (spares.length > 0) {
+      fail('avatars list', `B listed picture(s) A is not using: ${spares.join(', ')}`);
+    } else {
+      ok('avatars list', listed.length === 0 ? 'nothing visible' : 'only the picture in use');
+    }
 
     const avWr = await B.client.storage
       .from('avatars')
       .upload(`${A.userId}/intruder.jpg`, new Blob(['x'], { type: 'image/jpeg' }));
     if (!avWr.error) fail('avatars write', "B wrote into A's picture folder");
     else ok('avatars write', 'blocked');
+
+    // NEGATIVE: a photo A uploaded but is not using.
+    const spare = await B.client.storage.from('avatars').download(avatarPath);
+    if (spare.data) fail('avatars download (not in use)', "B downloaded a photo A is NOT using");
+    else ok('avatars download (not in use)', 'blocked');
+
+    // Is 0023 applied? Asked directly, because otherwise a database without it
+    // fails the positive check below and reports a leak-shaped alarm for a
+    // migration that simply has not been pasted yet — the same reason this
+    // script gates the Nomi and reminder checks on their own seeds.
+    const gate = await B.client.rpc('is_chosen_avatar', { object_name: 'nobody/none.jpg' });
+    const picturesShared = !(gate.error?.code === 'PGRST202' || gate.error?.code === '42883');
+
+    if (chosenAvatarPath && !picturesShared) {
+      console.log('  ----  avatars download (in use) — pictures not shared yet (migration 0023), not checked');
+    } else if (chosenAvatarPath) {
+      // POSITIVE: the one A is using. Without this the negative above passes
+      // just as well against a policy that serves nobody, and the chat would
+      // show a drawn face for everyone while looking entirely correct.
+      const chosen = await B.client.storage.from('avatars').download(chosenAvatarPath);
+      if (chosen.data) ok('avatars download (in use)', "B can see the picture A is using");
+      else fail('avatars download (in use)', `B cannot see A's chosen picture: ${chosen.error?.message}`);
+
+      // And the view hands out the path, or there is nothing to fetch.
+      const shown = await B.client
+        .from('public_profiles')
+        .select('avatar')
+        .eq('id', A.userId)
+        .maybeSingle();
+      const value = (shown.data as { avatar?: string } | null)?.avatar ?? '';
+      if (value === `photo:${chosenAvatarPath}`) ok('public_profiles (picture)', 'the chosen photo is offered');
+      else fail('public_profiles (picture)', `expected the chosen photo, got "${value}"`);
+    }
   } else {
     console.log('  ----  avatars — bucket not present (migration 0016), not checked');
   }
@@ -920,7 +1029,15 @@ async function main() {
   // sweep also collects what earlier runs left.
   await A.client.storage.from('documents').remove([storagePath]);
   if (notePicturesSeeded) await A.client.storage.from('note-images').remove([notePicturePath]);
-  if (avatarsSeeded) await A.client.storage.from('avatars').remove([avatarPath]);
+  if (avatarsSeeded) {
+    // The profile must stop pointing at the chosen photo BEFORE it is removed,
+    // or A is left with an avatar value whose file is gone. `parseAvatar` would
+    // fall back to a face, so it is not a crash — but leaving a dangling
+    // pointer on a shared test account is how a later run measures the wrong
+    // thing (NOTES §9.4).
+    if (chosenAvatarPath) await A.client.from('profiles').update({ avatar: 'face:3' }).eq('id', A.userId);
+    await A.client.storage.from('avatars').remove([avatarPath, chosenPath]);
+  }
   if (remindersSeeded) {
     await A.client.from('push_subscriptions').delete().eq('endpoint', reminderEndpoint);
     await A.client.from('reminder_settings').delete().eq('user_id', A.userId);

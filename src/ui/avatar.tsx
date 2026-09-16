@@ -78,36 +78,68 @@ export function Avatar({
 /**
  * Somebody ELSE's picture — in the chat, and beside a set they shared.
  *
- * ## Why this is not `Avatar`
+ * ## Why this is still not `Avatar`
  *
- * `Avatar` above knows how to fetch a photo: it asks for a signed link, keeps a
- * copy on the device, and writes what it learns into this device's avatar cache
- * under the user's id. Every one of those is wrong for another person.
+ * It began as the component that provably could not leak a photo: migration
+ * 0021's views turned an uploaded photo into null, and this drew a face with no
+ * network call in it at all. Migration 0023 reverses that at the owner's
+ * request — *"my dp isn't shown hahaha, i want it shown"* — so it now resolves
+ * a photo like `Avatar` does.
  *
- * It could not actually leak a photo — `public_profiles` and the other views in
- * migration 0021 pass only `face:N` through, and turn an uploaded photo's path
- * into null — so `Avatar` would draw a face here too. But it would do it by
- * looking at a value and deciding not to fetch, and a component that decides
- * not to leak is one refactor away from deciding wrong. This one CANNOT: there
- * is no network call in it and nothing for a photo path to take.
+ * It stays separate because `Avatar` does two things that are still wrong for
+ * another person: it reads and writes this device's avatar cache keyed by the
+ * user's id, which would fill it with four other people's avatars and make
+ * their photos outlive a sign-out; and it labels the picture "Your profile
+ * picture". Here the name is the person's own.
  *
- * It would also have polluted this device's cache with four other people's
- * avatar values, keyed by their user ids.
+ * ## The photo can only ever be the one they are using
  *
- * A null avatar is not a failure — it is either somebody who has not chosen a
- * face or somebody who uploaded a photo, and both get the default face derived
- * from their user id, which is stable for that person everywhere.
+ * Not a decision this component makes. `is_chosen_avatar` in 0023 serves a file
+ * from the avatars bucket only while it is the value in that person's
+ * `profiles.avatar`; the five older photos the bucket keeps as choices stay as
+ * private as they were. So a stale path here does not resolve — which is also
+ * why a failed link falls back to the face rather than to an empty circle.
+ *
+ * A null avatar is not a failure either — it is somebody who has not chosen
+ * one — and they get the default face derived from their user id, stable for
+ * that person everywhere.
  */
 export function PersonAvatar({
   avatar,
   userId,
+  name,
   size = 32,
 }: {
   avatar: string | null;
   userId: string;
+  /** Whose picture it is, for anyone who cannot see it. */
+  name?: string;
   size?: number;
 }) {
   const choice = parseAvatar(avatar, userId);
+  const photoPath = choice.kind === 'photo' ? choice.path : null;
+
+  const { data: url } = useQuery({
+    // The same key `Avatar` uses, so a person who appears in the chat twenty
+    // times costs one signed link, and their own picture on Home costs none.
+    queryKey: ['avatar-url', photoPath],
+    queryFn: () => avatarPhotoUrl(photoPath!),
+    enabled: photoPath !== null,
+    staleTime: 50 * 60 * 1000,
+  });
+
+  if (photoPath !== null && url) {
+    return (
+      <Image
+        source={{ uri: url }}
+        style={{ width: size, height: size, borderRadius: size / 2 }}
+        accessibilityLabel={name ? `${name}'s profile picture` : 'Profile picture'}
+      />
+    );
+  }
+
+  // Their face until the link arrives, and their face for good if it never
+  // does — a picture that has to load should never look like no picture.
   const index = choice.kind === 'face' ? choice.index : defaultFaceIndex(userId);
   return <Face index={index} size={size} />;
 }

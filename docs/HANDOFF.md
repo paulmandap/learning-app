@@ -57,7 +57,18 @@ under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 22; 0021 and 0022 NOT YET APPLIED
+### Migrations — 23; all applied and verified
+
+**0021, 0022 and 0023 were applied by the owner on 2026-09-16** and verified the
+same day (NOTES §46.7–10): isolation **61/61** against the live project in both
+directions, and `scripts/community-probe.ts` **11/11** end to end in the built
+app as the second user.
+
+Getting there took production down once, silently, for the length of one gap —
+`scripts/deploy-status.ts` was run in place of the deploy, so 0022 dropped a
+constraint the live bundle was still upserting on and every schedule write in
+the app answered 42P10. **Read §46.7 before applying any destructive pair.** The
+order below is the order any future one needs.
 
 **0021 and 0022 (community, NOTES §46) are written and waiting.** Until 0021 is
 applied the Community tab says "Sharing isn't switched on yet" and everything
@@ -282,11 +293,17 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     policy on that table would start counting other people's cards into someone's
     own Progress, silently, and `listSets` would list strangers' sets as theirs.
     If you ever need a sixth thing shared, add a sixth view.
-31. **An uploaded photo is never shown to anyone else** (NOTES §46). Every view
-    passes `profiles.avatar` through a CASE that lets only `face:%` out, so the
-    promise is the database's and not a screen's. Other people are drawn with
-    `PersonAvatar`, which has no network call in it at all — deliberately not
-    `Avatar`, which knows how to fetch a photo.
+31. **Other people see the picture you are USING, and only that one** (NOTES
+    §46.9, the owner's decision on 2026-09-16, reversing §46's face-only rule he
+    had chosen before using it). Migration 0023's `is_chosen_avatar` serves a
+    file from the avatars bucket only while it is the value in somebody's
+    `profiles.avatar`. The bucket keeps up to six photos per person as choices
+    and **the five they are not using stay private** — granting the bucket
+    wholesale is one line shorter and publishes every photo anyone ever
+    uploaded, including the ones they replaced. The bucket is still private,
+    still signed-in-only, and writing into someone else's folder is still
+    refused. The isolation test holds both halves: not-in-use blocked, in-use
+    readable.
 32. **"Report this card" and written answer choices are NOT offered on a shared
     set** (NOTES §46). Both write to `study_items`, which is update-own, so both
     would match no rows and return no error. The cost is stated rather than

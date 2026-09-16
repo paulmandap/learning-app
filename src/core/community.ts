@@ -32,7 +32,7 @@ export interface PublicSet {
   owner_id: string;
   /** Null when the owner has never chosen a name, or has no profile row at all. */
   owner_name: string | null;
-  /** 'face:N', or null for anyone who uploaded a photo — their photo stays private. */
+  /** 'face:N' or 'photo:<user id>/<file>' — the picture they are using (0023). */
   owner_avatar: string | null;
   title: string;
   published_at: string | null;
@@ -231,7 +231,7 @@ export function browseOrder(sets: readonly PublicSet[]): PublicSet[] {
 export const SHARING_FACTS: readonly string[] = [
   'Anyone signed in to Nomi can find this set and study its cards.',
   'They see the questions, the answers, and the bit of your notes each card came from.',
-  'They see the name you chose and your face — never a photo you uploaded.',
+  'They see the name you chose and the picture you are using.',
   'They cannot see your files, your notes, your other sets, or how you are doing.',
   'You can stop sharing at any time, and it disappears from the list.',
 ];

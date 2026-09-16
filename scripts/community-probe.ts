@@ -119,6 +119,12 @@ async function main() {
   }
   const setId = (set as { id: string }).id;
 
+  // `hidden` is spelled out on BOTH rows, and that is not tidiness. PostgREST
+  // builds one INSERT for a batch, so a key present on one row and absent from
+  // another is sent as NULL for the row that omitted it — it does NOT fall back
+  // to the column default. Measured on this probe's first run: "null value in
+  // column hidden of relation study_items violates not-null constraint", from an
+  // insert where only the second row mentioned it.
   const { error: itemErr } = await A.client.from('study_items').insert([
     {
       user_id: A.userId,
@@ -130,6 +136,7 @@ async function main() {
       answer: CARD_ANSWER,
       source_excerpt: 'The community probe card asks exactly this.',
       excerpt_verified: true,
+      hidden: false,
     },
     {
       user_id: A.userId,
@@ -144,7 +151,10 @@ async function main() {
       hidden: true,
     },
   ]);
-  if (itemErr) throw new Error(`Seed failed (study_items): ${itemErr.message}`);
+  if (itemErr) {
+    await A.client.from('study_sets').delete().eq('title', SET_TITLE);
+    throw new Error(`Seed failed (study_items): ${itemErr.message}`);
+  }
 
   console.log(`Seeded: A shared "${SET_TITLE}" (${setId})\n`);
 
@@ -172,7 +182,21 @@ async function main() {
     if (outDir) await page.screenshot(join(outDir, '01-community.png'));
 
     // --- opening it gives a read-only set screen ---------------------------
-    await page.click(SET_TITLE);
+    //
+    // Not `page.click(SET_TITLE)`. That helper matches a control whose visible
+    // text or aria-label EQUALS the label, and a shared set's row is labelled
+    // for a screen reader as "<title>, by <who>, <n> stars" — so an exact match
+    // never fires. Matching the start of the label keeps the good label and
+    // still names one row. Measured: the exact match timed out against a row
+    // that was on screen and correct.
+    await page.evaluate(`(() => {
+      const el = [...document.querySelectorAll('[role="button"]')]
+        .find((n) => (n.getAttribute('aria-label') ?? '').startsWith(${JSON.stringify(SET_TITLE + ',')}));
+      if (!el) throw new Error('no row for the shared set');
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      el.click();
+    })()`);
     await page.waitFor(
       `location.pathname.includes('/set/') ? 'y' : ''`,
       'the set screen',
@@ -204,7 +228,15 @@ async function main() {
     if (outDir) await page.screenshot(join(outDir, '02-shared-set.png'));
 
     // --- the deck deals A's cards -----------------------------------------
-    await page.goto(`/set/${setId}/flashcards`);
+    //
+    // `?level=remember` and not the bare route, because a deck with no level in
+    // its link opens on UNDERSTAND (`startingLevel`, src/core/deck.ts) and this
+    // probe's cards are all Remember. Without it the screen correctly shows
+    // "Remember 1 · Understand 0 · Apply 0" and "No cards at this level yet",
+    // and the probe reads that as a shared set dealing nothing — which is how
+    // its first run accused the feature of a bug the app does not have. The set
+    // screen passes the same parameter when it knows where the work is.
+    await page.goto(`/set/${setId}/flashcards?level=remember`);
     await page.waitFor(
       `document.body.innerText.includes(${JSON.stringify(CARD_PROMPT)}) ? 'y' : ''`,
       "A's card in B's deck",
@@ -253,15 +285,18 @@ async function main() {
     if (outDir) await page.screenshot(join(outDir, '04-chat.png'));
   } finally {
     await page.close();
-  }
 
-  // ------------------------------------------------------------- clean up --
-  await B.client.from('set_stars').delete().eq('user_id', B.userId).eq('study_set_id', setId);
-  await B.client.from('global_messages').delete().eq('body', CHAT_LINE);
-  await B.client.from('review_state').delete().eq('study_set_id', setId);
-  await B.client.from('attempts').delete().eq('study_set_id', setId);
-  const { error: sweep } = await A.client.from('study_sets').delete().eq('title', SET_TITLE);
-  if (sweep) console.log(`  (cleanup note: ${sweep.message})`);
+    // In the `finally`, so a check that throws half way still tidies up. The
+    // first run of this probe left its shared set on the test account because
+    // the cleanup sat after the try block — and synthetic data left in a shared
+    // account has already produced one wrong conclusion here (NOTES §9.4).
+    await B.client.from('set_stars').delete().eq('user_id', B.userId).eq('study_set_id', setId);
+    await B.client.from('global_messages').delete().eq('body', CHAT_LINE);
+    await B.client.from('review_state').delete().eq('study_set_id', setId);
+    await B.client.from('attempts').delete().eq('study_set_id', setId);
+    const { error: sweep } = await A.client.from('study_sets').delete().eq('title', SET_TITLE);
+    if (sweep) console.log(`  (cleanup note: ${sweep.message})`);
+  }
 
   console.log(`\n${checks - failures}/${checks} checks passed.`);
   if (outDir) console.log(`Pictures in ${outDir}`);

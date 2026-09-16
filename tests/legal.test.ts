@@ -82,11 +82,20 @@ describe('the Terms of Use and the Privacy Policy', () => {
     // it too — src/core/community.ts SHARING_FACTS, held to the views there.
     expect(privacy).toMatch(/the bit of your notes each card came from/);
 
-    // The photo. public_profiles, public_sets and global_chat each pass the
-    // avatar through a CASE that lets only a drawn face out, so this promise is
-    // the database's and not a screen's.
-    expect(privacy).toMatch(/photo you upload is never shown to anyone else/);
-    expect(migration).toContain("case when p.avatar like 'face:%' then p.avatar else null end");
+    // The picture. 0021 hid uploaded photos from everyone; 0023 shows them, at
+    // the owner's request, but only the one that person is USING — the bucket
+    // keeps their last few uploads as choices and those stay private. The
+    // policy is what makes that true, so the policy is what is checked.
+    const pictures = readFileSync(
+      'supabase/migrations/0023_shared_profile_pictures.sql',
+      'utf8',
+    );
+    expect(privacy).toMatch(/the picture you are using/);
+    expect(privacy).toMatch(/the ones you are not using stay private/);
+    expect(pictures).toContain("where p.avatar = 'photo:' || object_name");
+    // And nothing about it reaches the open internet, as the policy says.
+    expect(privacy).toMatch(/never on the open internet/);
+    expect(pictures).not.toMatch(/public\s*=\s*true/);
 
     // Stars counted, never named: set_stars is select-own and the count is
     // computed inside the view.
