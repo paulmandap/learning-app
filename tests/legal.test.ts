@@ -54,6 +54,57 @@ describe('the Terms of Use and the Privacy Policy', () => {
     expect(sets).toContain('removeAvatarPhotos(');
     expect(text(PRIVACY_POLICY)).toMatch(/does not remove your account itself/);
     expect(text(PRIVACY_POLICY)).toMatch(/Delete my data removes[^.]*your reminders/);
+
+    // And the part four other people can still read. Promising to remove the
+    // stars, the messages and the sharing is only true if something does it —
+    // deleting every set of mine leaves all three behind, because a star is a
+    // row about somebody ELSE's set and a message belongs to no set at all.
+    expect(sets).toContain('removeMyCommunityData(');
+    const community = readFileSync('src/data/community.ts', 'utf8');
+    for (const table of ['set_stars', 'global_messages']) {
+      expect(community, table).toContain(`'${table}'`);
+    }
+    expect(community).toMatch(/update\(\{ visibility: 'private' \}\)/);
+    expect(text(PRIVACY_POLICY)).toMatch(/Delete my data removes[^.]*the stars you gave/);
+    expect(text(PRIVACY_POLICY)).toMatch(/stops sharing every set you shared/);
+  });
+
+  it('tell people what the others can see, and it matches what the app shows them', () => {
+    const privacy = text(PRIVACY_POLICY);
+    const migration = readFileSync('supabase/migrations/0021_community.sql', 'utf8');
+
+    // The three things that leave the account, each named.
+    expect(privacy).toMatch(/What other people can see/);
+    expect(privacy).toMatch(/Sets are private until you share one/);
+    expect(privacy).toMatch(/one room that everyone signed in shares/);
+
+    // The excerpt. It is the half people assume wrongly, and the set screen says
+    // it too — src/core/community.ts SHARING_FACTS, held to the views there.
+    expect(privacy).toMatch(/the bit of your notes each card came from/);
+
+    // The photo. public_profiles, public_sets and global_chat each pass the
+    // avatar through a CASE that lets only a drawn face out, so this promise is
+    // the database's and not a screen's.
+    expect(privacy).toMatch(/photo you upload is never shown to anyone else/);
+    expect(migration).toContain("case when p.avatar like 'face:%' then p.avatar else null end");
+
+    // Stars counted, never named: set_stars is select-own and the count is
+    // computed inside the view.
+    expect(privacy).toMatch(/nobody can see who gave one/);
+    expect(migration).toContain('create policy set_stars_select_own');
+
+    // What is NOT published. public_set_items names study_items columns only.
+    expect(privacy).toMatch(/do not see the files you uploaded, your notes, your other sets/);
+  });
+
+  it('say in the Terms what may not be shared or sent', () => {
+    const terms = text(TERMS_OF_USE);
+    expect(terms).toMatch(/Sharing sets, and the chat/);
+    expect(terms).toMatch(/harasses, bullies, threatens or impersonates/);
+    expect(terms).toMatch(/share other people's personal information/);
+    // A rule nobody can enforce is a wish. Both documents say we can remove it.
+    expect(terms).toMatch(/We can remove a shared set or a message/);
+    expect(text(PRIVACY_POLICY)).toMatch(/We can remove a shared set or a message/);
   });
 
   it('say who delivers reminders, and what a reminder tells them (NOTES §45)', () => {

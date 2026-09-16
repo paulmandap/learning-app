@@ -18,6 +18,7 @@ import { space, type, useTheme } from '../../../src/ui/theme';
 import { NomiFinish } from '../../../src/ui/nomi-finish';
 import { StudyProgress } from '../../../src/ui/nomi-studying';
 import { listItems, type StudyItem } from '../../../src/data/items';
+import { readableSet } from '../../../src/data/community';
 import { missedItemIds } from '../../../src/data/attempts';
 import { useStudySession } from '../../../src/data/study-session';
 import { deal } from '../../../src/core/deck';
@@ -90,10 +91,21 @@ export default function Blanks() {
   const [got, setGot] = useState(0);
   const [answered, setAnswered] = useState(0);
 
-  const { data: allItems = [], isLoading } = useQuery({
-    queryKey: ['items', setId],
-    queryFn: () => listItems(setId),
+  // Whose set this is — see the longer note in flashcards.tsx. It decides which
+  // relation the cards come from, and `owned` is in the key so the first render
+  // cannot cache an empty deck under a key that never changes again.
+  const { data: readable, isLoading: setLoading } = useQuery({
+    queryKey: ['set', setId],
+    queryFn: () => readableSet(setId),
   });
+  const owned = readable?.owned ?? true;
+
+  const { data: allItems = [], isLoading: itemsLoading } = useQuery({
+    queryKey: ['items', setId, owned],
+    queryFn: () => listItems(setId, { owned }),
+    enabled: !setLoading,
+  });
+  const isLoading = setLoading || itemsLoading;
   const { data: schedules } = useQuery({
     queryKey: ['schedules', setId],
     queryFn: () => reviewStatesForSet(setId),

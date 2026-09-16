@@ -37,9 +37,18 @@ import { TabIcon, type TabIconName } from '../../src/ui/glyphs';
 /** Below this the bar sits at the bottom; at or above it, down the left. */
 const SIDEBAR_MIN_WIDTH = 800;
 
+/**
+ * Five tabs, since Community (NOTES §46).
+ *
+ * At 393px that is about 78 points each, and "Community" at 11px measures
+ * roughly 60 — so the word still fits and the bar does not become the icon-only
+ * guessing game the comment below rejects. Photographed at that width before it
+ * shipped, because nothing else would have caught it.
+ */
 const TABS = [
   { name: 'index', href: '/', label: 'Nomi', icon: 'study' },
   { name: 'notes', href: '/notes', label: 'Notes', icon: 'notes' },
+  { name: 'community', href: '/community', label: 'Community', icon: 'community' },
   { name: 'progress', href: '/progress', label: 'Progress', icon: 'progress' },
   { name: 'settings', href: '/settings', label: 'Settings', icon: 'settings' },
 ] as const;

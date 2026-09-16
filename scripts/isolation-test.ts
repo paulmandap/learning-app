@@ -1,9 +1,32 @@
 /**
  * Cross-user isolation test (spec §7).
  *
- * Signs in as two real users against the live project and asserts that user B
- * cannot reach ANY of user A's data. This is the only test that can prove RLS,
- * because RLS is enforced by Postgres, not by anything we could unit test.
+ * Signs in as two real users against the live project and asserts what user B
+ * can and cannot reach of user A's data. This is the only test that can prove
+ * RLS, because RLS is enforced by Postgres, not by anything we could unit test.
+ *
+ * ## The claim this script makes changed with migration 0021
+ *
+ * It used to be "B cannot reach ANY of A's data", full stop. Since sets can be
+ * shared with everyone, that sentence is no longer the guarantee — and a test
+ * still asserting it would have to be either wrong or weakened until it proved
+ * nothing. The claim is now narrower and it is checked in BOTH directions:
+ *
+ *   B reaches exactly three things of A's, and only when A chose it:
+ *     - a set A SHARED, and its cards, through public_sets / public_set_items
+ *     - A's chosen name and drawn face, through public_profiles
+ *     - what A said in the global chat
+ *
+ *   B reaches nothing else. In particular, and asserted separately below:
+ *     - A's PRIVATE set stays invisible even while another of A's sets is shared
+ *     - the base tables still return zero of A's rows — no policy was relaxed,
+ *       and this is the guard that says so
+ *     - A's uploaded photo, files, notes, pages, schedule and Gemini key
+ *
+ * The POSITIVE assertions matter as much as the negative ones here. The four
+ * cross-user views run as their owner, and if that ever stopped bypassing RLS
+ * they would return nothing at all — the Community tab would look like "nobody
+ * has shared anything yet" and every negative assertion below would still pass.
  *
  * Coverage, each asserted separately:
  *   - every user-scoped base table: study_sets, documents, document_pages,
@@ -20,6 +43,15 @@
  *   - storage objects under A's prefix
  *   - profiles.gemini_api_key specifically
  *   - heartbeat: direct writes refused, the RPC accepted
+ *   - community (0021), both directions: B DOES see A's shared set, its cards
+ *     and A's name; B does NOT see A's private set on the same account, the
+ *     reported card inside the shared one, A's generation plan, A's key, A's
+ *     uploaded photo, A's due dates, or anything extra through study_sets and
+ *     study_items directly. Plus: starring a private set is refused, a star
+ *     cannot be given in someone else's name, nobody can see WHO starred what,
+ *     one room means B reads what A said, B cannot delete A's message, two
+ *     people can each schedule the same shared card (0022), and unsharing
+ *     actually takes the set and its cards away again
  *
  * The views matter most. A Postgres view runs as its OWNER by default, which
  * bypasses RLS on the tables underneath. Testing only base tables would pass
@@ -70,6 +102,17 @@ if (!creds.a.email || !creds.a.password || !creds.b.email || !creds.b.password) 
  * a day they had actually studied.
  */
 const STUDY_DAY_PROBE = '2000-01-01';
+
+/**
+ * A's shared set, and the two things said in the chat.
+ *
+ * Distinctive strings rather than ids, so the cleanup at the end also sweeps up
+ * whatever an earlier run left behind when it failed part way — the same reason
+ * the private probe set is deleted by title.
+ */
+const SHARED_SET_TITLE = 'Isolation probe SHARED set';
+const CHAT_PROBE_A = 'isolation probe message from A';
+const CHAT_PROBE_B = 'isolation probe message from B';
 
 /**
  * The views this test covers, and the ones that may legitimately be gone.
@@ -294,6 +337,64 @@ async function main() {
   const notePicturesSeeded = !notePictureUpload.error;
   if (!notePicturesSeeded) console.log(`  (note picture seed note: ${notePictureUpload.error?.message})`);
 
+  // 0021: a SECOND set, which A shares with everyone. Two sets is the whole
+  // point — one shared and one private, on the same account, so "B can see A's
+  // set" and "B cannot see A's set" are both assertable at once. A test with
+  // only a shared set could not tell a correct filter from no filter at all.
+  const { data: sharedSet, error: sharedErr } = await A.client
+    .from('study_sets')
+    .insert({
+      user_id: A.userId,
+      title: SHARED_SET_TITLE,
+      status: 'ready',
+      visibility: 'public',
+      published_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single();
+  const communitySeeded = !sharedErr && !!sharedSet;
+  let sharedItemId: string | null = null;
+  if (communitySeeded) {
+    // A name and a face on the profile, so public_profiles has something to
+    // show and "B sees A's name" is not vacuously true of an empty column.
+    await A.client.from('profiles').update({ display_name: 'Probe A', avatar: 'face:3' }).eq('id', A.userId);
+
+    const { data: sharedItem } = await A.client
+      .from('study_items')
+      .insert({
+        user_id: A.userId,
+        study_set_id: (sharedSet as { id: string }).id,
+        document_id: doc?.id ?? null,
+        page_index: 0,
+        kind: 'flashcard',
+        level: 'remember',
+        prompt: 'shared probe prompt',
+        answer: 'shared probe answer',
+        source_excerpt: 'shared probe excerpt',
+        excerpt_verified: true,
+      })
+      .select('id')
+      .single();
+    sharedItemId = (sharedItem as { id: string } | null)?.id ?? null;
+
+    // A reported card in the SAME shared set. It must not reach B: `hidden`
+    // has always removed a card from every deck for its owner, and sharing
+    // must not be a way around that for everyone else.
+    await A.client.from('study_items').insert({
+      user_id: A.userId,
+      study_set_id: (sharedSet as { id: string }).id,
+      kind: 'flashcard',
+      level: 'remember',
+      prompt: 'shared probe REPORTED prompt',
+      answer: 'shared probe reported answer',
+      source_excerpt: 'shared probe reported excerpt',
+      excerpt_verified: true,
+      hidden: true,
+    });
+  } else {
+    console.log(`  (community not seeded: ${sharedErr?.message} — is 0021 applied?)`);
+  }
+
   const storagePath = `${A.userId}/${doc?.id ?? 'x'}/probe.txt`;
   const upload = await A.client.storage
     .from('documents')
@@ -453,6 +554,295 @@ async function main() {
     }
   }
 
+  // ------------------------------------------------------------ community --
+  //
+  // The only place in this script where B is SUPPOSED to see something of A's.
+  // Read the header before changing anything here: the negative assertions are
+  // worthless on their own, because a definer view that had stopped bypassing
+  // RLS would return nothing and pass every one of them while the feature
+  // quietly showed an empty tab.
+  if (communitySeeded) {
+    console.log('\nWhat B may see of A (0021 — shared on purpose):');
+
+    // POSITIVE. A shared it; B must find it.
+    const { data: publicSets, error: psErr } = await B.client.from('public_sets').select('*');
+    if (psErr) {
+      fail('public_sets (as B)', `B cannot read shared sets at all: ${psErr.message}`);
+    } else {
+      const rows = (publicSets ?? []) as Record<string, unknown>[];
+      const shared = rows.find((r) => r.id === (sharedSet as { id: string }).id);
+      if (!shared) {
+        fail('public_sets (as B)', "B cannot see A's SHARED set — does the view still bypass RLS?");
+      } else {
+        ok('public_sets (as B)', `A's shared set visible, ${String(shared.cards)} card(s)`);
+      }
+
+      // NEGATIVE, and the one that matters most on this line: A's OTHER set is
+      // private, on the same account, and must not have come along with it.
+      if (rows.some((r) => r.id === set.id)) {
+        fail('public_sets (private set)', "B CAN SEE A'S PRIVATE SET through public_sets");
+      } else {
+        ok('public_sets (private set)', "A's private set not in the shared list");
+      }
+
+      // The plan quotes A's notes and is not a column of this view.
+      if (JSON.stringify(rows).includes('"plan"')) {
+        fail('public_sets (plan)', 'the generation plan is exposed');
+      } else {
+        ok('public_sets (plan)', 'no generation plan');
+      }
+    }
+
+    // POSITIVE, then NEGATIVE, on the cards.
+    const { data: sharedItems, error: siErr } = await B.client
+      .from('public_set_items')
+      .select('*');
+    if (siErr) {
+      fail('public_set_items (as B)', `B cannot read shared cards at all: ${siErr.message}`);
+    } else {
+      const rows = (sharedItems ?? []) as Record<string, unknown>[];
+      const serialized = JSON.stringify(rows);
+
+      if (!rows.some((r) => r.id === sharedItemId)) {
+        fail('public_set_items (as B)', "B cannot see the SHARED set's card");
+      } else {
+        ok('public_set_items (as B)', `${rows.length} shared card(s) visible`);
+      }
+
+      // A's private set's card must not be here.
+      if (rows.some((r) => r.study_set_id === set.id) || serialized.includes('probe excerpt"')) {
+        fail('public_set_items (private set)', "A'S PRIVATE CARD IS EXPOSED");
+      } else {
+        ok('public_set_items (private set)', "A's private card not exposed");
+      }
+
+      // A reported card is gone for everyone, not only for its owner.
+      if (serialized.includes('REPORTED')) {
+        fail('public_set_items (reported)', 'a reported card is served to other people');
+      } else {
+        ok('public_set_items (reported)', 'reported card not served');
+      }
+
+      // Nothing here may point at A's files. document_id is deliberately not a
+      // column of the view — with it, the screen would offer "Open page" for a
+      // file in A's private bucket.
+      if (rows.length > 0 && 'document_id' in rows[0]!) {
+        fail('public_set_items (files)', 'document_id is exposed; it points into A’s bucket');
+      } else {
+        ok('public_set_items (files)', 'no link to the owner’s files');
+      }
+    }
+
+    // POSITIVE: a name and a face. NEGATIVE: the key, and the uploaded photo.
+    const { data: profiles, error: ppErr } = await B.client.from('public_profiles').select('*');
+    if (ppErr) {
+      fail('public_profiles (as B)', `B cannot read names at all: ${ppErr.message}`);
+    } else {
+      const rows = (profiles ?? []) as Record<string, unknown>[];
+      const aRow = rows.find((r) => r.id === A.userId);
+      if (!aRow) {
+        fail('public_profiles (as B)', "B cannot see A's name — the chat would attribute nothing");
+      } else if (aRow.display_name !== 'Probe A') {
+        fail('public_profiles (as B)', `expected A's chosen name, got ${String(aRow.display_name)}`);
+      } else {
+        ok('public_profiles (as B)', "A's chosen name and face visible");
+      }
+
+      const serialized = JSON.stringify(rows);
+      if (serialized.includes('A-SECRET-KEY-VALUE') || serialized.includes('gemini_api_key')) {
+        fail('public_profiles (key)', "B CAN READ A'S GEMINI KEY THROUGH THE VIEW");
+      } else {
+        ok('public_profiles (key)', 'no Gemini key');
+      }
+      // An uploaded photo's path must never leave the account — the avatars
+      // bucket is private and a path is all somebody would need to ask for it.
+      if (serialized.includes('photo:')) {
+        fail('public_profiles (photo)', "an uploaded photo's path is exposed");
+      } else {
+        ok('public_profiles (photo)', 'no uploaded photo path');
+      }
+    }
+
+    // THE REGRESSION GUARD. Sharing must not have widened a base table. If a
+    // permissive policy is ever added to study_sets or study_items, every query
+    // in the app that trusts RLS as its only filter widens with it — starting
+    // with the unfiltered read on the Progress screen, which would begin
+    // counting other people's cards as yours, silently.
+    for (const table of ['study_sets', 'study_items'] as const) {
+      const { data } = await B.client.from(table).select('id, user_id');
+      const leaked = (data ?? []).filter((r: Record<string, unknown>) => r.user_id === A.userId);
+      if (leaked.length > 0) {
+        fail(`${table} (base table, A sharing)`, `${leaked.length} of A's rows readable directly`);
+      } else {
+        ok(`${table} (base table, A sharing)`, "0 of A's rows, even with a set shared");
+      }
+    }
+
+    // ---- stars ----
+    const starOwn = await B.client
+      .from('set_stars')
+      .insert({ user_id: B.userId, study_set_id: (sharedSet as { id: string }).id });
+    if (starOwn.error) fail('set_stars insert', `B cannot star a shared set: ${starOwn.error.message}`);
+    else ok('set_stars insert', "B starred A's shared set");
+
+    // A private set cannot be starred — can_star_set says so, and it is a
+    // definer function precisely so a policy can ask about a row B cannot read.
+    const starPrivate = await B.client
+      .from('set_stars')
+      .insert({ user_id: B.userId, study_set_id: set.id });
+    if (!starPrivate.error) fail('set_stars (private set)', "B starred A's PRIVATE set");
+    else ok('set_stars (private set)', `blocked (${starPrivate.error.code ?? 'error'})`);
+
+    // And a star cannot be given in somebody else's name.
+    const starAsA = await B.client
+      .from('set_stars')
+      .insert({ user_id: A.userId, study_set_id: (sharedSet as { id: string }).id });
+    if (!starAsA.error) fail('set_stars (as A)', 'B gave a star in A’s name');
+    else ok('set_stars (as A)', `blocked (${starAsA.error.code ?? 'error'})`);
+
+    // Who starred what is nobody's business: the count is public, the rows are
+    // not. B has just starred A's set; A must not be able to see that row.
+    const starsAsA = await A.client.from('set_stars').select('*');
+    const seenB = (starsAsA.data ?? []).filter((r: Record<string, unknown>) => r.user_id === B.userId);
+    if (seenB.length > 0) fail('set_stars (who)', 'A can see who starred their set');
+    else ok('set_stars (who)', 'stars are counted, not named');
+
+    // The count, computed inside the view where set_stars' own policy cannot
+    // reach. If this is 0 the ranking is broken even though every row exists.
+    const counted = await A.client
+      .from('public_sets')
+      .select('stars')
+      .eq('id', (sharedSet as { id: string }).id)
+      .maybeSingle();
+    const stars = Number((counted.data as { stars?: number } | null)?.stars ?? 0);
+    if (stars < 1) fail('public_sets.stars', `star given but the view counts ${stars}`);
+    else ok('public_sets.stars', `${stars} counted`);
+
+    // ---- the global chat ----
+    const sentA = await A.client.rpc('send_global_message', { message: CHAT_PROBE_A });
+    const sentB = await B.client.rpc('send_global_message', { message: CHAT_PROBE_B });
+    if (sentA.error || sentB.error) {
+      fail('send_global_message', `${sentA.error?.message ?? ''} ${sentB.error?.message ?? ''}`.trim());
+    } else {
+      ok('send_global_message', 'both accounts sent a message');
+    }
+
+    // POSITIVE: one room means B reads what A said, with A's name beside it.
+    const { data: chat, error: chatErr } = await B.client.from('global_chat').select('*');
+    if (chatErr) {
+      fail('global_chat (as B)', `B cannot read the chat: ${chatErr.message}`);
+    } else {
+      const rows = (chat ?? []) as Record<string, unknown>[];
+      const fromA = rows.find((r) => r.body === CHAT_PROBE_A);
+      if (!fromA) fail('global_chat (as B)', "B cannot see A's message in a shared room");
+      else if (fromA.author_name !== 'Probe A') fail('global_chat (as B)', 'a message with no name beside it');
+      else ok('global_chat (as B)', "A's message readable, attributed to A");
+
+      if (JSON.stringify(rows).includes('photo:')) {
+        fail('global_chat (photo)', "an uploaded photo's path is exposed");
+      } else {
+        ok('global_chat (photo)', 'no uploaded photo path');
+      }
+    }
+
+    // NEGATIVE: you can take back what YOU said, and nothing else.
+    const { data: aMsg } = await A.client
+      .from('global_messages')
+      .select('id')
+      .eq('body', CHAT_PROBE_A)
+      .maybeSingle();
+    if (aMsg) {
+      await B.client.from('global_messages').delete().eq('id', (aMsg as { id: string }).id);
+      const still = await A.client.from('global_messages').select('id').eq('body', CHAT_PROBE_A);
+      if ((still.data ?? []).length === 0) fail('global_messages delete', "B DELETED A'S MESSAGE");
+      else ok('global_messages delete', "A's message survived B's delete");
+    }
+
+    // ---- my_schedule ----
+    // A's due dates are A's. The view's privilege exists to look up the CARD
+    // beside a schedule row, never to read somebody else's schedule.
+    const { data: sched, error: schedErr } = await B.client.from('my_schedule').select('*');
+    if (schedErr) {
+      fail('my_schedule (as B)', `unreadable: ${schedErr.message}`);
+    } else if ((sched ?? []).some((r: Record<string, unknown>) => r.study_item_id === item?.id)) {
+      fail('my_schedule (as B)', "B can see A's due dates");
+    } else {
+      ok('my_schedule (as B)', "0 of A's schedule rows");
+    }
+
+    // ---- one schedule per card PER PERSON (0021 + 0022) ----
+    // A has scheduled a card. B studying a SHARED card needs their own row for
+    // it. This is the assertion that says whether 0022 has been applied yet:
+    // under 0005's single-column unique, B's upsert targets a row RLS hides
+    // from them and is refused or writes nothing at all.
+    if (sharedItemId) {
+      await A.client.from('review_state').insert({
+        user_id: A.userId,
+        study_item_id: sharedItemId,
+        study_set_id: (sharedSet as { id: string }).id,
+        due_at: new Date().toISOString(),
+        interval_days: 1,
+        ease: 2.5,
+        reps: 1,
+        lapses: 0,
+        last_result: 'correct',
+      });
+
+      const bSchedule = await B.client.from('review_state').upsert(
+        {
+          user_id: B.userId,
+          study_item_id: sharedItemId,
+          study_set_id: (sharedSet as { id: string }).id,
+          due_at: new Date().toISOString(),
+          interval_days: 1,
+          ease: 2.5,
+          reps: 1,
+          lapses: 0,
+          last_result: 'correct',
+        },
+        { onConflict: 'user_id,study_item_id' },
+      );
+
+      if (bSchedule.error) {
+        fail(
+          'review_state (two people, one card)',
+          `${bSchedule.error.message} (${bSchedule.error.code ?? 'no code'}) — ` +
+            'apply 0022, which drops the old single-column unique on study_item_id',
+        );
+      } else {
+        const mine = await B.client
+          .from('review_state')
+          .select('user_id')
+          .eq('study_item_id', sharedItemId);
+        if ((mine.data ?? []).length === 0) {
+          fail('review_state (two people, one card)', 'the upsert reported success and wrote nothing');
+        } else {
+          ok('review_state (two people, one card)', 'B has their own schedule for a shared card');
+        }
+      }
+    }
+
+    // ---- unsharing is live ----
+    // The filter is one line in each view. Turning it back off must actually
+    // take the set away, or "stop sharing" is a button that does nothing.
+    await A.client.from('study_sets').update({ visibility: 'private' }).eq('id', (sharedSet as { id: string }).id);
+    const after = await B.client
+      .from('public_sets')
+      .select('id')
+      .eq('id', (sharedSet as { id: string }).id);
+    if ((after.data ?? []).length > 0) fail('unsharing', 'an unshared set is still listed');
+    else ok('unsharing', 'the set went away when A stopped sharing');
+
+    const cardsAfter = await B.client
+      .from('public_set_items')
+      .select('id')
+      .eq('study_set_id', (sharedSet as { id: string }).id);
+    if ((cardsAfter.data ?? []).length > 0) fail('unsharing (cards)', "an unshared set's cards are still readable");
+    else ok('unsharing (cards)', 'its cards went with it');
+  } else {
+    console.log('\n  ----  community — not present (migration 0021), not checked');
+  }
+
   // -------------------------------------------------------------- storage --
   console.log('\nB reaching A\'s storage objects:');
   const dl = await B.client.storage.from('documents').download(storagePath);
@@ -544,6 +934,28 @@ async function main() {
     .eq('day', new Date().toISOString().slice(0, 10));
   // Exact, and safe because no real streak day can fall on the sentinel.
   await A.client.from('study_days').delete().eq('day', STUDY_DAY_PROBE);
+
+  // 0021. Stars and messages do NOT cascade from a set — a star is a row about
+  // somebody else's set and a message belongs to no set at all — so each side
+  // deletes its own, which is all RLS allows either of them to do anyway.
+  // Matched by value rather than by this run's ids, so a failed earlier run is
+  // swept up too. The shared set is deleted with the private one below; its
+  // stars go with it.
+  if (communitySeeded) {
+    await B.client.from('set_stars').delete().eq('user_id', B.userId);
+    await A.client.from('global_messages').delete().eq('body', CHAT_PROBE_A);
+    await B.client.from('global_messages').delete().eq('body', CHAT_PROBE_B);
+    // B's schedule for A's shared card. It would cascade when the set goes, but
+    // only if 0022 let it be written at all — delete it explicitly so a re-run
+    // starts clean either way.
+    if (sharedItemId) await B.client.from('review_state').delete().eq('study_item_id', sharedItemId);
+    const { error: sharedSweep } = await A.client
+      .from('study_sets')
+      .delete()
+      .eq('title', SHARED_SET_TITLE);
+    if (sharedSweep) console.log(`  (cleanup note: ${sharedSweep.message})`);
+  }
+
   const { error: sweepError } = await A.client
     .from('study_sets')
     .delete()

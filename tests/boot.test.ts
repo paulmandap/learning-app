@@ -138,9 +138,30 @@ describe.skipIf(!hasBuild)('built web bundle', () => {
       );
     }
 
-    // React renders synchronously enough for the first paint; give microtasks
-    // and any effect-scheduled work a chance to land.
-    await new Promise((r) => setTimeout(r, 500));
+    /**
+     * Wait until the app has mounted something — do not sleep a fixed 500ms.
+     *
+     * It was a fixed sleep, and it was a race the whole time. Measured
+     * 2026-09-16: alone this test takes ~2.9s and passes; inside `npm test`,
+     * with 59 other files sharing the machine, it takes ~4.5s and failed 2 runs
+     * in 4 — reporting "the app mounted nothing into #root — this is a white
+     * screen" about a bundle that mounts perfectly. A suite that cries wolf
+     * about a white screen is a suite that gets ignored the day there is one.
+     *
+     * Polling does not weaken the assertion: the test still fails if #root is
+     * empty, it just stops deciding that after an arbitrary half second. The
+     * outer 60s timeout is the real bound.
+     */
+    const started = Date.now();
+    while (
+      (window.document.getElementById('root')?.innerHTML ?? '').length === 0 &&
+      errors.length === 0 &&
+      Date.now() - started < 20_000
+    ) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    // One more turn, so effect-scheduled work after the first paint lands too.
+    await new Promise((r) => setTimeout(r, 100));
 
     const root = window.document.getElementById('root');
     expect(errors, `uncaught errors during boot: ${errors.join('; ')}`).toEqual([]);

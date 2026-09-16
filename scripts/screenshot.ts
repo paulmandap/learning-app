@@ -132,6 +132,20 @@ export async function openPage(options: {
   /** Sign in as the test user before navigating. Default true. */
   auth?: boolean;
   /**
+   * WHICH test user to sign in as. Defaults to TEST_USER_A_* from the
+   * environment, which is what every probe before the community one wanted.
+   *
+   * It exists because sharing is the first feature whose behaviour depends on
+   * who is looking: a set screen is read-only for one person and editable for
+   * another, and a probe that can only ever be user A can only ever photograph
+   * half of it. `scripts/community-probe.ts` passes user B.
+   *
+   * Swapping the env vars around the call would do the same job and would be a
+   * trap — the next person to read the probe would see it sign in as "A" and
+   * believe it.
+   */
+  as?: { email: string; password: string };
+  /**
    * Render as a device set to dark.
    *
    * Worth having because of what it revealed: every screenshot taken in this
@@ -423,8 +437,8 @@ export async function openPage(options: {
   if (auth) {
     const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
     const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-    const email = process.env.TEST_USER_A_EMAIL;
-    const password = process.env.TEST_USER_A_PASSWORD;
+    const email = options.as?.email ?? process.env.TEST_USER_A_EMAIL;
+    const password = options.as?.password ?? process.env.TEST_USER_A_PASSWORD;
     if (!url || !key || !email || !password) {
       throw new Error(
         'Set EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, ' +

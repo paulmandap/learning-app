@@ -1,4 +1,5 @@
-import { completeRows, supabase } from './supabase';
+import { completeRows, supabase, type Db } from './supabase';
+import { isMissingColumn, isMissingTable } from '../core/db-errors';
 import type { Level } from '../core/planner';
 import type { ValidatedItem } from '../core/validate';
 
@@ -9,6 +10,13 @@ import type { ValidatedItem } from '../core/validate';
  * had its excerpt matched against the stored page text, so excerpt_verified is
  * true by construction. That flag means the quote was found in the notes — not
  * that the item is factually correct, human-checked, or second-model verified.
+ *
+ * Since 0021 a card can also come from a set SOMEBODY ELSE shared. Reading those
+ * lives here rather than in `src/data/community.ts` for one reason: every screen
+ * that deals a card should call one function and get one type, whoever owns the
+ * set. Two card-reading modules would mean two call sites to keep in step, and
+ * the one that fell behind would be a screen offering a stranger the owner's
+ * file. See `listItems`.
  */
 
 export interface StudyItem {
@@ -117,9 +125,20 @@ export async function insertItems(
 
 export async function listItems(
   studySetId: string,
-  options: { level?: Level } = {},
+  options: { level?: Level; owned?: boolean } = {},
+  db: Db = supabase,
 ): Promise<StudyItem[]> {
-  let query = supabase
+  // A set somebody shared. `owned` is what `readableSet` already worked out, and
+  // it is passed in rather than re-derived here so a screen cannot be showing a
+  // read-only banner while this function believes the set is the caller's.
+  //
+  // Undefined means "mine", so every existing caller — three study screens, two
+  // probes, quiz-options — is unchanged and keeps reading its own rows.
+  if (options.owned === false) {
+    return sharedSetItems(studySetId, options.level, db);
+  }
+
+  let query = db
     .from('study_items')
     // count: the deck is the clearest case where a truncated read is a wrong
     // answer rather than a slow one — it deals fewer cards than the student
@@ -149,6 +168,73 @@ export async function listItems(
   const result = await query;
   if (result.error) throw new Error(result.error.message);
   return completeRows('listItems', result) as unknown as StudyItem[];
+}
+
+/** Columns of `public_set_items` (0021). Deliberately NOT the list above. */
+const SHARED_COLUMNS =
+  'id, study_set_id, page_index, section_title, kind, level, prompt, answer, options, ' +
+  'rubric, source_excerpt, check_flag, topic, created_at';
+
+/**
+ * The cards of a set somebody else shared.
+ *
+ * ## Why the shape is filled in rather than selected
+ *
+ * `public_set_items` carries fewer columns than `study_items`, and every one of
+ * the missing ones is missing on purpose:
+ *
+ *   document_id       would point at a file in the owner's private bucket, and
+ *                     "Open page" must not be offered for a file the viewer has
+ *                     no right to open. Null here is what makes `SourcePanel`
+ *                     leave that button off — the same path a pasted note takes
+ *   hidden            the view filters reported cards out for everyone, so a
+ *                     card that reaches here is by definition not hidden
+ *   excerpt_verified  true by construction: an item that failed the validator
+ *                     was never inserted (0001)
+ *   variant_prompt    a rephrasing written for the OWNER after they failed the
+ *                     card three times. It is their history, not the card's
+ *   rubric_verified   likewise, the owner's second-pass verdict
+ *
+ * They are filled in here rather than left off `StudyItem` so that every screen,
+ * `promptFor`, and everything in `src/core/**` handles one type whoever owns the
+ * set. A second, subtly different card type would have to be got right at every
+ * call site, and the site that got it wrong would be the one showing a stranger
+ * a link to somebody's PDF.
+ */
+async function sharedSetItems(
+  studySetId: string,
+  level: Level | undefined,
+  db: Db = supabase,
+): Promise<StudyItem[]> {
+  let query = db
+    .from('public_set_items')
+    // count, for exactly the reason listItems asks for one: a truncated read
+    // deals fewer cards than the set holds and nothing anywhere can tell.
+    .select(SHARED_COLUMNS, { count: 'exact' })
+    .eq('study_set_id', studySetId)
+    .order('created_at', { ascending: true });
+
+  if (level) query = query.eq('level', level);
+
+  const result = await query;
+  if (isMissingTable(result.error) || isMissingColumn(result.error)) {
+    throw new Error('Sharing is not switched on yet.');
+  }
+  if (result.error) throw new Error(result.error.message);
+
+  const rows = completeRows('sharedSetItems', result) as unknown as Omit<
+    StudyItem,
+    'document_id' | 'hidden' | 'excerpt_verified' | 'variant_prompt' | 'rubric_verified'
+  >[];
+
+  return rows.map((row) => ({
+    ...row,
+    document_id: null,
+    hidden: false,
+    excerpt_verified: true,
+    variant_prompt: null,
+    rubric_verified: null,
+  }));
 }
 
 export async function countItems(studySetId: string): Promise<number> {

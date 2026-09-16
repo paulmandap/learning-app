@@ -180,17 +180,27 @@ describe('dueCountsBySet', () => {
   it('asks the database for only the cards it could actually deal', async () => {
     // The defect this pins: a reported card keeps its review_state row, so an
     // unfiltered count promised work every deck would then refuse to hand over.
-    // The fix is an embedded inner join, and NOTES §21.1 records why it has to
-    // be asserted rather than assumed — an embedded filter that fails to
-    // resolve its relationship returns ROWS, not an error. It cannot be caught
-    // by looking at the result.
+    //
+    // That used to be an embedded inner join here, and NOTES §21.1 records why
+    // it had to be asserted rather than assumed — an embedded filter that fails
+    // to resolve its relationship returns ROWS, not an error, and cannot be
+    // caught by looking at the result. Since 0021 the join lives in the
+    // `my_schedule` view, which also makes a set somebody SHARED count: the
+    // embedded version matched nothing there, because study_items stays
+    // select-own, so every due card in a shared set silently vanished.
+    //
+    // Still asserted on the URL, because "which relation did it ask?" is now
+    // the thing that decides whether shared sets are counted at all.
     const { db, calls } = fakeDb();
     await dueCountsBySet(NOON, db);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.target).toBe('review_state');
-    expect(calls[0]!.query).toContain('study_items!inner(hidden)');
-    expect(calls[0]!.query).toContain('study_items.hidden=eq.false');
+    expect(calls[0]!.target).toBe('my_schedule');
+    expect(calls[0]!.query).not.toContain('!inner');
+    // The hidden-card filter moved INTO the view, so it is no longer visible on
+    // the wire. tests/community.test.ts holds the view's own SQL to it — that is
+    // where the reported-card rule is now checked.
+    expect(calls[0]!.query).not.toContain('study_items');
   });
 
   it('asks for cards due up to the START of today, not the current moment', async () => {
@@ -203,7 +213,7 @@ describe('dueCountsBySet', () => {
 
   it('counts per set', async () => {
     const { db } = fakeDb({
-      review_state: [
+      my_schedule: [
         rows(
           { study_set_id: 'a' },
           { study_set_id: 'b' },
@@ -222,13 +232,50 @@ describe('dueCountsBySet', () => {
     // than a missing badge. The trade is that an outage looks like "nothing
     // due", which is why the warning below is not optional.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { db } = fakeDb({ review_state: [fails('relation does not exist')] });
+    const { db } = fakeDb({ my_schedule: [fails('connection reset')] });
 
     const counts = await dueCountsBySet(NOON, db);
 
     expect(counts.size).toBe(0);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it('falls back to the old query when 0021 has not been applied, and says so', async () => {
+    // Migration order matters (NOTES §31), and the safe direction is a build
+    // that still works against the older database. Without this, deploying
+    // before 0021 lands empties every due badge in the app — including on sets
+    // nobody has shared — and it looks exactly like "nothing is due".
+    //
+    // PGRST205 is what a missing relation reports: PostgREST rejects against its
+    // schema cache before Postgres ever sees the query (NOTES §19.4).
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { db, calls } = fakeDb({
+      my_schedule: [fails('Could not find the table', 'PGRST205')],
+      review_state: [rows({ study_set_id: 'a' }, { study_set_id: 'a' })],
+    });
+
+    const counts = await dueCountsBySet(NOON, db);
+
+    expect(counts.get('a')).toBe(2);
+    expect(calls.map((c) => c.target)).toEqual(['my_schedule', 'review_state']);
+    // The old query, embedded join and all — the one that cannot see shared sets.
+    expect(calls[1]!.query).toContain('study_items!inner(hidden)');
+    // A fallback nobody can see has cost this project a wrong conclusion four
+    // times. This one names the migration to apply.
+    expect(warn.mock.calls.map((c) => String(c[0])).join(' ')).toContain('0021');
+    warn.mockRestore();
+  });
+
+  it('counts a shared set, which is the whole reason the view exists', async () => {
+    // A row of my_schedule for a set somebody else owns. The query this replaced
+    // embedded study_items, which stays select-own, so this row's card was
+    // invisible and the count came back 0 — the feature half-working, silently.
+    const { db } = fakeDb({
+      my_schedule: [rows({ study_set_id: 'someone-elses-set' })],
+    });
+    const counts = await dueCountsBySet(NOON, db);
+    expect(counts.get('someone-elses-set')).toBe(1);
   });
 });
 
@@ -578,9 +625,9 @@ describe('a truncated read, end to end through the real client', () => {
   it('dueCountsBySet asks for an exact count', async () => {
     // Without this the detector below can never fire, because PostgREST only
     // sends Content-Range when a count was requested.
-    const { db, calls } = fakeDb({ review_state: [rows()] });
+    const { db, calls } = fakeDb({ my_schedule: [rows()] });
     await dueCountsBySet(Date.UTC(2026, 8, 11), db);
-    const call = calls.find((c) => c.target === 'review_state')!;
+    const call = calls.find((c) => c.target === 'my_schedule')!;
     expect(call).toBeDefined();
   });
 
@@ -588,7 +635,7 @@ describe('a truncated read, end to end through the real client', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     // 2 rows returned, 1200 matched — a max-rows cap, delivered as a 200.
     const { db } = fakeDb({
-      review_state: [truncated(1200, { study_set_id: 'set-a' }, { study_set_id: 'set-b' })],
+      my_schedule: [truncated(1200, { study_set_id: 'set-a' }, { study_set_id: 'set-b' })],
     });
 
     const counts = await dueCountsBySet(Date.UTC(2026, 8, 11), db);
@@ -603,7 +650,7 @@ describe('a truncated read, end to end through the real client', () => {
 
   it('says nothing on an ordinary complete read', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { db } = fakeDb({ review_state: [rows({ study_set_id: 'set-a' })] });
+    const { db } = fakeDb({ my_schedule: [rows({ study_set_id: 'set-a' })] });
     await dueCountsBySet(Date.UTC(2026, 8, 11), db);
     expect(warn.mock.calls.map((c) => String(c[0])).join(' ')).not.toContain('truncated');
     warn.mockRestore();

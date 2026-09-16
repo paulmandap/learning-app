@@ -17,6 +17,7 @@ import { gradeFeedback, hapticFlip, primeFeedback } from '../../../src/ui/feedba
 import { space } from '../../../src/ui/theme';
 import { SourcePanel } from '../../../src/ui/source';
 import { listItems, promptFor, reportItem, type StudyItem } from '../../../src/data/items';
+import { readableSet } from '../../../src/data/community';
 import { missedItemIds } from '../../../src/data/attempts';
 import { useStudySession } from '../../../src/data/study-session';
 import { busiestLevel, countByLevel as countAtLevels, deal, startingLevel } from '../../../src/core/deck';
@@ -76,13 +77,34 @@ export default function Flashcards() {
   const [missed, setMissed] = useState<Set<string>>(new Set());
   const [reported, setReported] = useState<string | null>(null);
 
-  const { data: allItems = [], isLoading } = useQuery({
+  /**
+   * Whose set is this?
+   *
+   * Under the same query key as the set screen, so arriving from there is a
+   * cache read rather than another round trip. It decides which relation the
+   * cards come from — `study_items` for your own, the `public_set_items` view
+   * for one somebody shared — and whether "Report" is offered at all.
+   */
+  const { data: readable, isLoading: setLoading } = useQuery({
+    queryKey: ['set', setId],
+    queryFn: () => readableSet(setId),
+  });
+  const owned = readable?.owned ?? true;
+
+  const { data: allItems = [], isLoading: itemsLoading } = useQuery({
     // Every level in one query, filtered below. Switching levels is then
     // instant, and the per-level counts the buttons show come for free
     // instead of costing three more round trips.
-    queryKey: ['items', setId],
-    queryFn: () => listItems(setId),
+    //
+    // `owned` is IN THE KEY and the query waits for it. Without both, the first
+    // render would ask study_items for a set it does not own, get the empty
+    // answer RLS is right to give, and cache it under a key that never changes
+    // again — an empty deck on a set full of cards, with no error anywhere.
+    queryKey: ['items', setId, owned],
+    queryFn: () => listItems(setId, { owned }),
+    enabled: !setLoading,
   });
+  const isLoading = setLoading || itemsLoading;
   const { data: missedSet } = useQuery({
     queryKey: ['missed', setId],
     queryFn: () => missedItemIds(setId),
@@ -458,7 +480,18 @@ export default function Flashcards() {
                 pageIndex={card.page_index}
                 checkFlag={card.check_flag}
                 onOpenPage={card.document_id ? openPage : undefined}
-                onReport={report}
+                // Only on your own cards. `reportItem` updates study_items,
+                // which is select-and-update-own, so on a shared set it would
+                // match no rows, return no error, and tell the student "you
+                // won't see that one again" about a card that is coming back.
+                // A control that silently does nothing is worse than no control.
+                //
+                // The cost is real and is not pretended away: "Report this
+                // card" IS the second verification pass at this scale (D7), and
+                // a wrong card in a shared set now has no way to be flagged.
+                // Reporting across accounts needs a table of its own and
+                // somebody to read it, which is a decision, not an oversight.
+                onReport={owned ? report : undefined}
               />
               {reported ? <Notice tone="ok">Thanks — you won't see that one again.</Notice> : null}
             </>

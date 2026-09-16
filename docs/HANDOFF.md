@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1061 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1094 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§45 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§46 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -48,16 +48,35 @@ roadmap item.
 ### Screens
 
 Study (home) · Add notes · Set (Preparing / Ready) · Flashcards · Quiz · Fill in
-the blanks · **Notes list** · **Note editor** · Progress · Settings · **Nomi** ·
-Sign in.
+the blanks · **Notes list** · **Note editor** · **Community** · Progress ·
+Settings · **Nomi** · Sign in.
 
-Navigation is four tabs — Nomi (Home, called Study until NOTES §40) · Notes ·
-Progress · Settings — as a bottom bar
+Navigation is five tabs — Nomi (Home, called Study until NOTES §40) · Notes ·
+Community (NOTES §46) · Progress · Settings — as a bottom bar
 under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 20; all applied and verified
+### Migrations — 22; 0021 and 0022 NOT YET APPLIED
+
+**0021 and 0022 (community, NOTES §46) are written and waiting.** Until 0021 is
+applied the Community tab says "Sharing isn't switched on yet" and everything
+else works exactly as before. **THE ORDER IS NOT OPTIONAL:**
+
+1. apply **0021** — additive only; safe before or after this code deploys
+2. deploy the code (it upserts `review_state` on `user_id,study_item_id`)
+3. `npx tsx --env-file=.env scripts/deploy-status.ts` — confirm it is live
+4. apply **0022**, which drops 0005's old single-column unique
+
+Applying 0022 early is NOTES §31 again: the deployed bundle asks PostgREST for
+`on_conflict=study_item_id`, the constraint that satisfies it is gone, and
+Postgres answers **42P10 for every answer in the app** — on every set, shared or
+not. Nothing would be scheduled again until the deploy caught up.
+
+Then verify, in this order: `scripts/isolation-test.ts` (it gained ~20 checks in
+both directions), then `scripts/community-probe.ts` (**written and never run** —
+expect it to need a fix on its first outing), then `npm run screenshot` of
+`/community` with something actually shared.
 
 **0020** (daily reminders, NOTES §45) was applied by the owner on 2026-09-15,
 with the sender secret's SHA-256 in `reminder_sender`, and verified the same
@@ -92,7 +111,10 @@ hours, see NOTES §31 before applying anything like it) · `0016`
 one-time privacy notice (NOTES §37). Both additive; applied 2026-09-13 ·
 `0018` `notes.content` and the private `note-images` bucket (NOTES §43) ·
 `0019` `documents.labels`, where a picture's labels are (NOTES §44) ·
-`0020` reminders: devices, chosen times, and the sender's secret (NOTES §45).
+`0020` reminders: devices, chosen times, and the sender's secret (NOTES §45) ·
+`0021` community: `study_sets.visibility`, `set_stars`, `global_messages`, the
+five cross-user views, and the wider `review_state` unique (NOTES §46) · `0022`
+drops the old `review_state` unique — **after** 0021's code is live.
 
 ## Rules — these are not negotiable
 
@@ -244,6 +266,29 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     after the app knows who is signed in, and still stays at least 1.4 s.
 28. **Uploaded photos stay as choices**, six at most, the oldest removed after an
     upload but never the picture in use (NOTES §45).
+29. **A shared set is studied IN PLACE, not copied** (NOTES §46, the owner's
+    decision, reversing a recommendation to copy). Your answers, due dates and
+    streak are your own; the cards stay the owner's. The consequence he accepted:
+    deleting a shared set takes its students' history with it, because `attempts`
+    and `review_state` cascade from `study_sets`.
+30. **NO BASE-TABLE POLICY WAS RELAXED FOR SHARING, AND NONE MAY BE** (NOTES
+    §46). Every cross-user read goes through one of five views that run as their
+    owner — `public_sets`, `public_set_items`, `public_profiles`, `global_chat`,
+    `my_schedule`. The reason is not tidiness: `src/data/dashboard.ts` reads
+    `from('study_items')` with no user filter, so an "or the set is public"
+    policy on that table would start counting other people's cards into someone's
+    own Progress, silently, and `listSets` would list strangers' sets as theirs.
+    If you ever need a sixth thing shared, add a sixth view.
+31. **An uploaded photo is never shown to anyone else** (NOTES §46). Every view
+    passes `profiles.avatar` through a CASE that lets only `face:%` out, so the
+    promise is the database's and not a screen's. Other people are drawn with
+    `PersonAvatar`, which has no network call in it at all — deliberately not
+    `Avatar`, which knows how to fetch a photo.
+32. **"Report this card" and written answer choices are NOT offered on a shared
+    set** (NOTES §46). Both write to `study_items`, which is update-own, so both
+    would match no rows and return no error. The cost is stated rather than
+    hidden: Report IS D7's second pass, and a wrong card in a shared set now has
+    no way to be flagged.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -430,7 +475,14 @@ npx tsx --env-file=.env scripts/nomi-moves-probe.ts [--out <dir>]   # Nomi study
 npx tsx --env-file=.env scripts/send-reminders.ts --slot evening --dry-run   # who would get tonight's reminder (needs 0020)
 npx tsx --env-file=.env scripts/reminders-e2e-probe.ts [--out <dir>]    # on from Settings → saved → counted → sent to that device only → shown → marked → off
 npx tsx --env-file=.env scripts/finish-lines-probe.ts [--out <dir>]     # what Nomi says after 3/3, 1/3 twice and 0/3, photographed
+npx tsx --env-file=.env scripts/community-probe.ts [--out <dir>]        # a shared set seen by the OTHER person, in the built app: listed, read-only, dealt, chatted. NEEDS 0021. NEVER RUN YET
+npx tsx --env-file=.env scripts/scroll-probe.ts --height 420            # 7 screens now, including Community's Chat pane — the one layout that is not a `Screen`
 ```
+
+**`openPage` can be somebody else now.** `openPage({ as: { email, password } })`
+signs in as that user instead of `TEST_USER_A_*`. Sharing is the first feature
+whose behaviour depends on who is looking, so a probe that can only ever be user
+A can only ever photograph half of it.
 
 ## What is genuinely open
 

@@ -6430,6 +6430,165 @@ typecheck clean · **1061 tests**, 3 skipped · `expo export` · boot. **Not
 deployed.**
 
 
+## 46. Sets shared with everyone, stars, a ranking and a global chat (2026-09-16)
+
+The owner: *"i'd like to implement to have a public/private flashcard, and a
+global chat. there can also be a ranking of stars for the public flashcards and
+there's a ranking."*
+
+This reopens **social/collab**, which spec §6 explicitly postponed, and it is
+the first feature in the project that lets one account read another's data. Four
+decisions were put to the owner before anything was written; he chose **study in
+place** over taking a copy, **top sets by stars** over a leaderboard of people,
+**one new tab** over two, and **name + a drawn face** over showing uploaded
+photos.
+
+### 46.1 What "study in place" cost, and why it is not a copy
+
+Copy-on-save was recommended and declined. Two things then had to be found before
+any code was written, and both were found by reading rather than by shipping:
+
+**`review_state.study_item_id` is globally `unique`** (0005, commented *"a card
+has exactly one schedule"*), and `saveSchedule` upserts `onConflict:
+'study_item_id'`. That premise held only while every card belonged to one person.
+Two people studying one shared card collide: the second person's upsert targets a
+row RLS hides from them, so it is refused or writes nothing — and **the result of
+that upsert was never read**, so nothing anywhere would have said so. The card
+would simply never come back, for ever, with no error.
+
+**A permissive RLS policy would have widened every query that trusts RLS as its
+only filter.** `src/data/dashboard.ts` reads `from('study_items')` with no user
+filter at all: an "or the set is public" policy on that table would have started
+counting other people's cards into the student's own Progress, silently. Same
+shape for `listSets`.
+
+So neither was done. The design that came out of it:
+
+- **No policy on any base table was relaxed. Not one.** The isolation test's
+  existing assertions all still pass unchanged, which is the strongest available
+  evidence that nothing widened.
+- Cross-user reads go through **five views that run as their owner** and are
+  filtered to exactly what is shared: `public_sets`, `public_set_items`,
+  `public_profiles`, `global_chat`, `my_schedule`.
+- The schedule key changes across **two migrations with a deploy in between** —
+  0021 adds `unique (user_id, study_item_id)`, 0022 drops the old one. Applying
+  0022 early is §31 again with a sharper edge: the deployed code's
+  `on_conflict=study_item_id` would have no matching constraint and Postgres
+  answers 42P10 for **every answer in the app**, on every set, shared or not.
+
+### 46.2 `my_schedule`, and the hole that would have half-worked
+
+`dueCountsBySet` and `dueLevelsForSet` asked `review_state` for the card beside
+the schedule through an embedded `study_items!inner` — the fix for a real defect,
+since a reported card keeps its schedule and would otherwise be promised and then
+not dealt. On a set somebody else shared that join matches nothing, because
+`study_items` stays select-own. Every due card in a shared set would have
+vanished from the badge: you would study a shared set and the app would never once
+tell you it was due.
+
+`my_schedule` does the join as its owner, filtered to `r.user_id = auth.uid()`.
+It also retires two embedded filters, which is worth having on its own — §21.1
+records that an embedded filter failing to resolve returns ROWS rather than an
+error, and §21 and §36 are both this badge disagreeing with the deck it opens.
+
+`legacyDueCountsBySet` keeps the old query for the window between deploying and
+applying 0021, and logs which one it used. Without it, deploying first would
+empty every due badge in the app and look exactly like "nothing is due".
+
+### 46.3 What sharing exposes, and what it must not
+
+`source_excerpt` is part of a shared card and cannot be removed from it —
+"shows me where every answer came from" is the product. So the set screen says
+so **before** anything is shared, in `SHARING_FACTS`, and every claim in that
+list is held to migration 0021's actual SQL by `tests/community.test.ts`. A
+privacy promise with no check behind it is a wish.
+
+What must never leave, each asserted separately in the tests and again in the
+isolation test:
+
+| | why |
+|---|---|
+| `documents`, `document_pages` | the whole PDF, and paths into the private bucket. `public_set_items` names `study_items` columns only and does not select `document_id` — which is also what makes `SourcePanel` leave "Open page" off |
+| `study_sets.plan` | it quotes the owner's notes |
+| an uploaded photo's path | `profiles.avatar` holds `face:N` **or** `photo:<user id>/<file>`, and the photo is in the private `avatars` bucket. Every view passes it through a CASE that lets only `face:%` out. `PersonAvatar` was added rather than reusing `Avatar`, which knows how to fetch a photo — a component that decides not to leak is one refactor away from deciding wrong |
+| `gemini_api_key` | a credential |
+| who starred what | `set_stars` is select-own; the count is computed inside the view. In a room of five, a ranking where everyone can see who did and did not star their set is a worse place to share anything |
+
+### 46.4 Measured
+
+- **Five tabs fit at 393px.** About 78 points each; every label still renders in
+  full, photographed in dark mode. The bar was one label away from the icon-only
+  guessing game `(tabs)/_layout.tsx` rejects on purpose, so six tabs — Explore
+  and Chat separately — was declined before it was built.
+- **The community icon's heads needed to overlap the shoulders.** With a 2pt gap
+  they photographed as two circles floating over an unrelated line. Nothing but
+  looking at it would have caught that.
+- **`scripts/scroll-probe.ts` now covers 7 screens**, including Community's Chat
+  pane — the one layout in the app that is not a `Screen`, because the chat needs
+  a bounded message list with the composer pinned under it. At a 420px viewport
+  its scroller measures a 197px box: **bounded**, which is the §33 signature and
+  is clean.
+- **`accessibilityState={{ selected }}` renders no `aria-selected` at all.**
+  Measured 2026-09-16 while writing the scroll probe, which timed out waiting for
+  it against a control that was working perfectly. react-native-web emits
+  `role="tab" tabindex="0" aria-label="…"` and nothing else — on the new Segment,
+  on `LevelSegment`, and **on the tab bar**. So nothing using a screen reader can
+  tell which tab is current, anywhere in this app. Pre-existing, not introduced
+  here, and worth its own look. The probe waits on the button's background
+  instead.
+- **`tests/boot.test.ts` had a fixed 500ms sleep, and it was a race the whole
+  time.** Alone the test takes ~2.9s and passes; inside `npm test`, sharing the
+  machine with 59 other files, it takes ~4.5s and failed **2 runs in 4** —
+  reporting "the app mounted nothing into #root — this is a white screen" about a
+  bundle that mounts perfectly. Now polls for content instead, bounded by the
+  outer 60s timeout. Two full runs clean afterwards. A suite that cries wolf
+  about a white screen is one that gets ignored the day there is a real one.
+
+### 46.5 Deliberate gaps, named rather than hidden
+
+- **"Report this card" is not offered on a shared set.** `reportItem` updates
+  `study_items`, which is update-own, so it would match no rows, return no error,
+  and tell the student "you won't see that one again" about a card that is coming
+  back. The cost is real: Report **is** the second verification pass at this scale
+  (D7), and a wrong card in a shared set now has no way to be flagged. Reporting
+  across accounts needs a table of its own and somebody to read it.
+- **Answer choices are not written for a shared set.** `addQuizChoices` writes to
+  `study_items`; it would spend the viewer's Gemini quota and save nothing.
+  `choicesFor` stands the other cards' answers in, as it always has.
+- **Nomi does not know a shared set's notes.** `pagesForSet` reads
+  `document_pages`, select-own and always will be. The set context is skipped
+  rather than set to an empty string, so Nomi is not answering "about this set"
+  from nothing.
+- **Deleting a shared set takes its students' history with it.** `attempts` and
+  `review_state` cascade from `study_sets`. Inherent to studying in place.
+- **The chat polls every 4s** rather than using Supabase realtime — a second
+  transport with its own connection states and its own failure that looks like
+  silence, for five people in one room. Revisit on evidence.
+
+### 46.6 Not yet verified
+
+**Migrations 0021 and 0022 have not been applied**, so nothing below the database
+line has been exercised against a real database:
+
+- the five views have never returned a row;
+- `scripts/community-probe.ts` is **written and unrun** — it seeds a shared set
+  and drives the built bundle as the *other* person (`openPage` gained an `as`
+  option for it, since every probe before this one could only ever be user A);
+- the isolation test's new assertions — both directions, ~20 checks — are unrun;
+- the whole feature has only been photographed in its "not switched on yet" state.
+
+The views rest on one assumption that the isolation test is written to catch: that
+`postgres`, the role the dashboard SQL editor runs as, holds BYPASSRLS. The
+evidence that it does is already in this project — HANDOFF records `auth.uid()`
+being NULL in that editor while the owner reads every user's rows there daily —
+but if it were ever untrue the views would return **nothing at all**, the
+Community tab would look like "nobody has shared anything yet", and every
+negative assertion would still pass. Hence the positive ones.
+
+typecheck clean · **1094 tests**, 3 skipped · `expo export` · boot · scroll probe
+7/7. **Not deployed. Migrations not applied.**
+
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)

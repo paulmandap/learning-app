@@ -33,7 +33,7 @@ export const GLYPH = {
   newChat: '✎',
 } as const;
 
-export type TabIconName = 'study' | 'notes' | 'progress' | 'settings';
+export type TabIconName = 'study' | 'notes' | 'community' | 'progress' | 'settings';
 
 const BOX = 22;
 const STROKE = 1.75;
@@ -93,6 +93,29 @@ export function TabIcon({
           <View style={[solid, { left: 7.5, top: 7, width: 7, height: STROKE }]} />
           <View style={[solid, { left: 7.5, top: 10.5, width: 7, height: STROKE }]} />
           <View style={[solid, { left: 7.5, top: 14, width: 4.5, height: STROKE }]} />
+        </>
+      ) : name === 'community' ? (
+        // Two people. Shoulders drawn first as one bar, then two heads filled
+        // with the ground on top of it — the same trick as the sliders below,
+        // which is how a shape overlaps a line without an icon set to do it.
+        //
+        // The heads OVERLAP the bar by a point rather than sitting above it.
+        // Photographed at 393px with a 2pt gap first, where they read as two
+        // circles floating over an unrelated line instead of as two people.
+        <>
+          <View style={[solid, { left: 2, top: 12, width: 18, height: 7, borderRadius: 3.5 }]} />
+          <View
+            style={[
+              outline,
+              { left: 2.5, top: 4, width: 9, height: 9, borderRadius: 4.5, backgroundColor: ground },
+            ]}
+          />
+          <View
+            style={[
+              outline,
+              { left: 10.5, top: 4, width: 9, height: 9, borderRadius: 4.5, backgroundColor: ground },
+            ]}
+          />
         </>
       ) : name === 'progress' ? (
         // Three rising bars. Thin enough to carry the same ink as a stroke.

@@ -1,4 +1,5 @@
 import { completeRows, supabase, type Db } from './supabase';
+import { isMissingTable } from '../core/db-errors';
 import { NEW_CARD, startOfUtcDay, type Scheduled } from '../core/schedule';
 import type { AttemptResult } from '../core/grade';
 import type { Level } from '../core/planner';
@@ -87,16 +88,55 @@ export async function dueCountsBySet(
   now: number = Date.now(),
   db: Db = supabase,
 ): Promise<Map<string, number>> {
+  // `my_schedule` (0021) has already joined the card to the schedule, as its
+  // owner, so this counts due cards in sets somebody SHARED as well as your own.
+  // The query it replaced embedded `study_items!inner`, and study_items stays
+  // select-own — so in a shared set that join matched nothing and every due card
+  // in it silently vanished from the badge.
+  //
+  // It also retires an embedded filter. NOTES §21.1: an embedded filter that
+  // fails to resolve returns rows rather than an error, which is a wrong answer
+  // with no trace, and §21 and §36 are both this badge disagreeing with the deck
+  // it opens. A plain select on a relation that did the join cannot fail that way.
+  //
+  // count: a truncated read reintroduces the same disagreement from the other
+  // direction.
+  const { data, error, count } = await db
+    .from('my_schedule')
+    .select('study_set_id', { count: 'exact' })
+    .lte('due_at', new Date(startOfUtcDay(now)).toISOString());
+
+  if (isMissingTable(error)) return legacyDueCountsBySet(now, db);
+  if (error) {
+    console.warn(`[review] due counts unavailable: ${error.message}`);
+    return new Map();
+  }
+
+  const counts = new Map<string, number>();
+  for (const row of completeRows('dueCountsBySet', { data, count }) as {
+    study_set_id: string;
+  }[]) {
+    counts.set(row.study_set_id, (counts.get(row.study_set_id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * The pre-0021 query, for the gap between deploying this and applying it.
+ *
+ * Migration order matters (NOTES §31), and the safe direction is a build that
+ * still works against the older database. Without this, deploying before the
+ * migration lands would empty every due badge in the app — including on sets
+ * nobody has shared — and it would look exactly like "nothing is due".
+ *
+ * Logged, because a fallback that says nothing has cost this project a wrong
+ * conclusion four times. Delete it once 0021 is applied and recorded.
+ */
+async function legacyDueCountsBySet(now: number, db: Db): Promise<Map<string, number>> {
+  console.warn('[review] my_schedule is missing (apply migration 0021); counting own sets only.');
+
   const { data, error, count } = await db
     .from('review_state')
-    // The inner join is the fix for a real defect, not tidiness. A reported
-    // card is hidden from every deck by `listItems`, but nothing deletes its
-    // schedule — so counting these rows unfiltered promised cards the app
-    // would then refuse to deal, and the badge drifted further from the deck
-    // with every card reported. `!inner` drops the row when the card is gone
-    // or hidden, in the same round trip.
-    // count: §21 was a due badge that disagreed with the deck. A truncated
-    // read reintroduces exactly that, from the other direction.
     .select('study_set_id, study_items!inner(hidden)', { count: 'exact' })
     .eq('study_items.hidden', false)
     .lte('due_at', new Date(startOfUtcDay(now)).toISOString());
@@ -107,7 +147,7 @@ export async function dueCountsBySet(
   }
 
   const counts = new Map<string, number>();
-  for (const row of completeRows('dueCountsBySet', { data, count }) as {
+  for (const row of completeRows('dueCountsBySet/legacy', { data, count }) as {
     study_set_id: string;
   }[]) {
     counts.set(row.study_set_id, (counts.get(row.study_set_id) ?? 0) + 1);
@@ -130,6 +170,31 @@ export async function dueLevelsForSet(
   db: Db = supabase,
 ): Promise<Partial<Record<Level, number>>> {
   const { data, error, count } = await db
+    .from('my_schedule')
+    .select('level', { count: 'exact' })
+    .eq('study_set_id', studySetId)
+    .lte('due_at', new Date(startOfUtcDay(now)).toISOString());
+
+  if (isMissingTable(error)) return legacyDueLevelsForSet(studySetId, now, db);
+  if (error) {
+    console.warn(`[review] due levels unavailable: ${error.message}`);
+    return {};
+  }
+
+  const counts: Partial<Record<Level, number>> = {};
+  for (const row of completeRows('dueLevelsForSet', { data, count }) as { level: Level }[]) {
+    counts[row.level] = (counts[row.level] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** The pre-0021 query. See `legacyDueCountsBySet` for why this exists. */
+async function legacyDueLevelsForSet(
+  studySetId: string,
+  now: number,
+  db: Db,
+): Promise<Partial<Record<Level, number>>> {
+  const { data, error, count } = await db
     .from('review_state')
     .select('study_items!inner(hidden, level)', { count: 'exact' })
     .eq('study_set_id', studySetId)
@@ -142,7 +207,7 @@ export async function dueLevelsForSet(
   }
 
   const counts: Partial<Record<Level, number>> = {};
-  for (const row of completeRows('dueLevelsForSet', { data, count }) as {
+  for (const row of completeRows('dueLevelsForSet/legacy', { data, count }) as {
     study_items: { level: Level } | { level: Level }[] | null;
   }[]) {
     const item = Array.isArray(row.study_items) ? row.study_items[0] : row.study_items;
@@ -182,9 +247,23 @@ export async function currentState(studyItemId: string, db: Db = supabase) {
 /**
  * Write a card's next schedule.
  *
- * Upserts on study_item_id, which the table declares unique — so two tabs
- * grading the same card race to a well-defined winner instead of inserting two
- * schedules for one item.
+ * ## The conflict target changed in 0021, and the order matters
+ *
+ * It used to be `study_item_id` alone, which 0005 declared unique on the then
+ * true premise that a card belonged to exactly one person. A set shared with
+ * everyone is studied in place, so two people answer one card and each needs
+ * their own due date — under the old key the second person's upsert targets a
+ * row RLS hides from them, and their schedule is either refused or written
+ * nowhere at all.
+ *
+ * `(user_id, study_item_id)` is added by 0021 and the old single-column unique
+ * is dropped by 0022, IN THAT ORDER, with this deploy in between. PostgREST
+ * needs a matching unique constraint for the conflict target it is given: run
+ * 0022 before this code is live and every schedule write in the app answers
+ * 42P10 instead. See the header of 0022.
+ *
+ * Two tabs grading the same card still race to a well-defined winner; they are
+ * now the same person's two tabs rather than any two tabs anywhere.
  */
 export async function saveSchedule(
   input: {
@@ -196,7 +275,7 @@ export async function saveSchedule(
   },
   db: Db = supabase,
 ): Promise<void> {
-  await db.from('review_state').upsert(
+  const { error } = await db.from('review_state').upsert(
     {
       user_id: input.userId,
       study_item_id: input.studyItemId,
@@ -209,6 +288,22 @@ export async function saveSchedule(
       last_result: input.lastResult,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: 'study_item_id' },
+    { onConflict: 'user_id,study_item_id' },
   );
+
+  // This result was thrown away until now, and it is the single most important
+  // place in the app not to. A failure here loses a card's schedule silently:
+  // the answer is still graded, the deck still moves on, and the card simply
+  // never comes back. It is also exactly what a wrong conflict target produces
+  // (42P10, see above), so the one error that would tell you 0022 was applied
+  // too early was the one error nothing was reading.
+  //
+  // Warned, not thrown: a lost schedule must not end a study session mid-deck.
+  // "Anything that fails silently will cost you a wrong conclusion" — HANDOFF.
+  if (error) {
+    console.warn(
+      `[review] schedule not saved for card ${input.studyItemId}: ${error.message}` +
+        (error.code ? ` (${error.code})` : ''),
+    );
+  }
 }

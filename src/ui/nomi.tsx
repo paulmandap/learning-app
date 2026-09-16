@@ -344,16 +344,28 @@ export function Composer({
   busy,
   placeholder = 'Message Nomi',
   autoFocus,
+  maxLength = MAX_PASTE_CHARS,
 }: {
   onSend: (text: string) => void;
   busy: boolean;
   placeholder?: string;
   autoFocus?: boolean;
+  /**
+   * Where the box stops accepting characters.
+   *
+   * Defaults to a page of pasted notes, which is what Nomi's chat is for. The
+   * global chat passes MESSAGE_MAX_LENGTH instead — its database column refuses
+   * anything longer, and a box that lets you type two thousand characters and
+   * then rejects the message is a worse way to find that out than a box that
+   * stops. Reused rather than copied: three near-identical chat inputs is the
+   * drift `src/ui/segment.tsx` was written to end.
+   */
+  maxLength?: number;
 }) {
   const t = useTheme();
   const [draft, setDraft] = useState('');
   // Up to a page of pasted notes: Nomi can make a set from them (NOTES §37).
-  const canSend = !busy && isSendable(draft);
+  const canSend = !busy && isSendable(draft) && draft.trim().length <= maxLength;
 
   const submit = () => {
     if (!canSend) return;
@@ -373,7 +385,7 @@ export function Composer({
         // One line to start, growing as they type. Without it the web renders
         // a two-row box, which read as a form field rather than a chat input.
         numberOfLines={1}
-        maxLength={MAX_PASTE_CHARS}
+        maxLength={maxLength}
         autoFocus={autoFocus}
         onKeyPress={(e) => {
           const key = e.nativeEvent as { key: string; shiftKey?: boolean };

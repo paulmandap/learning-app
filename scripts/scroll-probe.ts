@@ -38,7 +38,20 @@
  */
 import { openPage } from './screenshot';
 
-const TABS = ['/', '/notes', '/progress', '/settings'] as const;
+const TABS = ['/', '/notes', '/community', '/progress', '/settings'] as const;
+
+/**
+ * Community is the one tab that is NOT a `Screen`.
+ *
+ * Its chat needs a bounded message list with the box to type in pinned under
+ * it, so it builds its own flex column and its own ScrollView inside the one
+ * TabSlot bounds — which is precisely the arrangement §33 records shipping
+ * broken, where three of four tabs could not be scrolled at all on a phone and
+ * all 618 tests passed. Its two set panes are ordinary scrolling columns; the
+ * chat pane is checked on its own below, because the segment it lives behind is
+ * a button this probe has to press rather than a route it can open.
+ */
+const COMMUNITY_PANES = ['Top sets', 'Chat'] as const;
 
 function arg(name: string, fallback: number): number {
   const i = process.argv.indexOf(name);
@@ -71,20 +84,14 @@ interface Finding {
   declared: { tag: string; cls: string; scrollHeight: number; clientHeight: number }[];
 }
 
+type Page = Awaited<ReturnType<typeof openPage>>;
+
 async function main() {
   const page = await openPage({ width: PHONE_WIDTH, height: PHONE_HEIGHT, dark: true });
   const findings: Finding[] = [];
 
-  try {
-    for (const route of TABS) {
-      await page.goto(route);
-      // Let the screen settle: a tab that has just mounted may still be
-      // laying out, and a measurement taken mid-layout is noise.
-      await page.waitFor(
-        `(document.querySelector('#root')?.innerText.trim().length ?? 0) > 0 ? 'y' : ''`,
-        `content on ${route}`,
-      );
-
+  /** Everything this probe measures about whatever is currently on screen. */
+  async function measure(label: string): Promise<void> {
       const raw = await page.evaluate<string>(`(() => {
         const info = (e) => ({
           tag: e.tagName,
@@ -146,7 +153,56 @@ async function main() {
         });
       })()`);
 
-      findings.push({ route, ...(JSON.parse(raw) as Omit<Finding, 'route'>) });
+    findings.push({ route: label, ...(JSON.parse(raw) as Omit<Finding, 'route'>) });
+  }
+
+  /** Open a tab, wait for it to settle, and measure it. */
+  async function visit(route: string, label = route): Promise<void> {
+    await page.goto(route);
+    // Let the screen settle: a tab that has just mounted may still be laying
+    // out, and a measurement taken mid-layout is noise.
+    await page.waitFor(
+      `(document.querySelector('#root')?.innerText.trim().length ?? 0) > 0 ? 'y' : ''`,
+      `content on ${route}`,
+    );
+    await measure(label);
+  }
+
+  try {
+    for (const route of TABS) await visit(route);
+
+    // Community's panes are behind a segment control, not behind routes, and
+    // the chat pane is the one layout in the app that is not a `Screen` — see
+    // the note on COMMUNITY_PANES. `page.goto` reloads, so the segment has to be
+    // pressed after the tab is open, once per pane.
+    for (const pane of COMMUNITY_PANES) {
+      await page.goto('/community');
+      await page.waitFor(
+        `document.body.innerText.includes('${pane}') ? 'y' : ''`,
+        `the ${pane} segment`,
+      );
+      await page.click(pane);
+      // Wait on something that can only be true AFTERWARDS (NOTES §19.7). The
+      // heading is on the screen before the tap, so waiting for it would pass
+      // instantly and measure the pane that was already there.
+      //
+      // The signal is the button's own background, NOT aria-selected. Measured
+      // 2026-09-16: react-native-web renders `accessibilityState={{ selected }}`
+      // as role="tab" tabindex="0" aria-label="…" and NO aria-selected at all,
+      // on this control, on LevelSegment and on the tab bar. Waiting for
+      // aria-selected here timed out against a control that was working
+      // perfectly — and the reason it is absent is worth its own look, because
+      // it means nothing using a screen reader can tell which tab is current.
+      await page.waitFor(
+        `(() => {
+           const el = document.querySelector('[aria-label="${pane}"][role="tab"]');
+           if (!el) return '';
+           const bg = getComputedStyle(el).backgroundColor;
+           return /rgba\\(0, 0, 0, 0\\)|transparent/.test(bg) ? '' : 'y';
+         })()`,
+        `${pane} selected`,
+      );
+      await measure(`/community · ${pane}`);
     }
   } finally {
     await page.close();
@@ -208,8 +264,8 @@ async function main() {
   console.log(`\n${'-'.repeat(78)}`);
   console.log(
     broken === 0
-      ? `  All ${findings.length} tabs scroll, open at the top, and clip nothing.`
-      : `  ${broken} of ${findings.length} tabs are BROKEN at phone width.`,
+      ? `  All ${findings.length} screens scroll, open at the top, and clip nothing.`
+      : `  ${broken} of ${findings.length} screens are BROKEN at phone width.`,
   );
   process.exitCode = broken === 0 ? 0 : 1;
 }

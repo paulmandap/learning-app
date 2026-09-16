@@ -19,7 +19,22 @@ import { OverflowMenu } from '../../../src/ui/menu';
 import { space } from '../../../src/ui/theme';
 import { formatSetTitle } from '../../../src/core/title';
 import { fetchProfile } from '../../../src/data/profile';
-import { deleteSet, getSet, updateSet } from '../../../src/data/sets';
+import { deleteSet, updateSet } from '../../../src/data/sets';
+import {
+  myStars,
+  readableSet,
+  setVisibility,
+  star,
+  unstar,
+  visibilityOf,
+} from '../../../src/data/community';
+import {
+  authorName,
+  SHARING_FACTS,
+  SHARING_TITLE,
+  starLabel,
+  UNSHARING_NOTE,
+} from '../../../src/core/community';
 import { freeUpSpace, listDocuments, pagesForSet } from '../../../src/data/documents';
 import { formatBytes } from '../../../src/core/storage';
 import { useAssistantContext } from '../../../src/data/assistant-context';
@@ -61,6 +76,10 @@ export default function SetScreen() {
   // quietly overwriting the original with its prettified version.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [savingName, setSavingName] = useState(false);
+  /** null = not asking. 'public' = about to share; 'private' = about to stop. */
+  const [confirmShare, setConfirmShare] = useState<'public' | 'private' | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [starring, setStarring] = useState(false);
   /**
    * Has this mount already kicked generation off?
    *
@@ -80,16 +99,48 @@ export default function SetScreen() {
   const [hasStarted, setHasStarted] = useState(false);
 
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
-  const { data: set, refetch: refetchSet } = useQuery({
+  /**
+   * The set, and whether it is the caller's.
+   *
+   * `readableSet` asks study_sets first and the public_sets view second, so this
+   * one query opens both your own set and one somebody shared — and `owned` is
+   * the single fact every conditional below reads. Deriving "is it mine?" more
+   * than once is how a screen ends up offering Delete on a stranger's set.
+   */
+  const { data: readable, isLoading: setLoading, refetch: refetchSet } = useQuery({
     queryKey: ['set', setId],
-    queryFn: () => getSet(setId),
+    queryFn: () => readableSet(setId),
   });
-  const { data: itemCount = 0, refetch: refetchCount } = useQuery({
+  const set = readable?.set ?? null;
+  const owned = readable?.owned ?? true;
+
+  /** Is this set of mine shared? Only asked about a set that is mine. */
+  const { data: visibility = 'private' } = useQuery({
+    queryKey: ['visibility', setId],
+    queryFn: () => visibilityOf(setId),
+    enabled: owned,
+  });
+
+  // On a set somebody shared: have I starred it? One row, and it also tells the
+  // star control what to draw before anything is tapped.
+  const { data: starred } = useQuery({
+    queryKey: ['my-stars'],
+    queryFn: () => myStars(),
+    enabled: !owned,
+  });
+  const { data: ownCount = 0, refetch: refetchCount } = useQuery({
     queryKey: ['itemCount', setId],
     queryFn: () => countItems(setId),
+    // Only for a set of your own: countItems reads study_items, which is
+    // select-own, so on a shared set it would answer 0 — and 0 is the number
+    // that hides every "Study this set" row on the screen below. The shared
+    // set's own count comes from the public_sets view instead, which counts as
+    // its owner and already excludes reported cards.
+    enabled: owned,
     // Poll while cards are still arriving so they appear as sections finish.
     refetchInterval: set?.status === 'generating' ? 3000 : false,
   });
+  const itemCount = owned ? ownCount : (readable?.owner?.cards ?? 0);
   const { data: docs = [] } = useQuery({
     queryKey: ['docs', setId],
     queryFn: () => listDocuments(setId),
@@ -118,12 +169,18 @@ export default function SetScreen() {
   const clearAssistantContext = useAssistantContext((s) => s.clearContext);
   useEffect(() => {
     if (!set) return;
+    // Only for a set of your own. `pagesForSet` reads document_pages, which is
+    // select-own and always will be — a shared set publishes its cards, not the
+    // notes behind them. Setting a set context with no notes in it would have
+    // Nomi answering "about this set" from nothing, confidently, which NOTES
+    // §36 records costing an afternoon the last time it happened.
+    if (!owned) return;
     setAssistantContext({
       kind: 'set',
       title: formatSetTitle(set.title),
       notes: trimNotes(pages.map((p) => p.text).join('\n\n')),
     });
-  }, [set, pages, setAssistantContext]);
+  }, [set, owned, pages, setAssistantContext]);
   useEffect(() => clearAssistantContext, [clearAssistantContext]);
 
   async function saveName() {
@@ -169,6 +226,45 @@ export default function SetScreen() {
     }
   }
 
+  /**
+   * Share this set with everyone, or stop.
+   *
+   * Never from the menu directly: the menu opens the card that says what
+   * sharing exposes, and this runs only after that is confirmed. `SHARING_FACTS`
+   * is the list, and `tests/community.test.ts` holds every claim in it to what
+   * migration 0021's views actually do.
+   */
+  async function applyVisibility(next: 'public' | 'private') {
+    setSharing(true);
+    try {
+      await setVisibility(setId, next);
+      await queryClient.invalidateQueries({ queryKey: ['visibility', setId] });
+      // The Community tab lists and ranks from this, so it has to be told.
+      await queryClient.invalidateQueries({ queryKey: ['public-sets'] });
+      setConfirmShare(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't change who can see this set.");
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  /** Star a set somebody shared, or take the star back. */
+  async function toggleStar() {
+    const on = starred?.has(setId) ?? false;
+    setStarring(true);
+    try {
+      await (on ? unstar(setId) : star(setId));
+      await queryClient.invalidateQueries({ queryKey: ['my-stars'] });
+      await queryClient.invalidateQueries({ queryKey: ['set', setId] });
+      await queryClient.invalidateQueries({ queryKey: ['public-sets'] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't do that just now.");
+    } finally {
+      setStarring(false);
+    }
+  }
+
   async function removeSet() {
     setDeleting(true);
     try {
@@ -203,16 +299,33 @@ export default function SetScreen() {
   useEffect(() => {
     if (started.current) return;
     if (!set || !apiKey) return;
+    // Never on somebody else's set. `readableSet` reports a shared set as
+    // 'ready' so this could not fire anyway, but making cards for a set you do
+    // not own would spend YOUR Gemini quota writing rows RLS would then refuse,
+    // and that is worth refusing here rather than relying on a status.
+    if (!owned) return;
     if (set.status !== 'generating') return;
     started.current = true;
     setHasStarted(true);
     void run();
-  }, [set, apiKey, run]);
+  }, [set, owned, apiKey, run]);
 
   if (!set) {
+    // Neither yours nor shared. The same answer for "no such set" and "it
+    // exists and is private" — telling them apart would tell a stranger which
+    // set ids are real.
     return (
       <Screen>
-        <LoadingState />
+        {setLoading ? (
+          <LoadingState />
+        ) : (
+          <StatePanel
+            kind="problem"
+            title="This set isn't here"
+            detail="It may have been deleted, or the person who made it stopped sharing it."
+            action={{ label: 'Back to Community', onPress: () => router.replace('/community') }}
+          />
+        )}
       </Screen>
     );
   }
@@ -244,22 +357,86 @@ export default function SetScreen() {
           // control and the ••• on the same line. The title moves into the body
           // as a large heading, iOS-style, where it can wrap freely.
           title: '',
-          headerRight: () => (
-            <OverflowMenu
-              items={[
-                { label: 'Add notes', onPress: () => router.push(`/new?setId=${setId}`) },
-                { label: 'Rename set', onPress: () => setRenaming(set.title) },
-                ...(hasFiles
-                  ? [{ label: 'Free up space', onPress: () => setConfirmFree(true) }]
-                  : []),
-                { label: 'Delete set', destructive: true, onPress: () => setConfirmDelete(true) },
-              ]}
-            />
-          ),
+          // Every item here writes to the set, so on a set somebody shared
+          // there is nothing to put in the menu and it is left off entirely. An
+          // empty ••• that opens onto nothing is worse than no •••; and RLS
+          // would refuse each of these silently — `reportItem` in particular
+          // updates no rows and returns no error.
+          headerRight: owned
+            ? () => (
+                <OverflowMenu
+                  items={[
+                    { label: 'Add notes', onPress: () => router.push(`/new?setId=${setId}`) },
+                    { label: 'Rename set', onPress: () => setRenaming(set.title) },
+                    // Only once there are cards to share. `public_sets` filters
+                    // on status = 'ready', so sharing a set still being made
+                    // would appear to work and then show nothing to anybody.
+                    ...(set.status === 'ready'
+                      ? [
+                          visibility === 'public'
+                            ? { label: 'Stop sharing', onPress: () => setConfirmShare('private') }
+                            : { label: 'Share with everyone', onPress: () => setConfirmShare('public') },
+                        ]
+                      : []),
+                    ...(hasFiles
+                      ? [{ label: 'Free up space', onPress: () => setConfirmFree(true) }]
+                      : []),
+                    { label: 'Delete set', destructive: true, onPress: () => setConfirmDelete(true) },
+                  ]}
+                />
+              )
+            : undefined,
         }}
       />
 
       <Display>{displayTitle}</Display>
+
+      {/* A set somebody shared: who made it, and the star. Above everything
+          else, because "whose is this?" is the first question about a set that
+          is not yours, and studying it without knowing is how a stranger's
+          mistake becomes something you learned. */}
+      {!owned && readable?.owner ? (
+        <Card>
+          <Body>
+            Shared by {authorName(readable.owner.owner_name)} · {starLabel(readable.owner.stars)}
+          </Body>
+          <Body muted>
+            These are their cards, made from their notes. You study them here and your answers,
+            streak and review dates are your own.
+          </Body>
+          <Button
+            label={starred?.has(setId) ? 'Remove your star' : 'Star this set'}
+            variant="secondary"
+            onPress={toggleStar}
+            busy={starring}
+          />
+        </Card>
+      ) : null}
+
+      {/* What sharing exposes, before it is shared — not after.
+          Every line is checked against migration 0021's views in
+          tests/community.test.ts; a privacy promise with no check behind it is
+          a wish, the same rule as "the prompt asks; the validator checks". */}
+      {confirmShare === 'public' ? (
+        <Card>
+          <Label>{SHARING_TITLE}</Label>
+          {SHARING_FACTS.map((fact) => (
+            <Body key={fact}>• {fact}</Body>
+          ))}
+          <Button label="Share it" onPress={() => applyVisibility('public')} busy={sharing} />
+          <Button label="Keep it to myself" variant="secondary" onPress={() => setConfirmShare(null)} />
+        </Card>
+      ) : null}
+
+      {confirmShare === 'private' ? (
+        <Card>
+          <Notice tone="warn">
+            Stop sharing "{displayTitle}"? {UNSHARING_NOTE}
+          </Notice>
+          <Button label="Stop sharing" onPress={() => applyVisibility('private')} busy={sharing} />
+          <Button label="Keep sharing" variant="secondary" onPress={() => setConfirmShare(null)} />
+        </Card>
+      ) : null}
 
       {renaming !== null ? (
         <Card>
@@ -342,6 +519,10 @@ export default function SetScreen() {
         <Body muted>
           {itemCount} card{itemCount === 1 ? '' : 's'}
           {dueCount > 0 ? ` · ${dueCount} due today` : ' · Ready'}
+          {/* Standing state, on the set itself rather than only behind the •••.
+              Somebody has to be able to tell at a glance that four other people
+              can read this, without opening a menu to find out. */}
+          {owned && visibility === 'public' ? ' · Shared with everyone' : ''}
         </Body>
       )}
 

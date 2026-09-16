@@ -21,6 +21,7 @@ import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import { NomiFinish } from '../../../src/ui/nomi-finish';
 import { StudyProgress } from '../../../src/ui/nomi-studying';
 import { listItems, promptFor, type StudyItem } from '../../../src/data/items';
+import { readableSet } from '../../../src/data/community';
 import { fetchProfile } from '../../../src/data/profile';
 import { missedItemIds } from '../../../src/data/attempts';
 import { useStudySession } from '../../../src/data/study-session';
@@ -92,17 +93,27 @@ export default function Quiz() {
   const [current, setCurrent] = useState<GradedAnswer | null>(null);
 
   const { data: profile, isSuccess: profileLoaded } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
+
+  // Whose set this is — see the longer note in flashcards.tsx.
+  const { data: readable, isLoading: setLoading } = useQuery({
+    queryKey: ['set', setId],
+    queryFn: () => readableSet(setId),
+  });
+  const owned = readable?.owned ?? true;
+
   const {
     data: allItems = [],
-    isLoading,
+    isLoading: itemsLoading,
     refetch: refetchItems,
   } = useQuery({
     // Every level in one query, filtered below. Switching levels is then
     // instant, and the per-level counts the buttons show come for free
     // instead of costing three more round trips.
-    queryKey: ['items', setId],
-    queryFn: () => listItems(setId),
+    queryKey: ['items', setId, owned],
+    queryFn: () => listItems(setId, { owned }),
+    enabled: !setLoading,
   });
+  const isLoading = setLoading || itemsLoading;
   const { data: missed } = useQuery({
     queryKey: ['missed', setId],
     queryFn: () => missedItemIds(setId),
@@ -128,7 +139,13 @@ export default function Quiz() {
     if (choicesStarted.current || isLoading || !profileLoaded) return;
     choicesStarted.current = true;
     const apiKey = profile?.gemini_api_key ?? '';
-    if (!apiKey || !allItems.some(needsChoices)) {
+    // Never on a set somebody shared. `addQuizChoices` writes the choices onto
+    // study_items, which is update-own, so on a shared set it would spend YOUR
+    // Gemini quota writing three wrong answers per card and then save none of
+    // them — silently, because a PostgREST update matching no rows is not an
+    // error. `choicesFor` already stands the other cards' answers in, which is
+    // what a set made before NOTES §38 has always been asked with.
+    if (!owned || !apiKey || !allItems.some(needsChoices)) {
       setChoices('ready');
       return;
     }
@@ -143,7 +160,7 @@ export default function Quiz() {
       });
     const giveUp = new Promise((resolve) => setTimeout(resolve, CHOICES_WAIT_MS));
     void Promise.race([writing, giveUp]).then(() => setChoices('ready'));
-  }, [isLoading, profileLoaded, profile, allItems, setId, refetchItems]);
+  }, [isLoading, profileLoaded, profile, allItems, setId, owned, refetchItems]);
 
   // The choices for every card, worked out once per change to the cards: the
   // card's own, or the set's (`choicesFor`). A card that can be asked neither

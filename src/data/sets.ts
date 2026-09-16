@@ -3,6 +3,7 @@ import type { Plan } from '../core/planner';
 import { isMissingColumn, isMissingTable } from '../core/db-errors';
 import { removeAvatarPhotos } from './profile';
 import { removeAllNoteImages } from './notes';
+import { removeMyCommunityData } from './community';
 
 /**
  * Study sets. RLS scopes every query to the signed-in user, so nothing here
@@ -147,6 +148,23 @@ export async function deleteSet(id: string): Promise<void> {
  * this removes everything the app itself can reach.
  */
 export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
+  // FIRST, before a single set is deleted (0021, NOTES §46): stop sharing
+  // everything, and remove the stars given and the messages sent.
+  //
+  // Order matters here in a way it does not for the rest of this function.
+  // Deleting a set removes it from public_sets too, so unsharing afterwards
+  // would usually be redundant — but this function has a partial-failure path
+  // (every storage removal below is best effort, and the loop above can throw
+  // half way), and a run that stopped in the middle must not leave a set four
+  // other people can still read. "Delete my data" cannot mean "delete my data
+  // except the public part".
+  //
+  // Stars and messages do not cascade from a set: a star is a row about
+  // somebody ELSE's set, and a message belongs to no set at all. Deleting every
+  // set of mine would leave all of both behind, which is the same omission
+  // NOTES §40 found for notes, study days and Nomi's daily count.
+  await removeMyCommunityData();
+
   const sets = await listSets();
   for (const set of sets) {
     await deleteSet(set.id);

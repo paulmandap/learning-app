@@ -91,6 +91,71 @@ export function LevelSegment({
 }
 
 /**
+ * The same picker, without the counts — for choosing between PLACES rather
+ * than between levels.
+ *
+ * `LevelSegment` above stays separate on purpose. Its count under each label is
+ * what makes exclusive levels honest — you can see a level is nearly empty
+ * before you pick it — and folding the two together would mean either a count
+ * that is always absent here or an optional one that is easy to forget there.
+ * The appearance is shared; the promise is not.
+ *
+ * Used by the Community tab for Sets / Top sets / Chat.
+ */
+export function Segment<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: readonly { key: T; label: string }[];
+  onChange: (key: T) => void;
+}) {
+  const t = useTheme();
+
+  return (
+    <View style={{ flexDirection: 'row', gap: space.sm }} accessibilityRole="tablist">
+      {options.map((o) => {
+        const selected = value === o.key;
+        return (
+          <Pressable
+            key={o.key}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            accessibilityLabel={o.label}
+            onPress={() => onChange(o.key)}
+            style={{
+              flex: 1,
+              minHeight: TOUCH_TARGET,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: space.sm,
+              paddingHorizontal: space.xs,
+              borderRadius: radius.button,
+              borderWidth: 1,
+              borderColor: selected ? t.accent : t.border,
+              backgroundColor: selected ? t.accent : 'transparent',
+            }}
+          >
+            {/* Weight as well as colour, like the tab bar: which one is chosen
+                must be readable without relying on hue. */}
+            <Text
+              style={[
+                type.label,
+                { color: selected ? t.accentText : t.text, fontWeight: selected ? '700' : '500' },
+              ]}
+              numberOfLines={1}
+            >
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
  * What "there is nothing here" says, in one voice.
  *
  * The three study screens carried seven near-duplicate strings between them,

@@ -75,6 +75,43 @@ export function Avatar({
   return <Face index={choice.index} size={size} />;
 }
 
+/**
+ * Somebody ELSE's picture — in the chat, and beside a set they shared.
+ *
+ * ## Why this is not `Avatar`
+ *
+ * `Avatar` above knows how to fetch a photo: it asks for a signed link, keeps a
+ * copy on the device, and writes what it learns into this device's avatar cache
+ * under the user's id. Every one of those is wrong for another person.
+ *
+ * It could not actually leak a photo — `public_profiles` and the other views in
+ * migration 0021 pass only `face:N` through, and turn an uploaded photo's path
+ * into null — so `Avatar` would draw a face here too. But it would do it by
+ * looking at a value and deciding not to fetch, and a component that decides
+ * not to leak is one refactor away from deciding wrong. This one CANNOT: there
+ * is no network call in it and nothing for a photo path to take.
+ *
+ * It would also have polluted this device's cache with four other people's
+ * avatar values, keyed by their user ids.
+ *
+ * A null avatar is not a failure — it is either somebody who has not chosen a
+ * face or somebody who uploaded a photo, and both get the default face derived
+ * from their user id, which is stable for that person everywhere.
+ */
+export function PersonAvatar({
+  avatar,
+  userId,
+  size = 32,
+}: {
+  avatar: string | null;
+  userId: string;
+  size?: number;
+}) {
+  const choice = parseAvatar(avatar, userId);
+  const index = choice.kind === 'face' ? choice.index : defaultFaceIndex(userId);
+  return <Face index={index} size={size} />;
+}
+
 /** One built-in face. */
 export function Face({ index, size }: { index: number; size: number }) {
   const face = AVATAR_FACES[index] ?? AVATAR_FACES[0]!;
