@@ -112,26 +112,28 @@ async function main() {
     console.log('  none. The live code and the schema it was written against agree.');
   } else {
     for (const f of changed) console.log(`    ${f}`);
-    // Dropping or renaming is what turns drift into an outage: the live build
-    // goes on SELECTing something the database no longer has, and PostgREST
-    // answers 42703 on every query that touches it.
-    const destructive = changed.filter((f) => {
-      if (!existsSync(f)) return false;
-      return /\b(drop\s+(table|column|view)|rename\s+(to|column))\b/i.test(readFileSync(f, 'utf-8'));
-    });
 
     console.log('');
+    const destructive = changed
+      .filter(existsSync)
+      .map((f) => ({ file: f, drops: destructiveDrops(readFileSync(f, 'utf-8')) }))
+      .filter((r) => r.drops.length > 0);
+
     if (destructive.length > 0) {
       console.log('  *** DANGER ***  These REMOVE or RENAME schema objects:');
-      for (const f of destructive) console.log(`      ${f}`);
+      for (const { file, drops } of destructive) {
+        console.log(`      ${file}`);
+        for (const d of drops) console.log(`        ${d}`);
+      }
       console.log('');
       console.log('  If they have been applied, production is running code written against');
-      console.log('  the OLD schema and will fail with 42703 on every query that touches a');
-      console.log('  dropped object. Deploy BEFORE applying, or the app is down until you do.');
-      console.log('  This is exactly what happened on 2026-09-12 (NOTES §31).');
+      console.log('  the OLD schema and will fail on every query that touches a dropped');
+      console.log('  object — 42703 for a column, 42P10 for a constraint an upsert names.');
+      console.log('  Deploy BEFORE applying, or the app is down until you do.');
+      console.log('  2026-09-12 was a column (NOTES §31); 2026-09-16 was a constraint (§46.7).');
     } else {
-      console.log('  None of them drops or renames anything, so an old build keeps working.');
-      console.log('  Additive migrations are safe to apply before deploying.');
+      console.log('  None of them drops or renames anything an old build could still be using,');
+      console.log('  so an old build keeps working. Safe to apply before deploying.');
     }
   }
 
@@ -158,7 +160,82 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e instanceof Error ? e.message : e);
-  process.exit(1);
-});
+/**
+ * Which drops in a migration could actually break a build that is already live.
+ *
+ * ## Why this is not one regular expression any more
+ *
+ * It was: `/\b(drop\s+(table|column|view)|rename\s+(to|column))\b/i` over the
+ * whole file. On 2026-09-16 that got BOTH answers wrong on the same pair of
+ * migrations, and the pair took production down (NOTES §46.7).
+ *
+ *  - **False positive on 0021.** It matched `drop view if exists
+ *    public.public_sets`, which is the standard idempotent idiom and is followed
+ *    three lines later by `create view public.public_sets`. Nothing is removed;
+ *    the view is replaced. The migration was additive and perfectly safe to
+ *    apply first, and the script called it DANGER.
+ *  - **False negative on 0022, which is the one that mattered.** It drops a
+ *    unique CONSTRAINT, and `constraint` was not in the pattern. So the script
+ *    said nothing about the only file that could break the live build — and it
+ *    did: the deployed bundle upserted `on_conflict=study_item_id`, the
+ *    constraint satisfying that was gone, and Postgres answered 42P10 on every
+ *    schedule write in the app.
+ *
+ * A warning that cries wolf on the safe file and stays silent on the dangerous
+ * one is worse than no warning, because it teaches you to scroll past it.
+ *
+ * ## What it does instead
+ *
+ * Comments are stripped first — this project's migrations discuss dropping
+ * things at length, and prose must not set off a schema alarm. Then every drop
+ * is matched with the KIND of object and, where there is one, its literal name.
+ * A drop is forgiven only if the same file creates that same name again.
+ *
+ * A drop with no literal name — `execute format('… drop constraint %I', …)`
+ * inside a DO block, which is how a constraint is correctly found by what it
+ * checks rather than by a guessed name — can never be proved to be recreated,
+ * so it always counts. That is the right way round: unprovable means dangerous.
+ */
+export function destructiveDrops(sql: string): string[] {
+  // Prose first. Without this, 0022's own explanation of what it drops and why
+  // would trip every pattern below.
+  const code = sql.replace(/--[^\n]*/g, '');
+
+  const KINDS = 'table|column|view|materialized\\s+view|constraint|index|policy|function|trigger|type|sequence|schema';
+  const found: string[] = [];
+
+  for (const m of code.matchAll(new RegExp(`\\bdrop\\s+(${KINDS})\\b([^;]*)`, 'gi'))) {
+    const kind = m[1]!.replace(/\s+/g, ' ').toLowerCase();
+    const rest = m[2] ?? '';
+    // The first identifier after the optional IF EXISTS is the name. A `%I`
+    // placeholder is not one, which is exactly the case we must not forgive.
+    const name = /^\s*(?:if\s+exists\s+)?([A-Za-z_][\w.$]*)/i.exec(rest)?.[1] ?? null;
+
+    if (name) {
+      // Replaced, not removed? `create view public.x` after `drop view public.x`.
+      const recreated = new RegExp(
+        `\\bcreate\\s+(?:or\\s+replace\\s+)?(?:${KINDS})\\b[^;]*?\\b${name.replace(/[.$]/g, '\\$&')}\\b`,
+        'i',
+      ).test(code);
+      if (recreated) continue;
+      found.push(`drops ${kind} ${name}`);
+    } else {
+      found.push(`drops a ${kind} whose name is built at run time — cannot be shown to be replaced`);
+    }
+  }
+
+  for (const m of code.matchAll(/\brename\s+(to|column)\b/gi)) {
+    found.push(`renames (${m[1]!.toLowerCase()})`);
+  }
+
+  return [...new Set(found)];
+}
+
+// Only when run directly, so `destructiveDrops` can be imported and tested —
+// the same guard scripts/screenshot.ts uses for the same reason.
+if (process.argv[1]?.endsWith('deploy-status.ts')) {
+  main().catch((e) => {
+    console.error(e instanceof Error ? e.message : e);
+    process.exit(1);
+  });
+}

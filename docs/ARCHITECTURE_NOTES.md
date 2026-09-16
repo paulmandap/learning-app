@@ -6588,6 +6588,76 @@ negative assertion would still pass. Hence the positive ones.
 typecheck clean · **1094 tests**, 3 skipped · `expo export` · boot · scroll probe
 7/7. **Not deployed. Migrations not applied.**
 
+### 46.7 §31 again, on the same day the warning about it was written (2026-09-16)
+
+Both migrations were applied and production went down — silently — in the exact
+shape §46.1 predicted and the handover block was written to prevent.
+
+**What happened.** The owner applied 0021, pushed the code, ran
+`scripts/deploy-status.ts`, and applied 0022. The middle step was the one that
+was missing: `deploy-status.ts` **reports** what is live, it does not deploy
+anything. Its own output said `live commit c747744` and `production is 1
+commit(s) behind HEAD`, and that line was read as confirmation rather than as the
+warning it was. The deploy is `npx wrangler pages deploy dist`.
+
+So for the gap between the two: the database had 0022's schema and the live
+bundle was c747744, which upserts `on_conflict=study_item_id`.
+
+**Measured, against the live database, rather than reasoned about:**
+
+```
+DEPLOYED code  (on_conflict=study_item_id)        FAILS — 42P10
+                 there is no unique or exclusion constraint matching
+                 the ON CONFLICT specification
+PUSHED code    (on_conflict=user_id,study_item_id) ok
+```
+
+Every card answered on production saved its `attempts` row and **not** its
+schedule. It did not look broken from inside the app: the old `saveSchedule`
+throws its result away, and `recordAttempt` wraps the call in a `catch {}` that
+degrades on purpose. Studying worked; nothing was scheduled. Cards would simply
+have stopped coming back as due, with no error anywhere — which is the fifth time
+this project has been bitten by something failing silently, and the reason the
+deployed-next version of `saveSchedule` reads that result and logs it.
+
+The same run confirmed the thing §46.6 could not: **the five views work and do
+bypass RLS.** `public_profiles` returned 1 row and `my_schedule` returned 1 row,
+so the BYPASSRLS assumption underneath all of them holds.
+
+**The tool that exists to prevent this got both answers wrong at once.** Its
+detector was one regular expression over the whole file —
+`/\b(drop\s+(table|column|view)|rename\s+(to|column))\b/i`:
+
+- **False positive on 0021.** It matched `drop view if exists public.public_sets`,
+  the standard idempotent idiom, recreated three lines later. An additive
+  migration, safe to apply first, was printed under `*** DANGER ***`.
+- **False negative on 0022.** It drops a unique CONSTRAINT, and `constraint` was
+  not in the pattern. The script was silent about the only file that could break
+  the live build.
+
+A warning that cries wolf on the safe file and says nothing about the dangerous
+one is worse than no warning, because it teaches you to scroll past it — and it
+was scrolled past. `destructiveDrops` now strips comments first (these migrations
+discuss dropping things at length), covers constraints, indexes, policies,
+functions, triggers and types as well, forgives a drop only when the same file
+creates that same name again, and **never** forgives one whose name is built at
+run time — which is how a constraint is correctly found by what it checks rather
+than by a guessed name, and therefore has no literal name to prove a replacement
+for. `tests/deploy-status.test.ts` pins its verdict on 0015, 0021 and 0022, read
+from the real migrations rather than fixtures.
+
+It now says:
+
+```
+  *** DANGER ***  These REMOVE or RENAME schema objects:
+      supabase/migrations/0022_one_schedule_per_person.sql
+        drops a constraint whose name is built at run time — cannot be shown to be replaced
+```
+
+**What the handover should have said.** "Deploy the code" was step 2 of four and
+was written as prose between two code blocks. The step that matters most was the
+only one without a command beside it. Every step gets its command now.
+
 
 ## Sources
 

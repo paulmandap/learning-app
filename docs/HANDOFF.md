@@ -64,8 +64,11 @@ applied the Community tab says "Sharing isn't switched on yet" and everything
 else works exactly as before. **THE ORDER IS NOT OPTIONAL:**
 
 1. apply **0021** — additive only; safe before or after this code deploys
-2. deploy the code (it upserts `review_state` on `user_id,study_item_id`)
-3. `npx tsx --env-file=.env scripts/deploy-status.ts` — confirm it is live
+2. **`npx wrangler pages deploy dist --project-name=learning-app --branch=main`**
+   — this is the deploy. `deploy-status.ts` REPORTS; it does not deploy anything
+3. `npx tsx --env-file=.env scripts/deploy-status.ts` — it must say
+   `production is exactly HEAD`. "production is 1 commit(s) behind HEAD" means
+   step 2 did not happen; do not go on
 4. apply **0022**, which drops 0005's old single-column unique
 
 Applying 0022 early is NOTES §31 again: the deployed bundle asks PostgREST for
@@ -332,6 +335,20 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   `npx tsx --env-file=.env scripts/deploy-status.ts`** and confirm production
   is not behind it. The script says so in as many words, and refuses to compare
   when it cannot find the live commit in git.
+- **`deploy-status.ts` REPORTS. It does not deploy.** The deploy is
+  `npx wrangler pages deploy dist --project-name=learning-app --branch=main`.
+  Running the status script in place of the deploy is what put production into
+  §31's state a second time, on 2026-09-16 (NOTES §46.7). What you are looking
+  for is `production is exactly HEAD`.
+- **A dropped CONSTRAINT breaks a live build as surely as a dropped column,
+  and it answers 42P10, not 42703.** PostgREST needs a unique constraint
+  matching whatever `on_conflict` the deployed bundle names. §46.7: 0022 dropped
+  `review_state`'s old single-column unique while the live bundle still upserted
+  on it, and every schedule write in the app failed — invisibly, because that
+  upsert's result was thrown away. The detector in `deploy-status.ts` now covers
+  constraints, indexes and policies, ignores comments, forgives a drop only when
+  the same file recreates that name, and never forgives one built at run time.
+  `tests/deploy-status.test.ts` holds it to 0015, 0021 and 0022.
 
 **The browser, iOS and the harness**
 - **iOS force-zooms any focused input under 16px and does not zoom back.** Use
