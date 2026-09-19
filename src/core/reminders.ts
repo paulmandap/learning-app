@@ -149,6 +149,46 @@ export function sentRecently(lastSentAt: string | null, now: number): boolean {
  */
 export const REMINDER_TTL_SECONDS = 3 * 60 * 60;
 
+/**
+ * The `Topic` header every reminder carries, so a newer one replaces an older
+ * one the phone has not shown yet.
+ *
+ * ## Why this is four letters and not a sentence
+ *
+ * It was `nomi-reminder`, and Apple refused every reminder for eight days with
+ *
+ *     HTTP 400 {"reason":"BadWebPushTopic"}
+ *
+ * which failed the workflow, which emailed the owner three times a day
+ * (NOTES §47). RFC 8030 §5.4 says a Topic is at most 32 characters from the URL
+ * and filename-safe base64 alphabet — and `nomi-reminder` passes both of those
+ * readings of the rule, which is why it was written and why it looked right.
+ *
+ * What it is not is a *decodable* base64url string. Base64 encodes three bytes
+ * into four characters, so an unpadded string's length is 0, 2 or 3 more than a
+ * multiple of four and **can never be one more**. `nomi-reminder` is 13
+ * characters; 13 mod 4 is 1. Apple checks. Google does not, so every test and
+ * every probe this project has ever run against Google's service passed.
+ *
+ * `isValidPushTopic` is the check that makes the rule enforceable rather than
+ * remembered, and `sendPush` refuses anything that fails it.
+ */
+export const REMINDER_TOPIC = 'nomi';
+
+/**
+ * Could a push service accept this as a Topic?
+ *
+ * The length test is the one that matters and the one that is easy to leave
+ * out: a string of the right alphabet and the right maximum length is still
+ * refused by Apple if it could not be base64url in the first place.
+ */
+export function isValidPushTopic(topic: string): boolean {
+  if (topic.length === 0 || topic.length > 32) return false;
+  if (!/^[A-Za-z0-9_-]+$/.test(topic)) return false;
+  // No base64url string is ever 1 more than a multiple of 4 characters long.
+  return topic.length % 4 !== 1;
+}
+
 // ---------------------------------------------------------------- the keys --
 
 /**

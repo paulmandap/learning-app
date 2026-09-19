@@ -28,6 +28,8 @@ import {
   unstar,
   visibilityOf,
 } from '../../../src/data/community';
+import { folderOfSet, listFolders, moveSetToFolder } from '../../../src/data/folders';
+import { folderOrder } from '../../../src/core/folders';
 import {
   authorName,
   SHARING_FACTS,
@@ -80,6 +82,9 @@ export default function SetScreen() {
   const [confirmShare, setConfirmShare] = useState<'public' | 'private' | null>(null);
   const [sharing, setSharing] = useState(false);
   const [starring, setStarring] = useState(false);
+  /** Choosing a folder for this set (NOTES §47). */
+  const [moving, setMoving] = useState(false);
+  const [movingTo, setMovingTo] = useState(false);
   /**
    * Has this mount already kicked generation off?
    *
@@ -113,6 +118,18 @@ export default function SetScreen() {
   });
   const set = readable?.set ?? null;
   const owned = readable?.owned ?? true;
+
+  /** Folders to move this set into, and which one it is in now (NOTES §47). */
+  const { data: folders = [] } = useQuery({
+    queryKey: ['folders'],
+    queryFn: () => listFolders(),
+    enabled: owned,
+  });
+  const { data: currentFolderId = null } = useQuery({
+    queryKey: ['set-folder', setId],
+    queryFn: () => folderOfSet(setId),
+    enabled: owned,
+  });
 
   /** Is this set of mine shared? Only asked about a set that is mine. */
   const { data: visibility = 'private' } = useQuery({
@@ -249,6 +266,28 @@ export default function SetScreen() {
     }
   }
 
+  /**
+   * Put this set in a folder, or take it out of one.
+   *
+   * By tapping, not dragging — `src/core/folders.ts` records why. Choosing
+   * again is how it is undone, so nothing here needs a confirmation: the
+   * action is reversible and destroys nothing.
+   */
+  async function moveTo(folderId: string | null) {
+    setMovingTo(true);
+    try {
+      await moveSetToFolder(setId, folderId);
+      // Home groups from these two.
+      await queryClient.invalidateQueries({ queryKey: ['sets'] });
+      await queryClient.invalidateQueries({ queryKey: ['folders'] });
+      setMoving(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't move that set.");
+    } finally {
+      setMovingTo(false);
+    }
+  }
+
   /** Star a set somebody shared, or take the star back. */
   async function toggleStar() {
     const on = starred?.has(setId) ?? false;
@@ -368,6 +407,12 @@ export default function SetScreen() {
                   items={[
                     { label: 'Add notes', onPress: () => router.push(`/new?setId=${setId}`) },
                     { label: 'Rename set', onPress: () => setRenaming(set.title) },
+                    // Only once there is somewhere to move it to. A menu item
+                    // that opens a list of no folders is a dead end; the way to
+                    // make one is on Home, beside the list it groups.
+                    ...(folders.length > 0
+                      ? [{ label: 'Move to folder', onPress: () => setMoving(true) }]
+                      : []),
                     // Only once there are cards to share. `public_sets` filters
                     // on status = 'ready', so sharing a set still being made
                     // would appear to work and then show nothing to anybody.
@@ -435,6 +480,34 @@ export default function SetScreen() {
           </Notice>
           <Button label="Stop sharing" onPress={() => applyVisibility('private')} busy={sharing} />
           <Button label="Keep sharing" variant="secondary" onPress={() => setConfirmShare(null)} />
+        </Card>
+      ) : null}
+
+      {moving ? (
+        <Card>
+          <Label>Move this set</Label>
+          <OptionList
+            options={[
+              ...folderOrder(folders).map((f) => ({
+                key: f.id,
+                title: f.name,
+                detail: f.id === currentFolderId ? "It's already in here" : 'Move it into this folder',
+                onPress: () => void moveTo(f.id),
+              })),
+              {
+                key: 'none',
+                title: 'No folder',
+                detail: 'Show it on its own under Your sets',
+                onPress: () => void moveTo(null),
+              },
+            ]}
+          />
+          <Button
+            label="Cancel"
+            variant="secondary"
+            onPress={() => setMoving(false)}
+            disabled={movingTo}
+          />
         </Card>
       ) : null}
 

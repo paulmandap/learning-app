@@ -1,6 +1,29 @@
+import { useMemo, useState } from 'react';
+import { Pressable, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
-import { ListRow, LoadingState, Notice, PillButton, Screen, SectionRow } from '../../src/ui/components';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  Body,
+  Button,
+  Card,
+  Field,
+  ListRow,
+  LoadingState,
+  Notice,
+  PillButton,
+  Screen,
+  SectionRow,
+} from '../../src/ui/components';
+import { GLYPH } from '../../src/ui/glyphs';
+import { radius, space, type, useTheme } from '../../src/ui/theme';
+import {
+  folderMeta,
+  folderOrder,
+  groupSets,
+  MAX_FOLDER_NAME,
+  type Folder,
+} from '../../src/core/folders';
+import { createFolder, listFolders } from '../../src/data/folders';
 import { StatePanel } from '../../src/ui/states';
 import { NomiCard } from '../../src/ui/nomi';
 import { ContinueCard, GreetingHeader } from '../../src/ui/home';
@@ -53,6 +76,30 @@ export default function Home() {
     queryFn: () => listSets(),
     enabled: !!session,
   });
+  const { data: folders = [] } = useQuery({
+    queryKey: ['folders'],
+    queryFn: () => listFolders(),
+    enabled: !!session,
+  });
+
+  /**
+   * Which folders are open, remembered on this device.
+   *
+   * Collapsed by default — that is the "cleaner look" — but an account where
+   * everything lives in folders would then open to a wall of shut doors on
+   * every visit. Kept in localStorage rather than in the database because it is
+   * a view preference, not data: it should differ between a phone and a laptop,
+   * and it must never be worth a round trip.
+   */
+  const [openFolders, setOpenFolders] = useState<Set<string>>(() => readOpenFolders());
+  const toggleFolder = (id: string) =>
+    setOpenFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      writeOpenFolders(next);
+      return next;
+    });
 
   // Both refetch when the app comes back to the front. An installed app is
   // reopened rather than relaunched, and "due today" is a statement about a day
@@ -85,6 +132,11 @@ export default function Home() {
   // go back to its original position" — the owner (NOTES §37). A stable move,
   // not a sort: nothing else in the list changes place.
   const ordered = dueFirst(sets, new Map((snapshot?.sets ?? []).map((s) => [s.id, s.due])));
+
+  // Into folders, keeping that order inside each one (NOTES §47). After
+  // `ordered`, because `groupSets` distributes rather than sorts — deciding the
+  // order here would quietly override `dueFirst`.
+  const grouped = useMemo(() => groupSets(ordered, folderOrder(folders)), [ordered, folders]);
 
   return (
     <Screen>
@@ -139,7 +191,23 @@ export default function Home() {
       ) : (
         <>
           <SectionRow title="Your sets" action={<PillButton label="+ New set" onPress={newSet} />} />
-          {ordered.map((set) => {
+
+          {/* Folders first, then everything in none (NOTES §47).
+              `groupSets` keeps the order it is given, so `dueFirst` still
+              decides what leads inside each folder. */}
+          {grouped.folders.map(({ folder, sets: inside }) => (
+            <FolderGroup
+              key={folder.id}
+              folder={folder}
+              open={openFolders.has(folder.id)}
+              onToggle={() => toggleFolder(folder.id)}
+              sets={inside}
+              statsBySet={statsBySet}
+              onOpenSet={(id) => router.push(`/set/${id}`)}
+            />
+          ))}
+
+          {grouped.loose.map((set) => {
             const stats = statsBySet.get(set.id);
             const cards = set.cardCount ?? 0;
             return (
@@ -152,10 +220,187 @@ export default function Home() {
               />
             );
           })}
+
+          {/* Under the list it adds to, like "+ New set" is beside it. A folder
+              with nothing in it is still worth making — you make it, then move
+              sets into it — so this never depends on having sets to group. */}
+          <NewFolder folders={folders} />
         </>
       )}
     </Screen>
   );
+}
+
+/**
+ * One folder, and the sets inside it.
+ *
+ * Collapsed by default, which is the "cleaner look" that was asked for — but
+ * the row itself carries how many sets are in there and how many are due, so
+ * collapsing hides the list and never the fact that there is work in it. A
+ * folder that could silently hide five due cards would make the count on Home
+ * wrong in the only way that matters.
+ */
+function FolderGroup({
+  folder,
+  open,
+  onToggle,
+  sets,
+  statsBySet,
+  onOpenSet,
+}: {
+  folder: Folder;
+  open: boolean;
+  onToggle: () => void;
+  sets: StudySet[];
+  statsBySet: Map<string, { due: number; known: number }>;
+  onOpenSet: (id: string) => void;
+}) {
+  const t = useTheme();
+  const due = sets.reduce((n, s) => n + (statsBySet.get(s.id)?.due ?? 0), 0);
+
+  return (
+    <View style={{ gap: space.sm }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${folder.name}, ${folderMeta(sets.length, due)}`}
+        onPress={onToggle}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.sm,
+          padding: space.md,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: t.border,
+          backgroundColor: t.card,
+          opacity: pressed ? 0.7 : 1,
+        })}
+      >
+        {/* The chevron turns rather than swapping character, so open and shut
+            are the same shape in two positions — one glyph, no icon set. */}
+        <Text
+          style={{
+            color: t.textMuted,
+            fontSize: 20,
+            transform: [{ rotate: open ? '90deg' : '0deg' }],
+          }}
+        >
+          {GLYPH.forward}
+        </Text>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={[type.bodyStrong, { color: t.text }]} numberOfLines={1}>
+            {folder.name}
+          </Text>
+          <Text style={[type.caption, { color: t.textMuted }]}>
+            {folderMeta(sets.length, due)}
+          </Text>
+        </View>
+      </Pressable>
+
+      {open ? (
+        // Indented, so a set inside a folder is visibly inside it rather than
+        // merely after it.
+        <View style={{ paddingLeft: space.lg, gap: space.sm }}>
+          {sets.length === 0 ? (
+            <Body muted>Nothing in here yet — move a set in from its ••• menu.</Body>
+          ) : (
+            sets.map((set) => {
+              const stats = statsBySet.get(set.id);
+              const cards = set.cardCount ?? 0;
+              return (
+                <ListRow
+                  key={set.id}
+                  title={formatSetTitle(set.title)}
+                  meta={describeSet(set, stats?.due ?? 0)}
+                  progress={cards > 0 && stats ? stats.known / cards : undefined}
+                  onPress={() => onOpenSet(set.id)}
+                />
+              );
+            })
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Making one. Closed until asked for, so Home is not a form. */
+function NewFolder({ folders }: { folders: Folder[] }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await createFolder(name ?? '');
+      await queryClient.invalidateQueries({ queryKey: ['folders'] });
+      setName(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't make that folder.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (name === null) {
+    return (
+      <View style={{ alignItems: 'flex-start' }}>
+        <PillButton label="+ New folder" onPress={() => setName('')} />
+      </View>
+    );
+  }
+
+  return (
+    <Card>
+      <Field
+        label="Folder name"
+        value={name}
+        onChangeText={setName}
+        placeholder="Anatomy"
+        autoCapitalize="sentences"
+        maxLength={MAX_FOLDER_NAME}
+      />
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      <Button label="Make the folder" onPress={save} busy={saving} />
+      <Button label="Cancel" variant="secondary" onPress={() => setName(null)} disabled={saving} />
+      {folders.length > 0 ? (
+        <Body muted>Move a set into it from the ••• menu on the set.</Body>
+      ) : null}
+    </Card>
+  );
+}
+
+/**
+ * Which folders this device had open.
+ *
+ * Wrapped in try/catch because localStorage is not always there — a private
+ * window, cleared site data, a browser that refuses it — and a folder list that
+ * will not render because it could not remember a chevron would be a poor
+ * trade. Failing means "all shut", which is the default anyway.
+ */
+const OPEN_FOLDERS_KEY = 'nomi.openFolders';
+
+function readOpenFolders(): Set<string> {
+  try {
+    const raw = globalThis.localStorage?.getItem(OPEN_FOLDERS_KEY);
+    if (!raw) return new Set();
+    const ids = JSON.parse(raw) as unknown;
+    return Array.isArray(ids) ? new Set(ids.filter((i): i is string => typeof i === 'string')) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function writeOpenFolders(open: Set<string>): void {
+  try {
+    globalThis.localStorage?.setItem(OPEN_FOLDERS_KEY, JSON.stringify([...open]));
+  } catch {
+    // A preference that could not be saved is not worth an error on screen.
+  }
 }
 
 /**

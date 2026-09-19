@@ -1,6 +1,61 @@
 import { createDecipheriv, createECDH, createPublicKey, generateKeyPairSync, hkdfSync, verify } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { encryptPayload, sendPush, vapidAuthorization } from '../scripts/web-push';
+import { isValidPushTopic, REMINDER_TOPIC } from '../src/core/reminders';
+
+describe('the Topic header', () => {
+  it('refuses the value Apple actually rejected', () => {
+    // Measured 2026-09-19: web.push.apple.com answered
+    // HTTP 400 {"reason":"BadWebPushTopic"} to every reminder for eight days,
+    // while Google accepted the same header without complaint (NOTES §47).
+    expect(isValidPushTopic('nomi-reminder')).toBe(false);
+  });
+
+  it('accepts the one reminders actually send', () => {
+    expect(isValidPushTopic(REMINDER_TOPIC)).toBe(true);
+  });
+
+  it('is the LENGTH rule, not just the alphabet', () => {
+    // The easy half is the alphabet and the 32-character cap, and a topic can
+    // pass both and still be refused: base64 turns three bytes into four
+    // characters, so an unpadded string is never 1 more than a multiple of 4.
+    expect(isValidPushTopic('a')).toBe(false); // 1
+    expect(isValidPushTopic('ab')).toBe(true); // 2
+    expect(isValidPushTopic('abc')).toBe(true); // 3
+    expect(isValidPushTopic('abcd')).toBe(true); // 4
+    expect(isValidPushTopic('abcde')).toBe(false); // 5
+    expect(isValidPushTopic('abcdef')).toBe(true); // 6
+  });
+
+  it('holds the alphabet and the cap too', () => {
+    expect(isValidPushTopic('')).toBe(false);
+    expect(isValidPushTopic('has space')).toBe(false);
+    expect(isValidPushTopic('has/slash')).toBe(false);
+    expect(isValidPushTopic('has+plus')).toBe(false);
+    expect(isValidPushTopic('a'.repeat(32))).toBe(true);
+    expect(isValidPushTopic('a'.repeat(33))).toBe(false);
+  });
+
+  it('sendPush refuses one before it reaches a push service', async () => {
+    // A rule with no check behind it is a wish. This one cost eight days of
+    // failed runs precisely because the only thing enforcing it was Apple.
+    const device = {
+      endpoint: 'https://push.example.test/x',
+      p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcx7aMRDSqSXNxpnP0k9m2Xe9eRcQVTvsPIMHJcJqNRfBc',
+      auth: 'BTBZMqHH6r4Tts7J_aSIgg',
+    };
+    const never = vi.fn();
+    await expect(
+      sendPush(
+        device,
+        'hi',
+        { keys: { publicKey: 'x', privateKey: 'y' }, subject: 'mailto:a@b.c', ttlSeconds: 60, topic: 'nomi-reminder' },
+        never as unknown as typeof fetch,
+      ),
+    ).rejects.toThrow(/not a usable Topic/);
+    expect(never).not.toHaveBeenCalled();
+  });
+});
 
 /**
  * Web Push without the npm package (NOTES §45), held to the standards it
@@ -116,7 +171,11 @@ describe('sendPush', () => {
     privateKey: pair.privateKey.export({ format: 'jwk' }).d!,
     publicKey: Buffer.concat([Buffer.from([4]), bytes(publicJwk.x!), bytes(publicJwk.y!)]).toString('base64url'),
   };
-  const options = { keys, subject: 'mailto:someone@example.test', ttlSeconds: 10800, topic: 'nomi-reminder' };
+  // REMINDER_TOPIC, not a literal. It WAS the literal 'nomi-reminder', so this
+  // suite asserted the exact header Apple was refusing and passed every time
+  // (NOTES §47). Reading the constant means the thing under test and the thing
+  // that ships cannot disagree again.
+  const options = { keys, subject: 'mailto:someone@example.test', ttlSeconds: 10800, topic: REMINDER_TOPIC };
 
   it('posts the encrypted message with the headers a push service requires', async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 201 }));
@@ -128,8 +187,10 @@ describe('sendPush', () => {
     expect(init.headers).toMatchObject({
       'Content-Encoding': 'aes128gcm',
       TTL: '10800',
-      Topic: 'nomi-reminder',
+      Topic: REMINDER_TOPIC,
     });
+    // And whatever that constant becomes, a push service must be able to take it.
+    expect(isValidPushTopic(REMINDER_TOPIC)).toBe(true);
     expect(String((init.headers as Record<string, string>).Authorization)).toMatch(/^vapid t=.+, k=/);
     expect(decrypt(Buffer.from(init.body as Uint8Array), device.getPrivateKey(), Buffer.alloc(16, 1)).toString()).toBe('{"title":"hi"}');
   });

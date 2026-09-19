@@ -23,9 +23,23 @@ import {
   reminderCounts,
   reminderMessage,
   reminderPayload,
+  REMINDER_TOPIC,
   sentRecently,
   VAPID_PUBLIC_KEY,
 } from '../src/core/reminders';
+
+/**
+ * Say it where the failure email will show it.
+ *
+ * GitHub puts `::error::` lines in a run's annotations, and the annotations are
+ * in the email it sends when a run fails. Without this the email says only
+ * "All jobs have failed" and the reason is behind a sign-in and four clicks —
+ * which is how a plain 400 from Apple went unread for eight days (NOTES §47).
+ */
+function reportFailure(message: string): void {
+  console.warn(`  ${message}`);
+  if (process.env.GITHUB_ACTIONS) console.log(`::error::${message}`);
+}
 
 interface Device {
   subscription_id: string;
@@ -97,7 +111,7 @@ async function main() {
         keys,
         subject: `mailto:${CONTACT_EMAIL}`,
         ttlSeconds: REMINDER_TTL_SECONDS,
-        topic: 'nomi-reminder',
+        topic: REMINDER_TOPIC,
         now,
       });
       if (result.outcome === 'sent') {
@@ -109,11 +123,11 @@ async function main() {
       } else {
         tally.failed++;
         // The service's host and its answer, never the address itself.
-        console.warn(`  not sent: ${new URL(device.endpoint).host} answered HTTP ${result.status} ${result.detail}`);
+        reportFailure(`not sent: ${new URL(device.endpoint).host} answered HTTP ${result.status} ${result.detail}`);
       }
     } catch (err) {
       tally.failed++;
-      console.warn(`  not sent: ${new URL(device.endpoint).host}: ${err instanceof Error ? err.message : String(err)}`);
+      reportFailure(`not sent: ${new URL(device.endpoint).host}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

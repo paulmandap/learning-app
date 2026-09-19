@@ -494,7 +494,12 @@ describe("the owner's third round (NOTES §37)", () => {
   it('Home lists sets with cards due first', () => {
     const home = code(read('app', '(tabs)', 'index.tsx'));
     expect(home).toMatch(/dueFirst\(sets,/);
-    expect(home).toContain('ordered.map(');
+    // Folders (NOTES §47) put the rows inside groups, so it is no longer
+    // `ordered.map(` — but due-first must SURVIVE the grouping. `groupSets`
+    // distributes and never sorts, so passing it `ordered` is what keeps the
+    // promise; passing it `sets` would silently drop it.
+    expect(home).toMatch(/groupSets\(ordered,/);
+    expect(home).toContain('grouped.loose.map(');
   });
 
   it('Nomi on Home thinks, then types, and cleans up after itself', () => {

@@ -318,16 +318,38 @@ export async function sendMessage(raw: string, db: Db = supabase): Promise<void>
 }
 
 /**
- * Take back something you said.
+ * Take it back from everyone.
  *
  * Delete, never edit: a message somebody has already read, silently changed
  * afterwards, is worse than one that visibly went away. RLS allows only your
  * own, so this needs no owner check of its own.
+ *
+ * Behind a choice on screen rather than a single tap (NOTES §47). The owner:
+ * *"delete button is just one click, what if i accidentally clicked it? already
+ * happened and i got sad"*. Offering "for you" beside it makes the choice the
+ * confirmation, instead of adding an "are you sure?" to a one-tap action.
  */
-export async function deleteMessage(id: string, db: Db = supabase): Promise<void> {
+export async function deleteMessageForEveryone(id: string, db: Db = supabase): Promise<void> {
   const { error } = await db.from('global_messages').delete().eq('id', id);
   if (isMissingTable(error)) throw new CommunityUnavailableError();
   if (error) throw new Error(error.message);
+}
+
+/**
+ * Take it off your own screen, and nobody else's.
+ *
+ * Works on ANYBODY's message, which is the point: you can clear something
+ * somebody else said out of your view without asking them to unsend it. The
+ * `global_chat` view filters these out (0024), so a hidden message is not
+ * fetched and then skipped — it does not arrive.
+ */
+export async function hideMessage(id: string, db: Db = supabase): Promise<void> {
+  const user_id = await currentUserId(db);
+  const { error } = await db.from('hidden_messages').insert({ user_id, message_id: id });
+
+  if (isMissingTable(error)) throw new CommunityUnavailableError();
+  // 23505: already hidden. The wanted state is the state.
+  if (error && error.code !== '23505') throw new Error(error.message);
 }
 
 /**
@@ -342,7 +364,7 @@ export async function deleteMessage(id: string, db: Db = supabase): Promise<void
 export async function removeMyCommunityData(db: Db = supabase): Promise<void> {
   const user_id = await currentUserId(db);
 
-  for (const table of ['set_stars', 'global_messages'] as const) {
+  for (const table of ['set_stars', 'global_messages', 'hidden_messages'] as const) {
     const { error } = await db.from(table).delete().eq('user_id', user_id);
     if (error && !isMissingTable(error)) throw new Error(error.message);
   }

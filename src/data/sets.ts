@@ -21,6 +21,14 @@ export interface StudySet {
   updated_at: string;
   /** Only populated by listSets, which asks for it. Undefined elsewhere. */
   cardCount?: number;
+  /**
+   * Which folder this set is in, or null for none (0024, NOTES §47).
+   *
+   * Undefined — not null — when the column does not exist yet or was not
+   * asked for. `groupSets` treats both as "no folder", which is right: before
+   * the migration nothing is in a folder.
+   */
+  folder_id?: string | null;
 }
 
 /**
@@ -58,16 +66,29 @@ async function currentUserId(): Promise<string> {
  * be counted on the home screen.
  */
 export async function listSets(db: Db = supabase): Promise<StudySet[]> {
-  const { data, error } = await db
-    .from('study_sets')
-    .select('id, title, status, plan, created_at, updated_at, study_items(count)')
-    .eq('study_items.hidden', false)
-    .order('updated_at', { ascending: false });
+  const columns = 'id, title, status, plan, created_at, updated_at, study_items(count)';
+  const query = (cols: string) =>
+    db
+      .from('study_sets')
+      .select(cols)
+      .eq('study_items.hidden', false)
+      .order('updated_at', { ascending: false });
 
+  // `folder_id` arrives with migration 0024. Asked for separately so that a
+  // build deployed before the migration still lists every set instead of
+  // answering PGRST204 for the whole screen — the same "prefer a retry on the
+  // missing column over making the deploy order load-bearing" rule that
+  // NOTES §19.4 settled on. One extra round trip, only while they are out of
+  // step, and only on the error path.
+  let { data, error } = await query(`${columns}, folder_id`);
+  if (isMissingColumn(error)) {
+    console.warn('[sets] no folder_id yet (apply migration 0024); listing without folders.');
+    ({ data, error } = await query(columns));
+  }
   if (error) throw new Error(error.message);
 
   type Row = Omit<StudySet, 'cardCount'> & { study_items?: { count: number }[] };
-  return ((data ?? []) as Row[]).map(({ study_items, ...set }) => ({
+  return ((data ?? []) as unknown as Row[]).map(({ study_items, ...set }) => ({
     ...set,
     cardCount: study_items?.[0]?.count ?? 0,
   }));

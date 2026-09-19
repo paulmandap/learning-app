@@ -145,8 +145,25 @@ function RootNavigator() {
   // read before signing in (NOTES §40). And never mounted signed out: it loads
   // the profile as it mounts, which is how an empty one reached the cache
   // before the first redirect to sign-in (NOTES §42).
+  //
+  // Hidden on Community for the Nomi-screen reason and one more (NOTES §47):
+  // the owner, on a phone — *"the gemini icon or chatbot is interfering with
+  // the send button. it looks messy."* The ✦ floats bottom-right and so does a
+  // chat's Send, so they land on each other. Every other screen is a `Screen`,
+  // which reserves FLOAT_CLEARANCE below its content; the chat cannot, because
+  // its composer is pinned rather than scrolled.
+  //
+  // The whole tab rather than the chat pane alone, because the panes are
+  // component state and not routes, so nothing here can see which one is open.
+  // Little is lost: Community is where OTHER people are, Nomi is one tap away
+  // in its own tab, and there is nothing on a stranger's set to ask Nomi about
+  // — it cannot read their notes (NOTES §46).
   const showAssistant =
-    signedIn && segments[0] !== 'sign-in' && segments[0] !== 'nomi' && !isPublicRoute(segments[0]);
+    signedIn &&
+    segments[0] !== 'sign-in' &&
+    segments[0] !== 'nomi' &&
+    segments[1] !== 'community' &&
+    !isPublicRoute(segments[0]);
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>

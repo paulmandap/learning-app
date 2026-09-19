@@ -7,6 +7,8 @@ import {
   Body,
   Button,
   Card,
+  Field,
+  Label,
   LoadingState,
   Notice,
   Screen,
@@ -16,7 +18,7 @@ import { FlipCard } from '../../../src/ui/flashcard';
 import { gradeFeedback, hapticFlip, primeFeedback } from '../../../src/ui/feedback';
 import { space } from '../../../src/ui/theme';
 import { SourcePanel } from '../../../src/ui/source';
-import { listItems, promptFor, reportItem, type StudyItem } from '../../../src/data/items';
+import { editCard, listItems, promptFor, reportItem, type StudyItem } from '../../../src/data/items';
 import { readableSet } from '../../../src/data/community';
 import { missedItemIds } from '../../../src/data/attempts';
 import { useStudySession } from '../../../src/data/study-session';
@@ -76,6 +78,10 @@ export default function Flashcards() {
   const [revealed, setRevealed] = useState(false);
   const [missed, setMissed] = useState<Set<string>>(new Set());
   const [reported, setReported] = useState<string | null>(null);
+  /** The card being corrected, as a draft. Null when nothing is being edited. */
+  const [editing, setEditing] = useState<{ prompt: string; answer: string } | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   /**
    * Whose set is this?
@@ -306,6 +312,37 @@ export default function Flashcards() {
   }
 
   /**
+   * Correcting a card in place (NOTES §47).
+   *
+   * The owner: *"users shall be able to edit their flashcards' contents even if
+   * the flashcard is already generated."* Before this, a card with one wrong
+   * word could only be reported — which hides the whole card. Report is still
+   * right for a card that should not exist; this is for one that should, with
+   * different words.
+   *
+   * Here rather than on a list of cards somewhere, because here is where you
+   * find out: you turn a card over, see it is wrong, and fix it without leaving
+   * the deck. `editing` holds the draft, so opening it and closing it again
+   * changes nothing.
+   */
+  async function saveEdit() {
+    if (!card || !editing) return;
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      await editCard(card.id, editing);
+      // The deck is dealt from this query, so the corrected words are on screen
+      // the moment it comes back — including the card currently turned over.
+      await queryClient.invalidateQueries({ queryKey: ['items', setId] });
+      setEditing(null);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Couldn't save that just now.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  /**
    * The picture this card came from, for image uploads (Phase 7a).
    *
    * Only for `kind === 'image'`: the original is already in Storage and
@@ -492,7 +529,48 @@ export default function Flashcards() {
                 // Reporting across accounts needs a table of its own and
                 // somebody to read it, which is a decision, not an oversight.
                 onReport={owned ? report : undefined}
+                // Only your own cards, for the same reason as Report: the
+                // update would match no rows and return no error on somebody
+                // else's set. Correcting a stranger's card is not a thing this
+                // app does — take a copy of the set if you want your own words.
+                onEdit={
+                  owned ? () => setEditing({ prompt: card.prompt, answer: card.answer }) : undefined
+                }
               />
+
+              {/* The correction, under the card it corrects. `promptFor` shows a
+                  rephrasing when there is one, so the field starts from the
+                  ORIGINAL question — editing what you can see and finding you
+                  changed something else would be worse than no editing. */}
+              {editing ? (
+                <Card>
+                  <Label>Correct this card</Label>
+                  <Field
+                    label="Question"
+                    value={editing.prompt}
+                    onChangeText={(prompt) => setEditing((e) => (e ? { ...e, prompt } : e))}
+                    autoCapitalize="sentences"
+                  />
+                  <Field
+                    label="Answer"
+                    value={editing.answer}
+                    onChangeText={(answer) => setEditing((e) => (e ? { ...e, answer } : e))}
+                    autoCapitalize="sentences"
+                  />
+                  {editError ? <Notice tone="error">{editError}</Notice> : null}
+                  <Button label="Save the card" onPress={saveEdit} busy={savingEdit} />
+                  <Button
+                    label="Leave it as it was"
+                    variant="secondary"
+                    onPress={() => setEditing(null)}
+                    disabled={savingEdit}
+                  />
+                  <Body muted>
+                    The bit of your notes under "Source" doesn&apos;t change — it&apos;s still where
+                    this card came from.
+                  </Body>
+                </Card>
+              ) : null}
               {reported ? <Notice tone="ok">Thanks — you won't see that one again.</Notice> : null}
             </>
           ) : null}

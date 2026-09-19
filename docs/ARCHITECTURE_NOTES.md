@@ -6800,6 +6800,209 @@ typecheck clean · **1101 tests**, 3 skipped · isolation **61/61** and communit
 probe **11/11** against the live project.
 
 
+## 47. Round eleven: reminders refused for eight days, and six things from using it (2026-09-19)
+
+Seven reports after a week of daily use. One was a live outage nobody could see.
+
+### 47.1 Apple had been refusing every reminder for eight days
+
+The owner: *"the notification is error again, i get this email several times
+now"*, with a GitHub failure email attached.
+
+The workflow had failed on **one run a day** since 2026-09-11 — the same commit,
+the same secrets, morning and evening fine. The run list made the pattern
+obvious once it was read as times rather than as failures:
+
+```
+11:54 failure   05:43 success   16:19 success
+12:11 failure   05:47 success   16:45 success
+12:33 failure   06:00 success   16:52 success
+```
+
+Three runs a day, and the middle one always failed. A dry run locally said why
+the middle one was special: **the afternoon slot is the only one with a device
+registered.** So it was not "afternoon is broken", it was "sending is broken,
+and afternoon is the only slot that sends".
+
+Sending it for real, once:
+
+```
+not sent: web.push.apple.com answered HTTP 400 {"reason":"BadWebPushTopic"}
+```
+
+**The `Topic` header.** It was `nomi-reminder`. RFC 8030 §5.4 allows at most 32
+characters from the URL and filename-safe base64 alphabet, and `nomi-reminder`
+satisfies both of those readings — which is why it was written, and why it
+looked right in review. What it is not is a *decodable* base64url string: base64
+turns three bytes into four characters, so an unpadded string's length is 0, 2
+or 3 more than a multiple of four and **can never be one more**. `nomi-reminder`
+is 13 characters. Apple checks. **Google does not**, so every test, every probe
+and `scripts/push-probe.ts` — all of which go to Google — had always passed.
+
+Worse: `tests/web-push.test.ts` asserted `Topic: 'nomi-reminder'` as a literal.
+The suite was pinning the exact header that was being refused.
+
+Fixed at three levels, because one would not have been enough:
+
+- `REMINDER_TOPIC = 'nomi'` in src/core/reminders.ts, with the reasoning beside it;
+- `isValidPushTopic`, and `sendPush` **throws** rather than sending an invalid
+  one — a rule enforced only by a push service is a rule nobody can test;
+- the test reads the constant instead of a literal, and asserts the constant is
+  valid, so the thing under test and the thing that ships cannot diverge again.
+
+Verified against Apple: `afternoon: 1 device(s) · 1 sent · 0 failed`.
+
+**And the email now says what went wrong.** `reportFailure` emits `::error::`
+when running in Actions, so the reason appears in the run's annotations — which
+are in the failure email. Before this, the email said "All jobs have failed" and
+the reason was behind a sign-in and four clicks, which is how a plain 400 went
+unread for eight days.
+
+Worth keeping: `if (tally.failed > 0) process.exitCode = 1` is right, and the
+daily email was the system working. The bug was that the email said nothing.
+
+### 47.2 The floating ✦ sat on the Send button
+
+*"in the mobile ui for the chat, the gemini icon or chatbot is interfering with
+the send button. it looks messy."*
+
+Every other screen is a `Screen`, which reserves `FLOAT_CLEARANCE` below its
+content. The chat cannot: its composer is pinned rather than scrolled, so the ✦
+and Send both float bottom-right and land on each other.
+
+Hidden on the whole Community tab, for the reason Nomi's own screen already
+hides it — *the whole screen is the conversation it would open* — plus this one.
+The tab rather than the chat pane alone, because the panes are component state
+and not routes, so `_layout.tsx` cannot see which is open. Little is lost:
+Community is where other people are, Nomi is one tap away, and Nomi cannot read
+a stranger's notes anyway (§46).
+
+### 47.3 The chat looks like a chat now
+
+*"add emoji. also, make the ui very similar to 'Messenger' app ... add bubbles
+to the chat so it doesn't look plain (it just blends in the background). add a
+feature for unsend for you, and unsend for everyone."*
+
+Bubbles, yours right and tinted, theirs left on the card surface, with the
+squarer corner on the side it came from — which is what makes a stack read as a
+direction rather than a column of lozenges. Name once per run, face on the LAST
+bubble of a run where a messenger puts it, and **one timestamp per run, not
+per message**: six timestamps down a page of one person talking is six times
+more furniture than the information deserves.
+
+**Emoji without a library.** A full picker means a few thousand entries, keyword
+search and skin-tone variants — a dependency and a download on every start. A
+phone's keyboard already has every emoji there is, so the panel is the shortcut
+for a laptop: four short groups in `src/core/emoji.ts`, and `appendEmoji`
+deciding the spaces (a space after a word, none after another emoji, so tapping
+three in a row gives 😀😂🔥 and not 😀 😂 🔥).
+
+**Unsend is two different things, named as two.** *"delete button is just one
+click, what if i accidentally clicked it? already happened and i got sad there's
+no like confirmation etc so adding the unsend for you/everyone is the
+confirmation itself."* — exactly right, and better than an "are you sure?",
+which is one more tap to learn to dismiss without reading. So the Delete link is
+gone; the bubble itself opens a choice. "For everyone" is the delete that
+already existed and stays own-messages-only; "for you" is `hidden_messages`
+(0024) and works on **anybody's** message, filtered out inside the `global_chat`
+view so a hidden message is never fetched and then skipped.
+
+### 47.4 Correcting a card instead of losing it
+
+*"users shall be able to edit their flashcards' contents even if the flashcard
+is already generated."*
+
+Until now a card with one wrong word could only be **reported**, which hides the
+whole card. Report is still right for a card that should not exist; `editCard`
+is for one that should, with different words. It sits beside Report on the
+card's source panel, because that is where you find out.
+
+What it deliberately does not touch: `source_excerpt` (still the sentence the
+card was grounded in, whatever the question now says) and `excerpt_verified`
+(which means exactly one thing since 0001, and that thing still happened). What
+it does clear: `variant_prompt` when the question changes, since a rephrasing of
+a question that no longer exists would be shown in preference to the new one;
+and `options` when the answer changes, since three wrong answers written against
+the old answer are three wrong answers about nothing.
+
+### 47.5 Folders, by tapping
+
+*"it can be either by tapping buttons or drag and drop."* Tapping. Drag and drop
+across a scrolling list needs a gesture library this project does not have, and
+it needs a second way in anyway — dragging is the one gesture that survives
+neither a screen reader, nor a keyboard, nor a phone held one-handed on a bus.
+
+One level, one folder per set. A set in two folders is a set you look for twice;
+nesting needs a navigator, a breadcrumb and a move-to-parent gesture before it
+is usable, which is a file manager rather than a study app.
+
+**`on delete set null`, not cascade** — the single most destructive line in 0024
+if written the other way. A folder is a label, not a container: deleting one
+puts its sets back on the top level. Somebody tidying up their groupings must
+not lose every set in a folder, with its cards, answers and review dates, and
+find out afterwards. `tests/folders.test.ts` asserts the migration says so.
+
+Collapsed by default, which is the "cleaner look" asked for — but the folder row
+carries its set count **and its due count**, so collapsing hides the list and
+never the fact that there is work in it. Open folders are remembered in
+localStorage: it is a view preference, it should differ between a phone and a
+laptop, and it must never be worth a round trip.
+
+`listSets` asks for `folder_id` and retries without it on a missing column, so a
+build deployed before 0024 still lists every set rather than answering PGRST204
+for the whole screen — NOTES §19.4's rule, applied again.
+
+### 47.6 Restoring a broken streak
+
+*"i just broke my streak. implement just like tiktok ... maximum of 5 restore
+every month, 48 hours between each restore before it expires to start from 0
+again."*
+
+**Not a row in `study_days`.** The tempting version writes one for the missed
+day and the existing sum just works — and it would be a lie: Progress counts
+days studied and total answers from that table, so a restored day would appear
+as studying that never happened, and the number people are proudest of would be
+the one that was not true. `study_days` stays a record of what happened;
+`streak_restores` records what was forgiven, and `studyStreak` reads both.
+`tests/data.test.ts` holds that apart: streak 4, totalAttempts 9.
+
+The window works out to one clear day, which is what 48 hours means here: a run
+through day 10 still shows a live streak on day 11 (the existing "you have not
+missed today until it is over" rule), breaks on day 12, and can be restored for
+the rest of day 12.
+
+Only ONE missed day is restorable. Two clear days is a stop, not a lapse, and
+forgiving the more recent one would spend a restore and leave the same broken
+streak on screen.
+
+The month's five are counted and claimed in one statement
+(`claim_streak_restore`), for the same reason as `claim_chat_message` in 0010:
+two taps both read "4 used" and both proceed otherwise. It returns -1 when spent
+rather than failing silently — "restore" that appeared to work is the worst
+possible answer to somebody who has just lost a streak.
+
+This is also the one place Progress may mention losing a streak, and only
+because it already happened. The standing rule against "keep it up or lose it"
+before the fact is unchanged.
+
+### 47.7 Not fixed here: the sign-in email still says "Study"
+
+*"in the email when sending code, it's still named as 'Study' and not 'Nomi'."*
+
+Correct, and not in this repository. Supabase's auth emails come from templates
+stored in the project, and **there is no Supabase management token** (HANDOFF),
+so they are changed the same way migrations are: by the owner, in the dashboard.
+
+  Authentication → Emails → Templates → Magic Link, and the subject line beside it
+  Project Settings → General → project name, which is what the sender shows
+
+Nothing in `src/` or `app/` decides that text, and nothing here can check it —
+which is why it is written down rather than left as a TODO nobody can act on.
+
+typecheck clean · **1150 tests**, 3 skipped · `expo export` · boot · scroll probe
+**7/7**. Apple verified live. **Migration 0024 not yet applied.**
+
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)

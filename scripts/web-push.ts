@@ -11,7 +11,7 @@
  * holds them to the RFC's own worked example, value for value.
  */
 import { createCipheriv, createECDH, createPrivateKey, hkdfSync, randomBytes, sign } from 'node:crypto';
-import type { SubscriptionKeys } from '../src/core/reminders';
+import { isValidPushTopic, type SubscriptionKeys } from '../src/core/reminders';
 
 const RECORD_SIZE = 4096;
 
@@ -100,6 +100,18 @@ export async function sendPush(
   options: { keys: VapidKeys; subject: string; ttlSeconds: number; topic?: string; now?: number },
   fetchImpl: typeof fetch = fetch,
 ): Promise<PushOutcome> {
+  // Refused here rather than by the push service. Apple answers a topic that
+  // could not be base64url with HTTP 400 BadWebPushTopic and Google accepts it
+  // happily, so without this check the only way to find out is for one person's
+  // iPhone to stop getting reminders while every test still passes — which is
+  // exactly what happened for eight days (NOTES §47).
+  if (options.topic !== undefined && !isValidPushTopic(options.topic)) {
+    throw new Error(
+      `"${options.topic}" is not a usable Topic: at most 32 characters of A-Z a-z 0-9 - _, ` +
+        'and never 1 more than a multiple of 4 long, because no base64url string is.',
+    );
+  }
+
   const response = await fetchImpl(device.endpoint, {
     method: 'POST',
     headers: {

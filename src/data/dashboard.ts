@@ -12,6 +12,10 @@ import {
   schedulesForVisibleCards,
   sectionSplit,
   studyStreak,
+  restorableStreak,
+  restoresLeftThisMonth,
+  MONTHLY_STREAK_RESTORES,
+  type RestorableStreak,
   type ForecastDay,
   type ItemHistory,
   type MasteryCounts,
@@ -23,6 +27,7 @@ import { summariseUsage, type UsageSummary } from '../core/storage';
 import { busiestLevel, countByLevel } from '../core/deck';
 import type { Level } from '../core/planner';
 import { storageUsedBytes } from './documents';
+import { listStreakRestores } from './streak';
 
 /**
  * Everything the Progress screen shows, in one round of queries (Phase 9b).
@@ -55,6 +60,16 @@ export interface DashboardData {
   streak: number;
   /** Whether today already has an answer — so Nomi can say today counts. */
   studiedToday: boolean;
+  /**
+   * A streak that has just broken and can still be brought back (NOTES §47),
+   * or null when there is nothing to offer.
+   *
+   * Computed here rather than on the screen because it needs the same two sets
+   * of days the streak itself does, and they are already loaded.
+   */
+  restorable: RestorableStreak | null;
+  /** Streak restores left this calendar month, of five. */
+  restoresLeft: number;
   /** Cards reviewed and now due again, across every set. */
   dueToday: number;
   /** Cards whose last answer was wrong or partly right — the missed pile (D8). */
@@ -120,6 +135,8 @@ export interface SetStat {
 export const EMPTY_DASHBOARD: DashboardData = {
   streak: 0,
   studiedToday: false,
+  restorable: null,
+  restoresLeft: MONTHLY_STREAK_RESTORES,
   dueToday: 0,
   toRetry: 0,
   mastery: { known: 0, getting: 0, needsWork: 0, notStarted: 0 },
@@ -186,7 +203,7 @@ export async function fetchDashboard(
   now: number = Date.now(),
   db: Db = supabase,
 ): Promise<DashboardData> {
-  const [days, schedules, stats, items, recent, usedBytes] = await Promise.all([
+  const [days, schedules, stats, items, recent, usedBytes, restoredDays] = await Promise.all([
     // The streak reads from study_days, NOT from attempts. attempts cascades
     // from study_sets, so deleting a set would erase the days its answers
     // happened on and reset a streak for having tidied up. study_days
@@ -231,6 +248,9 @@ export async function fetchDashboard(
       .order('created_at', { ascending: false })
       .limit(TREND_ATTEMPT_CAP),
     storageUsedBytes(db),
+    // Days forgiven with a restore (NOTES §47). Its own module, because a
+    // restore is not a day studied and must never be counted as one.
+    listStreakRestores(db),
   ]);
 
   warnIfFailed('study_days', days.error);
@@ -259,8 +279,13 @@ export async function fetchDashboard(
     }
   }
 
-  const streak = studyStreak(times, now);
+  // A forgiven day counts towards the run and towards nothing else: `times`
+  // still holds only real answers, so `studiedToday` and `totalAttempts` are
+  // unchanged by a restore.
+  const streak = studyStreak(times, now, restoredDays);
   const studiedToday = times.some((t) => startOfUtcDay(t) === startOfUtcDay(now));
+  const restorable = restorableStreak(times, now, restoredDays);
+  const restoresLeft = restoresLeftThisMonth(restoredDays, now);
 
   // --- mastery, and what is due -------------------------------------------
   const scheduleRows = completeRows('dashboard/review_state', schedules) as {
@@ -418,6 +443,8 @@ export async function fetchDashboard(
   return {
     streak,
     studiedToday,
+    restorable,
+    restoresLeft,
     dueToday,
     toRetry,
     mastery,

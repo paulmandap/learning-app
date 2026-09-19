@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Card, LoadingState, Notice, Title } from '../../src/ui/components';
+import { Body, Button, Card, Label, LoadingState, Notice, Title } from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
 import { Segment } from '../../src/ui/segment';
 import { Composer } from '../../src/ui/nomi';
@@ -15,12 +15,14 @@ import {
   rankSets,
   starLabel,
   canStar,
+  type ChatMessage,
   type PublicSet,
 } from '../../src/core/community';
 import { describeWhen } from '../../src/core/chat';
 import {
   CommunityUnavailableError,
-  deleteMessage,
+  deleteMessageForEveryone,
+  hideMessage,
   listMessages,
   listPublicSets,
   myStars,
@@ -331,9 +333,24 @@ function ChatPane() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['global-chat'] }),
   });
 
-  const remove = useMutation({
-    mutationFn: (id: string) => deleteMessage(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['global-chat'] }),
+  /**
+   * Which message is being unsent, if any.
+   *
+   * The owner: *"delete button is just one click, what if i accidentally
+   * clicked it? already happened and i got sad there's no like confirmation."*
+   * So Delete opens a choice instead of acting, and the choice IS the
+   * confirmation — an "are you sure?" on a one-tap action would be one more tap
+   * to learn to dismiss without reading.
+   */
+  const [unsending, setUnsending] = useState<ChatMessage | null>(null);
+
+  const unsend = useMutation({
+    mutationFn: ({ id, everyone }: { id: string; everyone: boolean }) =>
+      everyone ? deleteMessageForEveryone(id) : hideMessage(id),
+    onSuccess: async () => {
+      setUnsending(null);
+      await queryClient.invalidateQueries({ queryKey: ['global-chat'] });
+    },
   });
 
   if (error instanceof CommunityUnavailableError) return <Pane><NotSwitchedOn /></Pane>;
@@ -360,7 +377,7 @@ function ChatPane() {
               detail="This is one room, and everyone signed in to Nomi is in it."
             />
           ) : (
-            messages.map((m) => (
+            messages.map((m, i) => (
               <Message
                 key={m.id}
                 name={authorName(m.author_name)}
@@ -369,11 +386,27 @@ function ChatPane() {
                 body={m.body}
                 when={describeWhen(Date.parse(m.created_at), now)}
                 mine={m.author_id === myId}
-                onDelete={() => remove.mutate(m.id)}
+                // Only the first of a run shows a face and a name. Five
+                // messages in a row from one person with their picture beside
+                // every one reads as five conversations, which is why every
+                // messenger groups them.
+                startsRun={messages[i - 1]?.author_id !== m.author_id}
+                endsRun={messages[i + 1]?.author_id !== m.author_id}
+                onUnsend={() => setUnsending(m)}
               />
             ))
           )}
         </ScrollView>
+
+        {unsending ? (
+          <UnsendChoice
+            mine={unsending.author_id === myId}
+            busy={unsend.isPending}
+            error={unsend.isError ? (unsend.error as Error).message : null}
+            onPick={(everyone) => unsend.mutate({ id: unsending.id, everyone })}
+            onCancel={() => setUnsending(null)}
+          />
+        ) : null}
 
         {send.isError ? (
           <View style={{ paddingBottom: space.sm }}>
@@ -389,6 +422,7 @@ function ChatPane() {
             // The database refuses anything longer, so the box stops there
             // rather than letting someone type a page and then be told no.
             maxLength={MESSAGE_MAX_LENGTH}
+            emoji
           />
         </View>
       </View>
@@ -396,6 +430,84 @@ function ChatPane() {
   );
 }
 
+/**
+ * Unsending, as a choice rather than a confirmation.
+ *
+ * Two different things, named as two different things:
+ *
+ *  - **for you** takes it off your own screen and nobody else's, and works on
+ *    anybody's message — you can clear something somebody else said without
+ *    asking them to take it back;
+ *  - **for everyone** removes it from the room, and is only ever offered on
+ *    your own, because that is all the database will allow (0021).
+ *
+ * On somebody else's message there is only one thing to do, so it says so
+ * plainly instead of showing a disabled second button nobody can use.
+ */
+function UnsendChoice({
+  mine,
+  busy,
+  error,
+  onPick,
+  onCancel,
+}: {
+  mine: boolean;
+  busy: boolean;
+  error: string | null;
+  onPick: (everyone: boolean) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <View style={{ paddingBottom: space.sm }}>
+      <Card>
+        <Label>Unsend this message</Label>
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        {mine ? (
+          <>
+            <Button label="Unsend for everyone" onPress={() => onPick(true)} busy={busy} />
+            <Body muted>It disappears from the room. People who already read it will have read it.</Body>
+            <Button label="Unsend for me only" variant="secondary" onPress={() => onPick(false)} disabled={busy} />
+            <Body muted>It stays for everyone else, and goes from your screen.</Body>
+          </>
+        ) : (
+          <>
+            <Button label="Hide this from my screen" onPress={() => onPick(false)} busy={busy} />
+            <Body muted>
+              It stays in the room for everyone else — only the person who sent it can take it back.
+            </Body>
+          </>
+        )}
+        <Button label="Keep it" variant="secondary" onPress={onCancel} disabled={busy} />
+      </Card>
+    </View>
+  );
+}
+
+/**
+ * One message, the way a messenger draws one (NOTES §47).
+ *
+ * The owner: *"make the ui very similar to 'Messenger' app for cleaner look
+ * (like my chats is placed on the right side, other is on left.) add bubbles to
+ * the chat so it doesn't look plain (it just blends in the background)."*
+ *
+ * So: yours right and tinted, theirs left on the card surface, both in bubbles
+ * that separate the words from the page. It was plain text on the background,
+ * which is exactly the "blends in" he describes — there was nothing to say
+ * where one message ended and the next began except a gap.
+ *
+ * ## The corner that is not round
+ *
+ * Each bubble has three round corners and one squarer one, on the side it came
+ * from. It is what makes a stack of bubbles read as a direction rather than as
+ * a column of lozenges, and it costs one line.
+ *
+ * ## Tap the bubble, not a Delete link
+ *
+ * A visible "Delete" beside every message is a one-tap mistake waiting to
+ * happen — which is the report this was written from. The bubble itself opens
+ * the unsend choice, so nothing destructive is ever one tap away, and the
+ * choice does the confirming.
+ */
 function Message({
   name,
   avatar,
@@ -403,7 +515,9 @@ function Message({
   body,
   when,
   mine,
-  onDelete,
+  startsRun,
+  endsRun,
+  onUnsend,
 }: {
   name: string;
   avatar: string | null;
@@ -411,34 +525,79 @@ function Message({
   body: string;
   when: string;
   mine: boolean;
-  onDelete: () => void;
+  startsRun: boolean;
+  endsRun: boolean;
+  onUnsend: () => void;
 }) {
   const t = useTheme();
+  const AVATAR = 28;
 
   return (
-    <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' }}>
-      <PersonAvatar avatar={avatar} userId={userId} name={mine ? undefined : name} size={32} />
-      <View style={{ flex: 1, gap: 2 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm }}>
-          <Text style={[type.caption, { color: t.text, fontWeight: '700' }]}>
-            {mine ? 'You' : name}
-          </Text>
-          <Text style={[type.caption, { color: t.textMuted }]}>{when}</Text>
-          <View style={{ flex: 1 }} />
-          {mine ? (
-            // Delete, never edit: a message somebody has already read, silently
-            // changed afterwards, is worse than one that visibly went away.
-            <Pressable accessibilityRole="button" accessibilityLabel="Delete this message" onPress={onDelete} hitSlop={8}>
-              <Text style={[type.caption, { color: t.textMuted, textDecorationLine: 'underline' }]}>
-                Delete
-              </Text>
-            </Pressable>
-          ) : null}
-        </View>
-        <Text style={[type.body, { color: t.text }]} selectable>
-          {body}
+    <View
+      style={{
+        alignItems: mine ? 'flex-end' : 'flex-start',
+        // A run from one person sits close together; a change of speaker opens
+        // a gap. That spacing is most of what makes a stack of bubbles legible.
+        marginTop: startsRun ? space.sm : 2,
+        gap: 2,
+      }}
+    >
+      {/* Their name, once, above the first bubble of a run. Never on yours —
+          "You" over every message you send is a label nobody needs. */}
+      {startsRun && !mine ? (
+        <Text style={[type.caption, { color: t.textMuted, fontWeight: '700', marginLeft: AVATAR + space.sm }]}>
+          {name}
         </Text>
+      ) : null}
+
+      {/* The bubble and the face on one row, bottom-aligned, so the face sits
+          beside the message rather than beside the time under it. The time is
+          outside this row for exactly that reason. */}
+      <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-end', maxWidth: '86%' }}>
+        {/* The face goes on the LAST bubble of a run, where a messenger puts
+            it, with a spacer holding the line on the others. */}
+        {!mine ? (
+          endsRun ? (
+            <PersonAvatar avatar={avatar} userId={userId} name={name} size={AVATAR} />
+          ) : (
+            <View style={{ width: AVATAR }} />
+          )
+        ) : null}
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${mine ? 'You' : name} said ${body}. ${when}. Tap to unsend.`}
+          onPress={onUnsend}
+          style={({ pressed }) => ({
+            flexShrink: 1,
+            paddingHorizontal: space.md,
+            paddingVertical: space.sm,
+            borderRadius: radius.lg,
+            // The squarer corner points at whoever said it, on the last bubble
+            // of their run — which is what makes a stack read as a direction
+            // rather than as a column of lozenges.
+            borderBottomRightRadius: mine && endsRun ? radius.sm : radius.lg,
+            borderBottomLeftRadius: !mine && endsRun ? radius.sm : radius.lg,
+            backgroundColor: mine ? t.accent : t.card,
+            borderWidth: mine ? 0 : 1,
+            borderColor: t.border,
+            opacity: pressed ? 0.75 : 1,
+          })}
+        >
+          <Text style={[type.body, { color: mine ? t.accentText : t.text }]} selectable>
+            {body}
+          </Text>
+        </Pressable>
       </View>
+
+      {/* Once per run, not once per message. Six timestamps down a page of one
+          person talking is six times as much furniture as the information in
+          it deserves. */}
+      {endsRun ? (
+        <Text style={[type.caption, { color: t.textMuted, marginLeft: mine ? 0 : AVATAR + space.sm }]}>
+          {when}
+        </Text>
+      ) : null}
     </View>
   );
 }

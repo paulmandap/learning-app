@@ -75,24 +75,133 @@ export const STRONG_ACCURACY = 0.7;
  * the browser, and two definitions of "today" in one app would disagree for
  * anyone not on UTC — visibly, since a streak and a due count sit side by side.
  */
-export function studyStreak(attemptTimes: number[], now: number): number {
+export function studyStreak(
+  attemptTimes: number[],
+  now: number,
+  /**
+   * Days forgiven with a streak restore (NOTES §47), as UTC day starts.
+   *
+   * They count towards the run and towards NOTHING ELSE. `study_days` is still
+   * the record of days actually studied, which is what Progress counts and what
+   * "days studied" means — a restored day that wrote itself in there would show
+   * as studying that never happened, and the number people are proudest of
+   * would be the one that was not true.
+   */
+  restoredDays: readonly number[] = [],
+): number {
   if (attemptTimes.length === 0) return 0;
 
   const days = new Set(attemptTimes.map((t) => startOfUtcDay(t)));
+  const covered = new Set([...days, ...restoredDays.map(startOfUtcDay)]);
   const today = startOfUtcDay(now);
 
   // Where the run ends: today if it has an answer, else yesterday, else nowhere.
+  // Read from `covered`, so a restored yesterday keeps the run alive; but a
+  // streak of nothing but restores is still nothing, which is why the empty
+  // check above is on the answers.
   let cursor: number;
-  if (days.has(today)) cursor = today;
-  else if (days.has(today - DAY_MS)) cursor = today - DAY_MS;
+  if (covered.has(today)) cursor = today;
+  else if (covered.has(today - DAY_MS)) cursor = today - DAY_MS;
   else return 0;
 
   let streak = 0;
-  while (days.has(cursor)) {
+  while (covered.has(cursor)) {
     streak++;
     cursor -= DAY_MS;
   }
   return streak;
+}
+
+// --------------------------------------------------------- streak restores --
+
+/**
+ * How long after a missed day it can still be restored.
+ *
+ * The owner: *"48 hours between each restore before it expires to start from 0
+ * again."* Measured from the START of the day that was missed, which in
+ * practice gives a whole day to notice: a run through day 10 still shows a live
+ * streak on day 11 (see the "today not yet studied" rule above), breaks on day
+ * 12, and can be restored for the rest of day 12.
+ */
+export const RESTORE_WINDOW_HOURS = 48;
+
+/** How many restores one account gets per calendar month. Mirrors `streak_restore_limit()` in 0024. */
+export const MONTHLY_STREAK_RESTORES = 5;
+
+export interface RestorableStreak {
+  /** The UTC day that was missed, as a day start. */
+  missedDay: number;
+  /** When the offer lapses. */
+  expiresAt: number;
+  /** The run that would come back, counting the restored day. */
+  streak: number;
+}
+
+/**
+ * Is there a broken streak that can still be brought back?
+ *
+ * Null when there is nothing to restore, and that covers four different cases
+ * on purpose — never studied, streak still alive, the break is too old, or the
+ * gap is more than one day. A screen only needs to know whether to offer the
+ * button.
+ *
+ * ## Only ONE missed day
+ *
+ * Two clear days is not a lapse, it is a stop, and restoring it would need two
+ * of the five anyway. `restorableStreak` refuses it rather than quietly
+ * forgiving the more recent day and leaving a run that still does not join up —
+ * which would spend a restore and show the same broken streak afterwards.
+ */
+export function restorableStreak(
+  attemptTimes: number[],
+  now: number,
+  restoredDays: readonly number[] = [],
+): RestorableStreak | null {
+  if (attemptTimes.length === 0) return null;
+  // Already alive: nothing to restore, including when an earlier restore is
+  // what is keeping it alive.
+  if (studyStreak(attemptTimes, now, restoredDays) > 0) return null;
+
+  const covered = new Set([
+    ...attemptTimes.map((t) => startOfUtcDay(t)),
+    ...restoredDays.map(startOfUtcDay),
+  ]);
+  const today = startOfUtcDay(now);
+  const last = Math.max(...covered);
+
+  // The day after the last one covered is the one that was missed.
+  const missedDay = last + DAY_MS;
+  // Exactly one day short of joining up: the missed day must be the day before
+  // yesterday-or-today's cursor. Anything longer is a stop, not a lapse.
+  if (missedDay + DAY_MS < today) return null;
+
+  const expiresAt = missedDay + RESTORE_WINDOW_HOURS * 60 * 60 * 1000;
+  if (now >= expiresAt) return null;
+
+  // What comes back: the run up to `last`, plus the day being forgiven.
+  let cursor = last;
+  let streak = 0;
+  while (covered.has(cursor)) {
+    streak++;
+    cursor -= DAY_MS;
+  }
+  return { missedDay, expiresAt, streak: streak + 1 };
+}
+
+/** A UTC day start as the `date` the database stores, e.g. "2026-09-19". */
+export function utcDayString(dayStart: number): string {
+  return new Date(dayStart).toISOString().slice(0, 10);
+}
+
+/** How many restores are left this month, from the days already restored. */
+export function restoresLeftThisMonth(restoredDays: readonly number[], now: number): number {
+  const month = new Date(now).getUTCMonth();
+  const year = new Date(now).getUTCFullYear();
+  const used = restoredDays.filter((d) => {
+    const date = new Date(d);
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month;
+  }).length;
+  return Math.max(MONTHLY_STREAK_RESTORES - used, 0);
 }
 
 // ---------------------------------------------------------------- activity --

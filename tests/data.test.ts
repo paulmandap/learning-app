@@ -309,10 +309,11 @@ describe('fetchDashboard', () => {
 
   it('answers the whole screen in one round of queries, and names them', async () => {
     // The screen is one batch by design. The guard is not the NUMBER — it went
-    // from five to six in Phase C when section trends arrived, deliberately —
-    // it is that the set is fixed and flat. A per-set or per-card lookup would
-    // show up here as a table appearing twice, which is how a dashboard starts
-    // costing a request per row.
+    // from five to six in Phase C when section trends arrived, and to seven in
+    // §47 when streak restores did, both deliberately — it is that the set is
+    // fixed and flat. A per-set or per-card lookup would show up here as a
+    // table appearing twice, which is how a dashboard starts costing a request
+    // per row.
     const { db, calls } = fakeDb(oneMissedCard);
     await fetchDashboard(NOON, db);
 
@@ -321,9 +322,65 @@ describe('fetchDashboard', () => {
       'documents',
       'item_stats',
       'review_state',
+      'streak_restores',
       'study_days',
       'study_items',
     ]);
+  });
+
+  it('counts a restored day towards the streak and towards nothing else', async () => {
+    // The whole reason restores are not written into study_days (NOTES §47):
+    // Progress counts days studied and total answers from that table, so a
+    // restored day appearing there would show as studying that never happened.
+    const answered = [
+      Date.UTC(2026, 8, 8),
+      Date.UTC(2026, 8, 9),
+      Date.UTC(2026, 8, 10),
+    ].map((d) => new Date(d).toISOString().slice(0, 10));
+
+    const { db } = fakeDb({
+      study_days: [rows(...answered.map((day) => ({ day, answers: 3 })))],
+      // Day 11 missed and forgiven; NOON below is day 12.
+      streak_restores: [rows({ restored_day: '2026-09-11' })],
+    });
+
+    const data = await fetchDashboard(Date.UTC(2026, 8, 12, 12), db);
+
+    expect(data.streak).toBe(4); // three answered, one forgiven
+    expect(data.totalAttempts).toBe(9); // only the real answers
+    expect(data.studiedToday).toBe(false);
+    // Nothing left to restore while the run is alive.
+    expect(data.restorable).toBeNull();
+    expect(data.restoresLeft).toBe(4);
+  });
+
+  it('offers a restore when the streak has just broken', async () => {
+    const answered = ['2026-09-08', '2026-09-09', '2026-09-10'];
+    const { db } = fakeDb({
+      study_days: [rows(...answered.map((day) => ({ day, answers: 1 })))],
+    });
+
+    // Day 12: day 11 was missed, and it is still inside the 48 hours.
+    const data = await fetchDashboard(Date.UTC(2026, 8, 12, 12), db);
+
+    expect(data.streak).toBe(0);
+    expect(data.restorable).not.toBeNull();
+    expect(data.restorable!.streak).toBe(4);
+    expect(data.restoresLeft).toBe(5);
+  });
+
+  it('still loads before migration 0024, with no restores', async () => {
+    // A missing table is a migration that has not been applied. The streak is
+    // then exactly what the answers say, which is the right answer — not an
+    // error, and not a Progress screen that will not load.
+    const { db } = fakeDb({
+      study_days: [rows({ day: '2026-09-11', answers: 1 }, { day: '2026-09-12', answers: 1 })],
+      streak_restores: [fails('Could not find the table', 'PGRST205')],
+    });
+
+    const data = await fetchDashboard(Date.UTC(2026, 8, 12, 12), db);
+    expect(data.streak).toBe(2);
+    expect(data.restorable).toBeNull();
   });
 
   it('bounds the one query that reads a table growing without limit', async () => {

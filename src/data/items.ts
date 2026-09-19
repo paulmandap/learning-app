@@ -294,8 +294,8 @@ export async function reportItem(itemId: string): Promise<void> {
 }
 
 /** One card, by id. Used by the rephrase pass, which starts from an attempt. */
-export async function getItem(itemId: string): Promise<StudyItem | null> {
-  const { data, error } = await supabase
+export async function getItem(itemId: string, db: Db = supabase): Promise<StudyItem | null> {
+  const { data, error } = await db
     .from('study_items')
     .select(COLUMNS)
     .eq('id', itemId)
@@ -303,6 +303,54 @@ export async function getItem(itemId: string): Promise<StudyItem | null> {
 
   if (error) throw new Error(error.message);
   return (data ?? null) as unknown as StudyItem | null;
+}
+
+/**
+ * Correct a card by hand, after it was made (NOTES §47).
+ *
+ * The owner: *"users shall be able to edit their flashcards' contents even if
+ * the flashcard is already generated."* Until now a wrong card could only be
+ * reported, which hides it — the whole card gone because one word was wrong.
+ *
+ * ## What it changes, and the three things it deliberately does not
+ *
+ *  - **`source_excerpt` stays.** It is the sentence from the notes the card was
+ *    grounded in, and it is still that sentence whatever the question now says.
+ *    Rewriting it would be claiming the notes say something they do not, and
+ *    "shows me where every answer came from" is the product.
+ *  - **`excerpt_verified` stays true.** It means exactly one thing (0001): the
+ *    validator matched the excerpt against the stored page text. That is still
+ *    what happened. It has never meant the card is correct.
+ *  - **`options` stay.** A quiz's wrong answers were written against the old
+ *    answer, so editing the answer SHOULD invalidate them — and it does, below.
+ *
+ * `variant_prompt` is cleared whenever the question changes: it is a rephrasing
+ * of a question that no longer exists, and `promptFor` prefers it, so leaving it
+ * would show the old wording back to the student who just rewrote it.
+ */
+export async function editCard(
+  itemId: string,
+  fields: { prompt: string; answer: string },
+  db: Db = supabase,
+): Promise<void> {
+  const prompt = fields.prompt.trim();
+  const answer = fields.answer.trim();
+  if (!prompt || !answer) throw new Error('A card needs a question and an answer.');
+
+  const current = await getItem(itemId, db);
+  if (!current) throw new Error('That card is not yours to change.');
+
+  const patch: Record<string, unknown> = { prompt, answer };
+  // A rephrasing of a question that no longer exists.
+  if (prompt !== current.prompt) patch.variant_prompt = null;
+  // Three wrong answers written against an answer that has changed are three
+  // wrong answers about nothing. Cleared, and the quiz writes new ones or
+  // stands the other cards' answers in (`choicesFor`), as it does for any card
+  // that has none.
+  if (answer !== current.answer) patch.options = null;
+
+  const { error } = await db.from('study_items').update(patch).eq('id', itemId);
+  if (error) throw new Error(error.message);
 }
 
 /** Store a rephrasing. The original `prompt` is deliberately left in place. */

@@ -1,7 +1,7 @@
 import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
-import { Body, Button, Card, LoadingState, Screen, TitleRow } from '../../src/ui/components';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Body, Button, Card, LoadingState, Notice, Screen, TitleRow } from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
 import { GrowBar } from '../../src/ui/charts';
 import { radius, space, type, useTheme } from '../../src/ui/theme';
@@ -13,6 +13,7 @@ import {
   forecastDayLabel,
   forecastShortLabel,
   MIN_SECTION_ATTEMPTS,
+  MONTHLY_STREAK_RESTORES,
   niceAxisTop,
   type SectionScore,
   type SectionTrend,
@@ -22,6 +23,7 @@ import { formatBytes, MAX_USER_BYTES } from '../../src/core/storage';
 import { PetStreak } from '../../src/ui/pet';
 import { toPetSpecies } from '../../src/core/pet';
 import { fetchProfile } from '../../src/data/profile';
+import { claimStreakRestore } from '../../src/data/streak';
 
 /** The plotting height of a column chart. Enough for a week to read at a glance. */
 const CHART_HEIGHT = 128;
@@ -139,16 +141,53 @@ export default function Progress() {
  * a pet makes that kind of pressure land harder rather than softer.
  */
 function Streak({ data }: { data: DashboardData }) {
-  const { streak, dueToday } = data;
+  const { streak, dueToday, restorable, restoresLeft } = data;
+  const queryClient = useQueryClient();
 
   // Shared query key with Settings and the study screens, so this is a cache
   // read rather than another round trip — and the pet falls back to the
   // default while it loads, never to an empty space where a pet should be.
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
 
+  const restore = useMutation({
+    mutationFn: () => claimStreakRestore(restorable!.missedDay),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+  });
+
   return (
     <Card>
       <PetStreak streak={streak} species={toPetSpecies(profile?.pet)} />
+
+      {/* The one place this screen is allowed to mention losing a streak, and
+          only because it has already happened (NOTES §47). The note above still
+          holds everywhere else: no "keep it up or lose it" before the fact.
+
+          Offered only while `restorableStreak` says there is something to bring
+          back — one missed day, inside 48 hours — so this is never on screen
+          speculatively, and never as a thing to worry about in advance. */}
+      {restorable ? (
+        <>
+          <Notice tone="warn">
+            You missed a day, so your {restorable.streak - 1}-day streak stopped. You can bring it
+            back until {restoreDeadline(restorable.expiresAt)}.
+          </Notice>
+          {restore.isError ? (
+            <Notice tone="error">{(restore.error as Error).message}</Notice>
+          ) : null}
+          <Button
+            label={`Restore my ${restorable.streak}-day streak`}
+            onPress={() => restore.mutate()}
+            busy={restore.isPending}
+            disabled={restoresLeft <= 0}
+          />
+          <Body muted>
+            {restoresLeft > 0
+              ? `${restoresLeft} of ${MONTHLY_STREAK_RESTORES} restores left this month. It counts the day towards your streak — it doesn't add a day of studying.`
+              : `You've used all ${MONTHLY_STREAK_RESTORES} restores this month. They come back at the start of next month.`}
+          </Body>
+        </>
+      ) : null}
+
       {dueToday > 0 ? (
         <Body>
           {dueToday} card{dueToday === 1 ? '' : 's'} ready for review.
@@ -158,6 +197,20 @@ function Streak({ data }: { data: DashboardData }) {
       )}
     </Card>
   );
+}
+
+/**
+ * When a restore stops being offered, said the way somebody would say it.
+ *
+ * A time on a clock, not "in 14 hours": the deadline is a fixed moment and a
+ * countdown would be wrong the moment the screen stopped re-rendering. Local
+ * time, because this is the one number here a person acts on.
+ */
+function restoreDeadline(expiresAt: number): string {
+  const when = new Date(expiresAt);
+  const time = when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const isTomorrow = when.getDate() !== new Date().getDate();
+  return isTomorrow ? `${time} tomorrow` : time;
 }
 
 /**

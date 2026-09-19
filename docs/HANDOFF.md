@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1094 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1150 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§46 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§47 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -57,7 +57,19 @@ under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 23; all applied and verified
+### Migrations — 24; **0024 waiting**, the rest applied and verified
+
+**0024 (folders, unsend-for-you, streak restores — NOTES §47) is written and
+waiting.** Additive apart from recreating `global_chat`, which it recreates in
+the same file, so `deploy-status.ts` correctly calls it safe to apply before or
+after its deploy. Until it is applied: sets list ungrouped (`listSets` retries
+without `folder_id`), "Unsend for me only" fails, and Progress offers no streak
+restore. Everything else is unaffected.
+
+```
+npx wrangler pages deploy dist --project-name=learning-app --branch=main
+```
+is the deploy. `deploy-status.ts` REPORTS — see §46.7 and the gotchas below.
 
 **0021, 0022 and 0023 were applied by the owner on 2026-09-16** and verified the
 same day (NOTES §46.7–10): isolation **61/61** against the live project in both
@@ -309,6 +321,28 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     would match no rows and return no error. The cost is stated rather than
     hidden: Report IS D7's second pass, and a wrong card in a shared set now has
     no way to be flagged.
+33. **A card can be CORRECTED as well as reported** (NOTES §47). `editCard`
+    changes the question and answer only: `source_excerpt` and
+    `excerpt_verified` are untouched — the excerpt is still the sentence the
+    card was grounded in, and the flag still means only that the validator
+    matched it (0001). It clears `variant_prompt` on a question change and
+    `options` on an answer change, because both were written against words that
+    no longer exist.
+34. **A restored streak is NEVER a row in `study_days`** (NOTES §47).
+    `study_days` is what happened; `streak_restores` is what was forgiven, and
+    `studyStreak` takes both. Writing a restore into `study_days` would make
+    "days studied" and total answers count a day nobody studied.
+35. **A folder is a label, not a container** (NOTES §47). `study_sets.folder_id`
+    is `on delete set null`: deleting a folder puts its sets back on the top
+    level and must never delete them. Tapping, not dragging — a gesture library
+    is a dependency, and dragging survives neither a screen reader nor a
+    keyboard. One level, one folder per set.
+36. **The push `Topic` header must be decodable base64url** (NOTES §47). Apple
+    refuses anything else with `400 BadWebPushTopic`; Google accepts it, so
+    every test in this repo passed while every reminder was refused for eight
+    days. `isValidPushTopic` enforces it and `sendPush` throws rather than
+    sending. **Never assert a header's value as a literal in a test** — that is
+    what pinned the broken one.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -449,8 +483,15 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   (NOTES §43.6). `document.querySelector('.ProseMirror').editor` is the Tiptap
   editor, for reading its state.
 
+**Push services do not agree with each other.** Google accepts things Apple
+refuses, and every probe and test in this repo talks to Google. A reminder that
+works in `push-probe.ts` is not a reminder that works on the owner's iPhone —
+the only proof is `send-reminders.ts` against the real device (NOTES §47).
+
 **Anything that fails silently will cost you a wrong conclusion.** It has now
-happened four times. Log fallbacks and best-effort failures.
+happened five times. Log fallbacks and best-effort failures — and when a
+scheduled workflow fails, make the reason reach the EMAIL (`::error::`), not
+just the log behind a sign-in.
 
 ## Credentials and operations
 

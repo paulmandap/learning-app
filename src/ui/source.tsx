@@ -28,6 +28,7 @@ export function SourcePanel({
   checkFlag,
   onOpenPage,
   onReport,
+  onEdit,
 }: {
   excerpt: string;
   /** Highlighted inside the excerpt when it can be located there. */
@@ -36,6 +37,15 @@ export function SourcePanel({
   checkFlag?: string | null;
   onOpenPage?: () => void;
   onReport?: () => void;
+  /**
+   * Correct this card's words (NOTES §47).
+   *
+   * Beside Report rather than instead of it, because they answer different
+   * questions: Report is for a card that should not exist, Edit is for one that
+   * should, with different words. Offering only Report is what made a card with
+   * one wrong word cost the whole card.
+   */
+  onEdit?: () => void;
 }) {
   const t = useTheme();
   const [open, setOpen] = useState(false);
@@ -85,6 +95,14 @@ export function SourcePanel({
             IS the second verification pass at this scale (D7), so it must stay
             reachable — but it is used on perhaps one card in fifty, and giving
             it the same visual weight as "Got it" was overstating it. */}
+        {onEdit ? (
+          <Pressable accessibilityRole="button" onPress={onEdit} hitSlop={8}>
+            <Text style={{ color: t.textMuted, fontSize: 13, textDecorationLine: 'underline' }}>
+              Edit
+            </Text>
+          </Pressable>
+        ) : null}
+
         {onReport ? (
           <Pressable accessibilityRole="button" onPress={onReport} hitSlop={8}>
             <Text style={{ color: t.textMuted, fontSize: 13, textDecorationLine: 'underline' }}>

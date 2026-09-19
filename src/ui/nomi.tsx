@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { Animated, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useIsFocused } from 'expo-router';
 import { NomiCharacter } from './nomi-character';
 import { GLYPH } from './glyphs';
@@ -7,6 +7,7 @@ import { useReducedMotion } from './motion';
 import { INPUT_FONT_SIZE, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
 import { Button } from './components';
 import { isSendable, MAX_PASTE_CHARS, type ChatTurn } from '../core/chat';
+import { appendEmoji, EMOJI_GROUPS } from '../core/emoji';
 import { actionCard, CARD_COUNTS, type NomiAction } from '../core/nomi-actions';
 import { revealedCount, revealSchedule, THINK_MS } from '../core/typing';
 import { nextGreetingDelay, type NomiState } from '../core/nomi-motion';
@@ -345,6 +346,7 @@ export function Composer({
   placeholder = 'Message Nomi',
   autoFocus,
   maxLength = MAX_PASTE_CHARS,
+  emoji = false,
 }: {
   onSend: (text: string) => void;
   busy: boolean;
@@ -361,9 +363,12 @@ export function Composer({
    * drift `src/ui/segment.tsx` was written to end.
    */
   maxLength?: number;
+  /** Offer the emoji shortcut beside the box. The global chat does; Nomi does not. */
+  emoji?: boolean;
 }) {
   const t = useTheme();
   const [draft, setDraft] = useState('');
+  const [picking, setPicking] = useState(false);
   // Up to a page of pasted notes: Nomi can make a set from them (NOTES §37).
   const canSend = !busy && isSendable(draft) && draft.trim().length <= maxLength;
 
@@ -375,7 +380,34 @@ export function Composer({
   };
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: space.sm }}>
+    <View style={{ gap: space.sm }}>
+      {/* Open above the box, not below it: below is where the keyboard is on a
+          phone, and a panel there would be covered the moment it opened. */}
+      {emoji && picking ? (
+        <EmojiPanel onPick={(e) => setDraft((d) => appendEmoji(d, e))} />
+      ) : null}
+
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: space.sm }}>
+      {emoji ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={picking ? 'Hide emoji' : 'Add an emoji'}
+          accessibilityState={{ expanded: picking }}
+          onPress={() => setPicking((p) => !p)}
+          style={{
+            width: TOUCH_TARGET,
+            height: TOUCH_TARGET,
+            borderRadius: TOUCH_TARGET / 2,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: picking ? t.card : 'transparent',
+            borderWidth: 1,
+            borderColor: picking ? t.accent : t.border,
+          }}
+        >
+          <Text style={{ fontSize: 20 }}>🙂</Text>
+        </Pressable>
+      ) : null}
       <TextInput
         value={draft}
         onChangeText={setDraft}
@@ -426,6 +458,60 @@ export function Composer({
           {GLYPH.send}
         </Text>
       </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The emoji shortcut (NOTES §47).
+ *
+ * For a laptop, where the keyboard has none. A phone's keyboard already offers
+ * every emoji there is, so this is a convenience there rather than the only
+ * way in — which is why it is a short grouped list and not a searchable picker
+ * with a library behind it (`src/core/emoji.ts` records that decision).
+ */
+function EmojiPanel({ onPick }: { onPick: (emoji: string) => void }) {
+  const t = useTheme();
+  return (
+    <View
+      style={{
+        maxHeight: 180,
+        padding: space.sm,
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: t.border,
+        backgroundColor: t.card,
+        gap: space.sm,
+      }}
+    >
+      <ScrollView keyboardShouldPersistTaps="handled">
+        {EMOJI_GROUPS.map((group) => (
+          <View key={group.label} style={{ gap: space.hair, marginBottom: space.sm }}>
+            <Text style={[type.caption, { color: t.textMuted }]}>{group.label}</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              {group.emoji.map((e) => (
+                <Pressable
+                  key={e}
+                  accessibilityRole="button"
+                  accessibilityLabel={e}
+                  onPress={() => onPick(e)}
+                  style={({ pressed }) => ({
+                    width: TOUCH_TARGET,
+                    height: TOUCH_TARGET,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: radius.sm,
+                    backgroundColor: pressed ? t.bg : 'transparent',
+                  })}
+                >
+                  <Text style={{ fontSize: 22 }}>{e}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ))}
+      </ScrollView>
     </View>
   );
 }
