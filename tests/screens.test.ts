@@ -308,7 +308,10 @@ describe('the existing assistant still works, and is now called Nomi', () => {
     // inside the Stack would remount it on every route change.
     const layout = read('app', '_layout.tsx');
     expect(layout).toContain('<StudyAssistant />');
-    expect(layout).toContain("segments[0] !== 'sign-in'");
+    // `path`, not `segments`, since NOTES §47.8 — the segments tuple cannot be
+    // indexed past 0 on a clean checkout. What is asserted is the rule, not the
+    // spelling: hidden on sign-in.
+    expect(layout).toContain("path[0] !== 'sign-in'");
   });
 
   it('the ✦ panel and Nomi’s screen are one conversation, not two AIs', () => {
@@ -320,7 +323,15 @@ describe('the existing assistant still works, and is now called Nomi', () => {
   });
 
   it('is hidden on Nomi’s own screen, where the whole screen is the conversation', () => {
-    expect(read('app', '_layout.tsx')).toContain("segments[0] !== 'nomi'");
+    expect(read('app', '_layout.tsx')).toContain("path[0] !== 'nomi'");
+  });
+
+  it('is hidden on Community, where it would land on the Send button', () => {
+    // The owner, on a phone: "the gemini icon or chatbot is interfering with
+    // the send button. it looks messy." Every other screen is a `Screen`, which
+    // reserves FLOAT_CLEARANCE; the chat cannot, because its composer is pinned
+    // rather than scrolled (NOTES §47.2).
+    expect(read('app', '_layout.tsx')).toContain("path[1] !== 'community'");
   });
 
   it('shows the same owl on both surfaces, and keeps ✦ on the floating button', () => {
@@ -519,6 +530,29 @@ describe("the owner's third round (NOTES §37)", () => {
       const source = code(read(...file));
       expect(source, file.join('/')).toContain('isMissingColumn(');
       expect(source, file.join('/')).not.toContain("'42703'");
+    }
+  });
+
+  it('no screen indexes useSegments() past the first segment', () => {
+    // ## The failure this exists for (NOTES §47.8)
+    //
+    // `useSegments()` is typed from the route types Expo Router generates into
+    // `.expo/types/`, and `.expo/` is gitignored. On a machine where the dev
+    // server has run, the type is a union deep enough to index; on a clean
+    // checkout it is `[string]`, and `segments[1]` is
+    //
+    //     TS2493: Tuple type '[string]' of length '1' has no element at index '1'
+    //
+    // So `npm run typecheck` passes here and fails in CI. That is the worst
+    // shape of error available: it passed locally, passed review, and broke the
+    // first run after the push.
+    //
+    // `segments[0]` is safe — a one-element tuple has one element — so the rule
+    // is only about going deeper. Read it as `readonly string[]` when you need
+    // to, which is what app/_layout.tsx does.
+    for (const file of ['_layout.tsx']) {
+      const source = code(read('app', file));
+      expect(source, file).not.toMatch(/\bsegments\[[1-9]\]/);
     }
   });
 

@@ -23,11 +23,21 @@ create table if not exists public.folders (
   id         uuid primary key default gen_random_uuid(),
   user_id    uuid not null references auth.users (id) on delete cascade,
   name       text not null check (length(btrim(name)) between 1 and 60),
-  created_at timestamptz not null default now(),
-  -- Two folders called "Anatomy" on one account is a naming mistake, not a
-  -- feature. Case-insensitive, so "anatomy" is the same mistake.
-  unique (user_id, lower(name))
+  created_at timestamptz not null default now()
 );
+
+-- Two folders called "Anatomy" on one account is a naming mistake, not a
+-- feature. Case-insensitive, so "anatomy" is the same mistake.
+--
+-- A unique INDEX, not a `unique (user_id, lower(name))` table constraint.
+-- Postgres takes only plain column names in a table constraint and answers
+-- `42601: syntax error at or near "("` on the `lower(` — which is exactly what
+-- the first version of this migration did when it was pasted (NOTES §47.8).
+-- An index is the only way to make a unique rule that is case-insensitive, and
+-- it enforces the same thing: the insert still fails with 23505, which
+-- `createFolder` already turns into "You already have a folder called …".
+create unique index if not exists folders_user_name_key
+  on public.folders (user_id, lower(name));
 
 create index if not exists folders_user_idx on public.folders (user_id, created_at);
 

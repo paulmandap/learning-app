@@ -7002,6 +7002,65 @@ which is why it is written down rather than left as a TODO nobody can act on.
 typecheck clean · **1150 tests**, 3 skipped · `expo export` · boot · scroll probe
 **7/7**. Apple verified live. **Migration 0024 not yet applied.**
 
+### 47.8 Two that got past a clean local run (2026-09-19)
+
+Both were mine, both were found by the owner within minutes of the handover, and
+both had a passing `npm test` and a passing `npm run typecheck` behind them.
+
+**1. `unique (user_id, lower(name))` is not valid SQL.**
+
+```
+ERROR: 42601: syntax error at or near "("
+LINE 29:   unique (user_id, lower(name))
+```
+
+A table constraint takes plain column names. An expression needs a unique
+INDEX, which enforces exactly the same thing and still raises 23505 — so
+`createFolder`'s "You already have a folder called …" is unchanged. Checked
+afterwards against the live database: **nothing** of 0024 had been applied, and
+`global_chat` was still 0023's, so the fixed file re-pastes from the top.
+
+`tests/folders.test.ts` asserted the broken line as a string, which is the same
+mistake §47.1 records for the push Topic: a test that pins the literal it is
+supposed to be checking will agree with it forever. It now asserts the index.
+
+**The general lesson, twice in one session: THIS PROJECT CANNOT RUN ITS OWN
+MIGRATIONS.** There is no Supabase management token, so SQL is checked by being
+pasted, and every syntax error is found by the owner rather than by CI. Read a
+new migration for what Postgres will take, not only for what it means.
+
+**2. `npm run typecheck` passes here and fails in CI, for a reason nothing local
+can see.**
+
+CI failed at the Typecheck step on the first push:
+
+```
+app/_layout.tsx(165,14): error TS2493:
+  Tuple type '[string]' of length '1' has no element at index '1'
+```
+
+`useSegments()` is typed from the route types Expo Router generates into
+`.expo/types/`, and **`.expo/` is gitignored**. On a machine where the dev
+server has run, that type is a union deep enough to index; on a clean checkout
+it is `[string]`, and `segments[1]` does not compile. HANDOFF already recorded
+the forward version of this — a new route breaks typecheck until `expo start`
+runs — and this is its mirror image, which is worse: it passes locally, passes
+review, and breaks the first run after the push.
+
+Reproduced by renaming `.expo` away and running typecheck, which is the cheapest
+way to see what CI sees:
+
+```powershell
+Rename-Item ".expo" ".expo-bak"; npm run typecheck; Rename-Item ".expo-bak" ".expo"
+```
+
+Fixed by reading the segments as `readonly string[]` for anything past index 0 —
+`segments[0]` is safe, since a one-element tuple has one element. Guarded in
+`tests/screens.test.ts`, which now fails any `segments[1]` or deeper in
+`app/**`, so the next person does not have to know this.
+
+typecheck clean **with and without `.expo/`** · **1152 tests**, 3 skipped.
+
 
 ## Sources
 

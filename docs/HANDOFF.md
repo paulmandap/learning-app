@@ -418,6 +418,22 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 - **Expo Router's typed routes only regenerate from the dev server.** Adding a
   route breaks typecheck until `npx expo start` runs briefly. `expo export` does
   not do it and `expo typegen` is not a command (NOTES §19.5).
+- **And the mirror image, which is worse: typecheck can PASS here and FAIL in
+  CI.** `.expo/` is gitignored, so on a clean checkout `useSegments()` is
+  `[string]` and `segments[1]` is TS2493 — while locally it is a union deep
+  enough to index (NOTES §47.8). Never index the segments past 0; read them as
+  `readonly string[]` instead (`tests/screens.test.ts` fails any that do). To
+  see what CI sees before pushing:
+  `Rename-Item ".expo" ".expo-bak"; npm run typecheck; Rename-Item ".expo-bak" ".expo"`
+- **A unique rule on an EXPRESSION needs a unique INDEX, not a table
+  constraint.** `unique (user_id, lower(name))` inside `create table` is
+  `42601: syntax error at or near "("`. It enforces the same thing and still
+  raises 23505 (NOTES §47.8).
+- **THIS PROJECT CANNOT RUN ITS OWN MIGRATIONS**, so every SQL syntax error is
+  found by the owner pasting it, never by CI. Read a new migration for what
+  Postgres will accept, not only for what it means. When a paste fails, check
+  what actually landed before re-pasting — the editor usually rolls back, but
+  "usually" is not evidence.
 - **Git Bash rewrites a lone `/` argument into a Windows path.** Run
   `scripts/screenshot.ts /` from PowerShell, or set `MSYS_NO_PATHCONV=1`.
 - **`npx` on Windows runs through a `.cmd` shim, and cmd.exe eats `>`.** Any

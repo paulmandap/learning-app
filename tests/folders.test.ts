@@ -55,7 +55,13 @@ describe('naming a folder', () => {
   });
 
   it('is case-insensitive because the database is', () => {
-    expect(MIGRATION).toContain('unique (user_id, lower(name))');
+    // A unique INDEX, not a table constraint. Postgres takes only plain column
+    // names in `unique (...)` and answers 42601 on the `lower(` — which is what
+    // the first version of this migration did when it was pasted (NOTES §47.8).
+    expect(MIGRATION).toMatch(
+      /create unique index[^;]*on public\.folders \(user_id, lower\(name\)\)/,
+    );
+    expect(MIGRATION).not.toMatch(/unique \(user_id, lower\(name\)\)\s*\n\s*\)/);
   });
 });
 

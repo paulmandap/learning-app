@@ -158,11 +158,19 @@ function RootNavigator() {
   // Little is lost: Community is where OTHER people are, Nomi is one tap away
   // in its own tab, and there is nothing on a stranger's set to ask Nomi about
   // — it cannot read their notes (NOTES §46).
+  //
+  // `path`, not `segments[1]`. `useSegments()` is typed from the route types
+  // the dev server generates into `.expo/types/`, which is gitignored — so on
+  // THIS machine it is a union deep enough to index, and on a clean checkout it
+  // is `[string]`, where `segments[1]` is TS2493 and the build fails. That is a
+  // typecheck error only CI can see, which is the worst kind: it passed here,
+  // passed review, and broke the first run after the push (NOTES §47.8).
+  const path = segments as readonly string[];
   const showAssistant =
     signedIn &&
-    segments[0] !== 'sign-in' &&
-    segments[0] !== 'nomi' &&
-    segments[1] !== 'community' &&
+    path[0] !== 'sign-in' &&
+    path[0] !== 'nomi' &&
+    path[1] !== 'community' &&
     !isPublicRoute(segments[0]);
 
   return (
