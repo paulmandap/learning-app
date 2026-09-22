@@ -28,6 +28,46 @@ export interface Folder {
   id: string;
   name: string;
   created_at: string;
+  /**
+   * The folder this one is inside, or null for a top-level folder (0025).
+   *
+   * Undefined — not null — before migration 0025, where the column does not
+   * exist. Everything here treats both as "top level", which is right: without
+   * the column nothing is nested.
+   */
+  parent_id?: string | null;
+}
+
+/**
+ * How deep folders go: a folder may hold subfolders, a subfolder may not.
+ *
+ * Enforced by `folders_shape_guard` in 0025, not by this constant — which is
+ * here so the app can say why rather than showing a database error. Deeper
+ * trees need a navigator, a breadcrumb and a move-to-parent gesture before they
+ * are usable, and the focused view this was built for shows ONE folder's
+ * contents, which is only coherent while contents cannot themselves be a tree.
+ */
+export const MAX_FOLDER_DEPTH = 2;
+
+/** Top-level folders only — the ones the Home list shows. */
+export function topLevel(folders: readonly Folder[]): Folder[] {
+  return folders.filter((f) => !f.parent_id);
+}
+
+/** The folders inside one folder. */
+export function childrenOf(folders: readonly Folder[], parentId: string): Folder[] {
+  return folders.filter((f) => f.parent_id === parentId);
+}
+
+/**
+ * May this folder take subfolders?
+ *
+ * False for one that is already inside another — that is the two-level rule,
+ * and offering "+ New folder in here" where the database will refuse it is
+ * worse than not offering it.
+ */
+export function canHoldFolders(folder: Folder): boolean {
+  return !folder.parent_id;
 }
 
 /** The longest a folder name may be. Mirrors the check in migration 0024. */
@@ -94,19 +134,50 @@ export function groupSets<T extends { id: string; folder_id?: string | null }>(
   folders: readonly Folder[],
 ): Grouping<T> {
   const byId = new Map(folders.map((f) => [f.id, f]));
-  const buckets = new Map<string, T[]>(folders.map((f) => [f.id, []]));
+  const tops = topLevel(folders);
+  const buckets = new Map<string, T[]>(tops.map((f) => [f.id, []]));
   const loose: T[] = [];
 
   for (const set of sets) {
-    const id = set.folder_id ?? null;
-    if (id !== null && byId.has(id)) buckets.get(id)!.push(set);
+    // Up to the top-level ancestor, so a set two deep is counted on the folder
+    // that is actually on screen (0025). Home shows top-level folders only; a
+    // subfolder's sets vanishing from every count would make "3 sets · 5 due"
+    // on the row a lie exactly when somebody has organised their work well.
+    const top = topAncestor(byId, set.folder_id ?? null);
+    if (top !== null && buckets.has(top)) buckets.get(top)!.push(set);
     else loose.push(set);
   }
 
   return {
-    folders: folders.map((folder) => ({ folder, sets: buckets.get(folder.id) ?? [] })),
+    folders: tops.map((folder) => ({ folder, sets: buckets.get(folder.id) ?? [] })),
     loose,
   };
+}
+
+/**
+ * The top-level folder a folder id sits under, or null.
+ *
+ * Walks up, bounded by the number of folders, so a cycle the database should
+ * never allow cannot hang the screen if one ever exists. `folders_shape_guard`
+ * in 0025 refuses to create one; this refuses to loop over one.
+ */
+function topAncestor(byId: Map<string, Folder>, id: string | null): string | null {
+  let current = id;
+  for (let hops = 0; hops <= byId.size && current !== null; hops++) {
+    const folder = byId.get(current);
+    if (!folder) return null; // a folder that has gone: the set shows as loose
+    if (!folder.parent_id) return folder.id;
+    current = folder.parent_id;
+  }
+  return null;
+}
+
+/** The sets directly in one folder — not counting its subfolders. */
+export function setsInFolder<T extends { folder_id?: string | null }>(
+  sets: readonly T[],
+  folderId: string,
+): T[] {
+  return sets.filter((s) => s.folder_id === folderId);
 }
 
 /**

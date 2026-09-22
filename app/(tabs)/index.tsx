@@ -23,7 +23,9 @@ import {
   MAX_FOLDER_NAME,
   type Folder,
 } from '../../src/core/folders';
-import { createFolder, listFolders } from '../../src/data/folders';
+import { createFolder, listFolders, moveSetToFolder } from '../../src/data/folders';
+import { FolderSheet } from '../../src/ui/folder-sheet';
+import { DraggableSet, DragToFolderProvider, DropFolder } from '../../src/ui/drag-to-folder';
 import { StatePanel } from '../../src/ui/states';
 import { NomiCard } from '../../src/ui/nomi';
 import { ContinueCard, GreetingHeader } from '../../src/ui/home';
@@ -83,23 +85,30 @@ export default function Home() {
   });
 
   /**
-   * Which folders are open, remembered on this device.
+   * The folder being looked at, on its own (NOTES §48).
    *
-   * Collapsed by default — that is the "cleaner look" — but an account where
-   * everything lives in folders would then open to a wall of shut doors on
-   * every visit. Kept in localStorage rather than in the database because it is
-   * a view preference, not data: it should differ between a phone and a laptop,
-   * and it must never be worth a round trip.
+   * This replaced a set of open ids remembered in localStorage: folders used to
+   * expand inline, and the owner asked for a focused view instead — *"instead
+   * of drop down, it will be focused there like some sort of pop out ... then
+   * the background is blurred so my focus is only at that folder."* One at a
+   * time, so there is nothing to remember between visits.
    */
-  const [openFolders, setOpenFolders] = useState<Set<string>>(() => readOpenFolders());
-  const toggleFolder = (id: string) =>
-    setOpenFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      writeOpenFolders(next);
-      return next;
-    });
+  const [openFolder, setOpenFolder] = useState<Folder | null>(null);
+  /** The name being typed for a new folder, or null when not making one. */
+  const [makingFolder, setMakingFolder] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  /** Dropping a set on a folder row. The undo is dragging it back out. */
+  async function moveSet(setId: string, folderId: string) {
+    try {
+      await moveSetToFolder(setId, folderId);
+      await queryClient.invalidateQueries({ queryKey: ['sets'] });
+    } catch {
+      // Best effort: a move that did not take leaves the set where it was, and
+      // the list refreshes to show that. An error card over a drag would land
+      // after the finger had already gone.
+    }
+  }
 
   // Both refetch when the app comes back to the front. An installed app is
   // reopened rather than relaunched, and "due today" is a statement about a day
@@ -190,44 +199,150 @@ export default function Home() {
         />
       ) : (
         <>
-          <SectionRow title="Your sets" action={<PillButton label="+ New set" onPress={newSet} />} />
+          {/* Both controls on the heading (NOTES §48). "+ New folder" was under
+              the list, which is where you end up looking for it last — the
+              owner: *"i don't like that new folder sits at the very bottom.
+              move it beside the `new set`."* */}
+          <SectionRow
+            title="Your sets"
+            action={
+              <View style={{ flexDirection: 'row', gap: space.sm }}>
+                <PillButton label="+ Folder" onPress={() => setMakingFolder('')} />
+                <PillButton label="+ New set" onPress={newSet} />
+              </View>
+            }
+          />
 
-          {/* Folders first, then everything in none (NOTES §47).
-              `groupSets` keeps the order it is given, so `dueFirst` still
-              decides what leads inside each folder. */}
-          {grouped.folders.map(({ folder, sets: inside }) => (
-            <FolderGroup
-              key={folder.id}
-              folder={folder}
-              open={openFolders.has(folder.id)}
-              onToggle={() => toggleFolder(folder.id)}
-              sets={inside}
-              statsBySet={statsBySet}
-              onOpenSet={(id) => router.push(`/set/${id}`)}
+          {makingFolder !== null ? (
+            <NewFolder
+              value={makingFolder}
+              onChange={setMakingFolder}
+              onDone={() => setMakingFolder(null)}
             />
-          ))}
+          ) : null}
 
-          {grouped.loose.map((set) => {
-            const stats = statsBySet.get(set.id);
-            const cards = set.cardCount ?? 0;
-            return (
-              <ListRow
-                key={set.id}
-                title={formatSetTitle(set.title)}
-                meta={describeSet(set, stats?.due ?? 0)}
-                progress={cards > 0 && stats ? stats.known / cards : undefined}
-                onPress={() => router.push(`/set/${set.id}`)}
-              />
-            );
-          })}
+          {/* Folders first, then everything in none. `groupSets` keeps the
+              order it is given, so `dueFirst` still decides what leads.
 
-          {/* Under the list it adds to, like "+ New set" is beside it. A folder
-              with nothing in it is still worth making — you make it, then move
-              sets into it — so this never depends on having sets to group. */}
-          <NewFolder folders={folders} />
+              Wrapped in the drag provider: a drag starts on a set row and ends
+              on a folder row, and neither can see the other. */}
+          <DragToFolderProvider onDrop={(setId, folderId) => void moveSet(setId, folderId)}>
+            {grouped.folders.map(({ folder, sets: inside }) => (
+              <DropFolder key={folder.id} folderId={folder.id}>
+                {(isOver) => (
+                  <FolderRow
+                    folder={folder}
+                    sets={inside}
+                    statsBySet={statsBySet}
+                    isOver={isOver}
+                    onPress={() => setOpenFolder(folder)}
+                  />
+                )}
+              </DropFolder>
+            ))}
+
+            {grouped.loose.map((set) => {
+              const stats = statsBySet.get(set.id);
+              const cards = set.cardCount ?? 0;
+              return (
+                <DraggableSet key={set.id} setId={set.id} disabled={folders.length === 0}>
+                  {(lifted, guard, overFolder) => (
+                    <ListRow
+                      title={formatSetTitle(set.title)}
+                      meta={
+                        lifted
+                          ? overFolder
+                            ? `Let go to put it in ${folders.find((f) => f.id === overFolder)?.name ?? 'this folder'}`
+                            : 'Drop it on a folder'
+                          : describeSet(set, stats?.due ?? 0)
+                      }
+                      progress={cards > 0 && stats ? stats.known / cards : undefined}
+                      // Guarded: letting go of a drag often lands on the row it
+                      // started from, and that must not open the set.
+                      onPress={guard(() => router.push(`/set/${set.id}`))}
+                    />
+                  )}
+                </DraggableSet>
+              );
+            })}
+          </DragToFolderProvider>
         </>
       )}
+
+      {/* The folder, with everything else out of the way. One sheet at a time:
+          opening a subfolder replaces this one rather than stacking, which is
+          what keeps two levels feeling like two levels. */}
+      {openFolder ? (
+        <FolderSheet
+          folder={openFolder}
+          folders={folders}
+          sets={sets}
+          statsBySet={statsBySet}
+          onClose={() => setOpenFolder(null)}
+          onOpenSet={(id) => {
+            setOpenFolder(null);
+            router.push(`/set/${id}`);
+          }}
+          onOpenFolder={setOpenFolder}
+        />
+      ) : null}
     </Screen>
+  );
+}
+
+/**
+ * A folder on the home list: a row that opens it, and a target to drop on.
+ *
+ * Counts its WHOLE tree — `groupSets` buckets a subfolder's sets onto their
+ * top-level ancestor — so collapsing a folder hides the list and never the fact
+ * that there is work inside it.
+ */
+function FolderRow({
+  folder,
+  sets,
+  statsBySet,
+  isOver,
+  onPress,
+}: {
+  folder: Folder;
+  sets: StudySet[];
+  statsBySet: Map<string, { due: number; known: number }>;
+  isOver: boolean;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  const due = sets.reduce((n, s) => n + (statsBySet.get(s.id)?.due ?? 0), 0);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${folder.name}, ${folderMeta(sets.length, due)}`}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.sm,
+        padding: space.md,
+        borderRadius: radius.md,
+        // Lit up while a set is held over it, which is the only thing telling
+        // somebody mid-drag that letting go will do what they want.
+        borderWidth: isOver ? 2 : 1,
+        borderColor: isOver ? t.accent : t.border,
+        backgroundColor: isOver ? t.card : t.card,
+        opacity: pressed ? 0.7 : 1,
+      })}
+    >
+      <Text style={{ fontSize: 18 }}>📁</Text>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={[type.bodyStrong, { color: t.text }]} numberOfLines={1}>
+          {folder.name}
+        </Text>
+        <Text style={[type.caption, { color: isOver ? t.accent : t.textMuted }]}>
+          {isOver ? 'Drop it in here' : folderMeta(sets.length, due)}
+        </Text>
+      </View>
+      <Text style={{ color: t.textMuted, fontSize: 22 }}>{GLYPH.forward}</Text>
+    </Pressable>
   );
 }
 
@@ -325,10 +440,17 @@ function FolderGroup({
   );
 }
 
-/** Making one. Closed until asked for, so Home is not a form. */
-function NewFolder({ folders }: { folders: Folder[] }) {
+/** Making one. Opened from the heading, so Home is not a form until asked. */
+function NewFolder({
+  value,
+  onChange,
+  onDone,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onDone: () => void;
+}) {
   const queryClient = useQueryClient();
-  const [name, setName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -336,9 +458,9 @@ function NewFolder({ folders }: { folders: Folder[] }) {
     setSaving(true);
     setError(null);
     try {
-      await createFolder(name ?? '');
+      await createFolder(value);
       await queryClient.invalidateQueries({ queryKey: ['folders'] });
-      setName(null);
+      onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't make that folder.");
     } finally {
@@ -346,30 +468,20 @@ function NewFolder({ folders }: { folders: Folder[] }) {
     }
   }
 
-  if (name === null) {
-    return (
-      <View style={{ alignItems: 'flex-start' }}>
-        <PillButton label="+ New folder" onPress={() => setName('')} />
-      </View>
-    );
-  }
-
   return (
     <Card>
       <Field
         label="Folder name"
-        value={name}
-        onChangeText={setName}
+        value={value}
+        onChangeText={onChange}
         placeholder="Anatomy"
         autoCapitalize="sentences"
         maxLength={MAX_FOLDER_NAME}
       />
       {error ? <Notice tone="error">{error}</Notice> : null}
       <Button label="Make the folder" onPress={save} busy={saving} />
-      <Button label="Cancel" variant="secondary" onPress={() => setName(null)} disabled={saving} />
-      {folders.length > 0 ? (
-        <Body muted>Move a set into it from the ••• menu on the set.</Body>
-      ) : null}
+      <Button label="Cancel" variant="secondary" onPress={onDone} disabled={saving} />
+      <Body muted>Then hold a set and drag it in, or use "Move to folder" on the set.</Body>
     </Card>
   );
 }

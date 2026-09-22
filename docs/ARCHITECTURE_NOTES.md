@@ -7062,6 +7062,164 @@ Fixed by reading the segments as `readonly string[]` for anything past index 0 �
 typecheck clean **with and without `.expo/`** · **1152 tests**, 3 skipped.
 
 
+## 48. Round twelve: folders you can hold and drag, subfolders, and a chat you can react in (2026-09-19 → 22)
+
+The owner, with four Messenger screenshots. Two requests reversed decisions this
+project had made on evidence, and both were his to reverse:
+
+- **Drag and drop**, declined in §47.5 for needing a gesture library. Built
+  without one.
+- **Subfolders**, declined in §47.5 as "a file manager rather than a study
+  app". Built at two levels, with the shape enforced by the database.
+
+### 48.1 "+ Folder" beside "+ New set"
+
+*"i don't like that new folder sits at the very bottom. move it beside the
+`new set`."* Both are compact PillButtons, so Continue keeps the screen's only
+filled button (`tests/screens.test.ts` asserts the weight, not the layout).
+
+### 48.2 A folder opens on its own, with everything else blurred
+
+*"instead of drop down, it will be focused there like some sort of pop out ...
+then the background is blurred so my focus is only at that folder. once that
+happens, the add subfolder will work."*
+
+`src/ui/folder-sheet.tsx`. The drop-down put a folder's sets inline, which read
+as the same list with more indentation and left nowhere to put anything ABOUT
+the folder — rename, delete, add a folder inside. Here the folder is the screen
+for as long as it is open.
+
+`backdrop-filter: blur(10px)` is web CSS with no react-native equivalent, so the
+dark scrim carries the effect and the blur refines it. **Measured in the built
+app: the computed style on the scrim is `blur(10px)`.** Photographed, the ✦ sat
+on top of the scrim un-dimmed, so the sheet sits one layer above
+`elevation.float`.
+
+### 48.3 Subfolders — two levels, enforced by the database
+
+`folders.parent_id`, `on delete set null` for the same reason as `folder_id`:
+deleting a folder must never delete what is inside it. `folders_shape_guard`
+(0025) refuses a folder inside itself, a third level, and moving a folder that
+already holds folders into another. The app offers "+ Folder inside this one"
+only where the database will accept it (`canHoldFolders`).
+
+Home shows top-level folders only, and `groupSets` buckets a subfolder's sets
+onto their top-level ancestor, so "3 sets · 5 due" on the row counts the whole
+tree. The walk up is bounded by the number of folders, so a loop the database
+should never allow cannot hang the screen if one ever existed.
+
+### 48.4 Hold and drag, without a gesture library
+
+*"click and hold to drag ... functioning for both using mouse or using fingers.
+for mobile, add a 1 second delay ... there should be a 1 vibrate for haptics."*
+
+`src/ui/drag-to-folder.tsx`, on DOM pointer events. **Three bugs, and none of
+them would have been found by a test that did not move a real pointer:**
+
+1. **A mouse could never have started a drag.** The first version armed the
+   hold in `onTouchStart`; a mouse fires no touch events. Found by re-reading.
+2. **A finger would have got a quarter-second, not a second.** The delay was
+   chosen by `Platform.OS === 'web'`, and this app is a PWA — on the owner's
+   iPhone `Platform.OS` IS 'web'. Now chosen by the pressing event's
+   `pointerType`: 250ms for a mouse, 1000ms for a finger or pen. Found by
+   re-reading.
+3. **Every set was dropped one frame after it lifted.** The lift changes the
+   drag context; `finish` depended on the context; the unmount effect was keyed
+   on `finish`. React runs an effect's cleanup whenever its dependencies change,
+   not only on unmount — so the lift ran the "unmount" cleanup and ended the
+   drag. Home's inline `onDrop` would have done the same on every refetch.
+   Measured: held 700ms, never lifted. Everything now reads through refs and the
+   callbacks are stable. **Found only by `scripts/drag-probe.ts`.**
+
+The probe drives Chrome's own input API (`Input.dispatchMouseEvent`,
+`Input.dispatchTouchEvent`), so the page gets trusted events with the right
+`pointerType`, and it asks the DATABASE whether the set moved:
+
+```
+PASS  mouse: the carried set says where it will land
+PASS  mouse: held 400ms and dropped on the folder
+PASS  finger: held only 500ms, then moved        (must NOT move — it is a scroll)
+PASS  finger: held 1200ms and dropped on the folder
+PASS  mouse: a plain click opens the set
+PASS  mouse: and moves nothing
+```
+
+Three consecutive runs, 18 of 18. Two things about the probe itself:
+
+- **Its first run printed "all passed" having run no checks.** It threw before
+  the first one and the `finally` counted zero failures. It now fails unless all
+  six ran.
+- **It failed the mouse case once in four runs, against a working app.** Home
+  settles in stages — Nomi types its line, the counts arrive — and a position
+  measured before that is not where the set is a moment later. It now waits
+  until nothing on the page is still moving.
+
+What the carried card looks like took three photographs. At 95% opacity the
+folder's words printed through it; at 100% they still did, because the row
+inside is a Pressable drawn at 0.7 while pressed and the pointer is down the
+whole time. It now has a solid backing in the row's shape, is drawn a touch
+smaller, and **says where it will land** — "Let go to put it in Anatomy" —
+because it covers the very folder row whose highlight would otherwise say so.
+
+Scrolling is untouched until the lift: moving more than 8 points during the hold
+cancels it and the list scrolls as it always did. Only after the lift does a
+non-passive `touchmove` listener refuse the page's scroll, and it is removed at
+the drop. A long press on Android opens the context menu at about half a second;
+it is refused only while a hold or drag is under way.
+
+**The buzz does not fire on an iPhone.** iOS Safari has never implemented the
+Vibration API (§45 measured it, `src/ui/feedback.ts`), and the switch-label
+trick that works for taps does not work here — it needs a trusted click, and a
+timer cannot make one. On Android it buzzes once; on the owner's iPhone the lift
+itself — the card shrinking, shadowed, following the finger — is the signal.
+
+### 48.5 Reactions, and a menu that appears on hover or a long press
+
+*"when my mouse is not hovering that chat, nothing appears. once i hover, those
+3 dots, reply, and react will appear. for mobile, when click and hold, that will
+appear."*
+
+`src/ui/message-actions.tsx`. On a pointer the controls appear beside the bubble
+on hover and are kept mounted at opacity 0 rather than unmounted, so a message
+does not shift sideways as the mouse passes. On a touch screen a 450ms long
+press opens the same choices as a sheet — shorter than the drag's second,
+because opening a menu is not destructive and a menu that takes a second to
+arrive feels broken.
+
+Proving the hover needed a real mouse: a dispatched `pointerenter` does not
+bubble, so React cannot synthesise `onPointerEnter` from it. `Input.dispatchMouseEvent`
+did it first time.
+
+The six reactions he named, in Messenger's order, plus "+" for any emoji in
+`EMOJI_GROUPS`. One chip per distinct emoji with a count. **Who reacted is
+visible**, unlike a star on a set (§46): a reaction is a reply, in a room where
+everything else is attributed, and an anonymous 😠 would be worse than a named
+one.
+
+**Reply was not built.** It is in the screenshots and never in the words, and it
+is not a menu item but a threading model — a parent on the message, a quoted
+stub above the bubble, and a decision about a reply whose parent is unsent.
+
+### 48.6 Editing, for twenty minutes, and never silently
+
+0021 refused editing outright: *"a message somebody has already read, silently
+changed afterwards, is worse than one that visibly went away."* That still holds
+and this does not break it, because the edit is not silent — `edited_at` is set
+and "edited" shows beside the time.
+
+Through `edit_global_message` rather than an update policy, because an UPDATE
+could also set `created_at` and make the twenty minutes last for ever. There is
+no update policy at all; the isolation test asserts a direct update reaches no
+row. The first draft of the function declared a variable `body` and ran
+`set body = body` — an ambiguous reference plpgsql refuses by default, which
+would have failed on the first edit anybody tried with every test passing.
+Caught reading it back.
+
+typecheck clean with and without `.expo/` · **1177 tests**, 3 skipped · drag
+probe **18/18** over three runs · isolation **61/61** · scroll probe **7/7**.
+**Migration 0025 not yet applied.**
+
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)

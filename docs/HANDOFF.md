@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1150 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1177 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§47 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§48 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -57,14 +57,16 @@ under 800px and a rail beside the content above it. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 24; **0024 waiting**, the rest applied and verified
+### Migrations — 25; **0025 waiting**, the rest applied and verified
 
-**0024 (folders, unsend-for-you, streak restores — NOTES §47) is written and
-waiting.** Additive apart from recreating `global_chat`, which it recreates in
-the same file, so `deploy-status.ts` correctly calls it safe to apply before or
-after its deploy. Until it is applied: sets list ungrouped (`listSets` retries
-without `folder_id`), "Unsend for me only" fails, and Progress offers no streak
-restore. Everything else is unaffected.
+**0024 was applied on 2026-09-19** (after one failed paste — NOTES §47.8).
+
+**0025 (subfolders, reactions, editing — NOTES §48) is written and waiting.**
+Additive apart from recreating `global_chat` in the same file. Until it is
+applied: no subfolders (`listFolders` retries without `parent_id`), reacting
+says "not switched on yet", Edit is refused, and `scripts/isolation-test.ts`
+reports `---- reactions and edits — not present`. Drag-and-drop, the focused
+folder sheet and the hover/long-press menu all work without it.
 
 ```
 npx wrangler pages deploy dist --project-name=learning-app --branch=main
@@ -333,16 +335,28 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     `studyStreak` takes both. Writing a restore into `study_days` would make
     "days studied" and total answers count a day nobody studied.
 35. **A folder is a label, not a container** (NOTES §47). `study_sets.folder_id`
-    is `on delete set null`: deleting a folder puts its sets back on the top
-    level and must never delete them. Tapping, not dragging — a gesture library
-    is a dependency, and dragging survives neither a screen reader nor a
-    keyboard. One level, one folder per set.
+    and `folders.parent_id` are both `on delete set null`: deleting a folder
+    must never delete what is inside it. **Two levels at most**, enforced by
+    `folders_shape_guard` (0025), not by the app. §47 declined subfolders and
+    drag-and-drop; the owner asked for both in §48 and both were built — drag
+    with no gesture library, and "Move to folder" kept as the way in for a
+    keyboard or a screen reader.
 36. **The push `Topic` header must be decodable base64url** (NOTES §47). Apple
     refuses anything else with `400 BadWebPushTopic`; Google accepts it, so
     every test in this repo passed while every reminder was refused for eight
     days. `isValidPushTopic` enforces it and `sendPush` throws rather than
     sending. **Never assert a header's value as a literal in a test** — that is
     what pinned the broken one.
+37. **The drag's hold is chosen by `pointerType`, never by `Platform.OS`**
+    (NOTES §48). This is a PWA, so on an iPhone `Platform.OS` is 'web'.
+    1000ms for a finger, 250ms for a mouse. `scripts/drag-probe.ts` is the only
+    thing that can prove the drag works — it moves a real mouse and a real
+    finger through Chrome's input API and asks the database. Run it after
+    touching anything in `src/ui/drag-to-folder.tsx`.
+38. **An edited message is always marked edited** (NOTES §48). 0021's rule
+    against silent edits stands; editing is allowed for 20 minutes only because
+    it is visible. Through `edit_global_message` only — there is no update
+    policy on `global_messages`, so `created_at` cannot be moved.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -568,6 +582,7 @@ npx tsx --env-file=.env scripts/reminders-e2e-probe.ts [--out <dir>]    # on fro
 npx tsx --env-file=.env scripts/finish-lines-probe.ts [--out <dir>]     # what Nomi says after 3/3, 1/3 twice and 0/3, photographed
 npx tsx --env-file=.env scripts/community-probe.ts [--out <dir>]        # a shared set seen by the OTHER person, in the built app: listed, read-only, dealt, chatted. NEEDS 0021. NEVER RUN YET
 npx tsx --env-file=.env scripts/scroll-probe.ts --height 420            # 7 screens now, including Community's Chat pane — the one layout that is not a `Screen`
+npx tsx --env-file=.env scripts/drag-probe.ts [--shot <file.png>]       # hold a set and drag it into a folder, with a real mouse and a real finger; asks the database whether it moved
 ```
 
 **`openPage` can be somebody else now.** `openPage({ as: { email, password } })`

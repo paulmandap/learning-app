@@ -2,7 +2,16 @@ import { useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, Label, LoadingState, Notice, Title } from '../../src/ui/components';
+import {
+  Body,
+  Button,
+  Card,
+  Field,
+  Label,
+  LoadingState,
+  Notice,
+  Title,
+} from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
 import { Segment } from '../../src/ui/segment';
 import { Composer } from '../../src/ui/nomi';
@@ -11,6 +20,8 @@ import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from '
 import {
   authorName,
   browseOrder,
+  canEdit,
+  EDIT_WINDOW_MINUTES,
   MESSAGE_MAX_LENGTH,
   rankSets,
   starLabel,
@@ -18,14 +29,24 @@ import {
   type ChatMessage,
   type PublicSet,
 } from '../../src/core/community';
+import { tallyReactions, type Reaction, type ReactionTally } from '../../src/core/emoji';
+import {
+  HoverActions,
+  MessageSheet,
+  ReactionChips,
+  useLongPress,
+} from '../../src/ui/message-actions';
 import { describeWhen } from '../../src/core/chat';
 import {
   CommunityUnavailableError,
   deleteMessageForEveryone,
+  editMessage,
   hideMessage,
   listMessages,
   listPublicSets,
+  listReactions,
   myStars,
+  react,
   sendMessage,
   star,
   unstar,
@@ -342,14 +363,53 @@ function ChatPane() {
    * confirmation — an "are you sure?" on a one-tap action would be one more tap
    * to learn to dismiss without reading.
    */
-  const [unsending, setUnsending] = useState<ChatMessage | null>(null);
+  const [acting, setActing] = useState<ChatMessage | null>(null);
+  /** The message being edited, as a draft (NOTES §48). */
+  const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
+
+  const { data: reactions = [] } = useQuery({
+    queryKey: ['chat-reactions'],
+    queryFn: () => listReactions(),
+    refetchInterval: CHAT_POLL_MS,
+  });
+  const reactionsByMessage = useMemo(() => {
+    const map = new Map<string, Reaction[]>();
+    for (const r of reactions) {
+      const list = map.get(r.message_id) ?? [];
+      list.push(r);
+      map.set(r.message_id, list);
+    }
+    return map;
+  }, [reactions]);
+
+  const refreshChat = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['global-chat'] });
+    await queryClient.invalidateQueries({ queryKey: ['chat-reactions'] });
+  };
 
   const unsend = useMutation({
     mutationFn: ({ id, everyone }: { id: string; everyone: boolean }) =>
       everyone ? deleteMessageForEveryone(id) : hideMessage(id),
     onSuccess: async () => {
-      setUnsending(null);
-      await queryClient.invalidateQueries({ queryKey: ['global-chat'] });
+      setActing(null);
+      await refreshChat();
+    },
+  });
+
+  const toggleReaction = useMutation({
+    mutationFn: ({ id, emoji, on }: { id: string; emoji: string; on: boolean }) =>
+      react(id, emoji, on),
+    onSuccess: async () => {
+      setActing(null);
+      await refreshChat();
+    },
+  });
+
+  const saveEdit = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: string }) => editMessage(id, body),
+    onSuccess: async () => {
+      setEditing(null);
+      await refreshChat();
     },
   });
 
@@ -392,20 +452,77 @@ function ChatPane() {
                 // messenger groups them.
                 startsRun={messages[i - 1]?.author_id !== m.author_id}
                 endsRun={messages[i + 1]?.author_id !== m.author_id}
-                onUnsend={() => setUnsending(m)}
+                edited={!!m.edited_at}
+                canEdit={canEdit(m, myId, now)}
+                tallies={tallyReactions(reactionsByMessage.get(m.id) ?? [], myId)}
+                onAct={() => setActing(m)}
+                onToggleReaction={(emoji, on) => toggleReaction.mutate({ id: m.id, emoji, on })}
               />
             ))
           )}
         </ScrollView>
 
-        {unsending ? (
-          <UnsendChoice
-            mine={unsending.author_id === myId}
-            busy={unsend.isPending}
-            error={unsend.isError ? (unsend.error as Error).message : null}
-            onPick={(everyone) => unsend.mutate({ id: unsending.id, everyone })}
-            onCancel={() => setUnsending(null)}
+        {/* Everything you can do to a message, from a long press on a phone or
+            the ⋯ on a laptop (NOTES §48). */}
+        {acting ? (
+          <MessageSheet
+            mine={acting.author_id === myId}
+            canEdit={canEdit(acting, myId, Date.now())}
+            editWindowMinutes={EDIT_WINDOW_MINUTES}
+            busy={unsend.isPending || toggleReaction.isPending}
+            error={
+              unsend.isError
+                ? (unsend.error as Error).message
+                : toggleReaction.isError
+                  ? (toggleReaction.error as Error).message
+                  : null
+            }
+            onReact={(emoji) => {
+              const mineAlready = (reactionsByMessage.get(acting.id) ?? []).some(
+                (r) => r.user_id === myId && r.emoji === emoji,
+              );
+              toggleReaction.mutate({ id: acting.id, emoji, on: !mineAlready });
+            }}
+            onEdit={() => {
+              setEditing({ id: acting.id, body: acting.body });
+              setActing(null);
+            }}
+            onUnsendEveryone={() => unsend.mutate({ id: acting.id, everyone: true })}
+            onUnsendMe={() => unsend.mutate({ id: acting.id, everyone: false })}
+            onClose={() => setActing(null)}
           />
+        ) : null}
+
+        {/* Editing happens in the message list rather than in the sheet: you
+            need to see the conversation around what you are rewording. */}
+        {editing ? (
+          <View style={{ paddingBottom: space.sm }}>
+            <Card>
+              <Label>Edit your message</Label>
+              <Field
+                label="Message"
+                value={editing.body}
+                onChangeText={(body) => setEditing((e) => (e ? { ...e, body } : e))}
+                autoCapitalize="sentences"
+                maxLength={MESSAGE_MAX_LENGTH}
+              />
+              {saveEdit.isError ? (
+                <Notice tone="error">{(saveEdit.error as Error).message}</Notice>
+              ) : null}
+              <Button
+                label="Save"
+                onPress={() => saveEdit.mutate(editing)}
+                busy={saveEdit.isPending}
+              />
+              <Button
+                label="Cancel"
+                variant="secondary"
+                onPress={() => setEditing(null)}
+                disabled={saveEdit.isPending}
+              />
+              <Body muted>Everyone will see it marked as edited.</Body>
+            </Card>
+          </View>
         ) : null}
 
         {send.isError ? (
@@ -517,7 +634,11 @@ function Message({
   mine,
   startsRun,
   endsRun,
-  onUnsend,
+  edited,
+  canEdit: editable,
+  tallies,
+  onAct,
+  onToggleReaction,
 }: {
   name: string;
   avatar: string | null;
@@ -527,10 +648,25 @@ function Message({
   mine: boolean;
   startsRun: boolean;
   endsRun: boolean;
-  onUnsend: () => void;
+  edited: boolean;
+  canEdit: boolean;
+  tallies: ReactionTally[];
+  onAct: () => void;
+  onToggleReaction: (emoji: string, on: boolean) => void;
 }) {
   const t = useTheme();
   const AVATAR = 28;
+
+  /**
+   * Hover, on a pointer device only.
+   *
+   * `onPointerEnter` exists on react-native-web and is inert on a touch screen,
+   * which is exactly right: a phone has no hover, and the long press below is
+   * its way in. Kept on the whole row rather than on the buttons, or the
+   * controls would vanish as the mouse travelled towards them.
+   */
+  const [hovered, setHovered] = useState(false);
+  const longPress = useLongPress(onAct);
 
   return (
     <View
@@ -550,10 +686,19 @@ function Message({
         </Text>
       ) : null}
 
-      {/* The bubble and the face on one row, bottom-aligned, so the face sits
-          beside the message rather than beside the time under it. The time is
-          outside this row for exactly that reason. */}
-      <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'flex-end', maxWidth: '86%' }}>
+      {/* The bubble, the face and the hover controls on one row, bottom-aligned
+          so the face sits beside the message rather than beside the time under
+          it. The time is outside this row for exactly that reason. */}
+      <View
+        style={{
+          flexDirection: mine ? 'row-reverse' : 'row',
+          gap: space.sm,
+          alignItems: 'flex-end',
+          maxWidth: '92%',
+        }}
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
+      >
         {/* The face goes on the LAST bubble of a run, where a messenger puts
             it, with a spacer holding the line on the others. */}
         {!mine ? (
@@ -566,8 +711,15 @@ function Message({
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${mine ? 'You' : name} said ${body}. ${when}. Tap to unsend.`}
-          onPress={onUnsend}
+          accessibilityLabel={`${mine ? 'You' : name} said ${body}. ${when}${
+            edited ? ', edited' : ''
+          }. Hold for reactions and more.`}
+          // A long press on a touch screen; the ⋯ beside it on a pointer. The
+          // bubble is no longer a one-tap unsend — the owner unsent something by
+          // accident that way (NOTES §47), and this is the fix he asked for.
+          onLongPress={onAct}
+          delayLongPress={450}
+          {...longPress}
           style={({ pressed }) => ({
             flexShrink: 1,
             paddingHorizontal: space.md,
@@ -588,14 +740,26 @@ function Message({
             {body}
           </Text>
         </Pressable>
+
+        <HoverActions
+          visible={hovered}
+          mine={mine}
+          canEdit={editable}
+          onPick={onAct}
+        />
       </View>
+
+      <ReactionChips tallies={tallies} alignEnd={mine} onToggle={onToggleReaction} />
 
       {/* Once per run, not once per message. Six timestamps down a page of one
           person talking is six times as much furniture as the information in
-          it deserves. */}
+          it deserves. "edited" rides along with it, which is what keeps editing
+          honest — 0021 refused silent edits, and this is the mark that makes
+          them not silent (NOTES §48). */}
       {endsRun ? (
         <Text style={[type.caption, { color: t.textMuted, marginLeft: mine ? 0 : AVATAR + space.sm }]}>
           {when}
+          {edited ? ' · edited' : ''}
         </Text>
       ) : null}
     </View>

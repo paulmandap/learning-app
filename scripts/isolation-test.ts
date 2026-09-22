@@ -817,6 +817,82 @@ async function main() {
       else ok('global_messages delete', "A's message survived B's delete");
     }
 
+    // ---- reactions and edits (0025) ----
+    // A reaction is readable by everyone on purpose — it is a reply, in a room
+    // where everything is attributed — so what is asserted is that nobody can
+    // react, un-react or edit IN SOMEBODY ELSE'S NAME.
+    const reactionsProbe = await B.client.from('message_reactions').select('message_id').limit(1);
+    const has0025 = !(reactionsProbe.error && isMissingRelation(reactionsProbe.error));
+    const aMessage = await A.client
+      .from('global_messages')
+      .select('id')
+      .eq('body', CHAT_PROBE_A)
+      .maybeSingle();
+    const aMessageId = (aMessage.data as { id: string } | null)?.id ?? null;
+
+    if (!has0025) {
+      console.log('  ----  reactions and edits — not present (migration 0025), not checked');
+    } else if (aMessageId) {
+      const bReacts = await B.client
+        .from('message_reactions')
+        .insert({ message_id: aMessageId, user_id: B.userId, emoji: '❤️' });
+      if (bReacts.error) fail('message_reactions insert', `B cannot react: ${bReacts.error.message}`);
+      else ok('message_reactions insert', "B reacted to A's message");
+
+      const asA = await B.client
+        .from('message_reactions')
+        .insert({ message_id: aMessageId, user_id: A.userId, emoji: '😠' });
+      if (!asA.error) fail('message_reactions (as A)', "B left a reaction in A's name");
+      else ok('message_reactions (as A)', `blocked (${asA.error.code ?? 'error'})`);
+
+      // A can see B's reaction, attributed — the positive half.
+      const seen = await A.client
+        .from('message_reaction_people')
+        .select('user_id, name, emoji')
+        .eq('message_id', aMessageId);
+      const fromB = (seen.data ?? []).find((r: Record<string, unknown>) => r.user_id === B.userId);
+      if (!fromB) fail('message_reaction_people', "A cannot see B's reaction on A's own message");
+      else ok('message_reaction_people', 'reaction visible, with who left it');
+
+      // A reacts too, and B must not be able to take A's away.
+      await A.client.from('message_reactions').insert({ message_id: aMessageId, user_id: A.userId, emoji: '👍' });
+      await B.client.from('message_reactions').delete().eq('message_id', aMessageId).eq('user_id', A.userId);
+      const aStill = await A.client
+        .from('message_reactions')
+        .select('emoji')
+        .eq('message_id', aMessageId)
+        .eq('user_id', A.userId);
+      if ((aStill.data ?? []).length === 0) fail('message_reactions delete', "B REMOVED A'S REACTION");
+      else ok('message_reactions delete', "A's reaction survived B's delete");
+
+      // Editing: only your own, and only through the function.
+      const bEdits = await B.client.rpc('edit_global_message', { p_id: aMessageId, p_body: 'hijacked' });
+      if (!bEdits.error) fail('edit_global_message (as B)', "B EDITED A'S MESSAGE");
+      else ok('edit_global_message (as B)', `refused (${bEdits.error.code ?? 'error'})`);
+
+      const aEdits = await A.client.rpc('edit_global_message', { p_id: aMessageId, p_body: `${CHAT_PROBE_A} (edited)` });
+      if (aEdits.error) fail('edit_global_message (as A)', `A cannot edit their own new message: ${aEdits.error.message}`);
+      else {
+        const edited = await B.client.from('global_chat').select('body, edited_at').eq('id', aMessageId).maybeSingle();
+        const row = edited.data as { body?: string; edited_at?: string | null } | null;
+        if (!row?.edited_at) fail('edit_global_message (as A)', 'edited without being marked — an edit must never be silent');
+        else ok('edit_global_message (as A)', 'edited, and marked edited for everyone');
+      }
+
+      // And no update policy exists to go around the function: a direct update
+      // could move created_at forward and make the twenty minutes last for ever.
+      const direct = await A.client
+        .from('global_messages')
+        .update({ created_at: new Date().toISOString() })
+        .eq('id', aMessageId)
+        .select('id');
+      if (!direct.error && (direct.data ?? []).length > 0) {
+        fail('global_messages update', 'a direct UPDATE reached the table — the edit window can be reset');
+      } else {
+        ok('global_messages update', 'no direct update; editing only through the function');
+      }
+    }
+
     // ---- my_schedule ----
     // A's due dates are A's. The view's privilege exists to look up the CARD
     // beside a schedule row, never to read somebody else's schedule.
@@ -1060,7 +1136,10 @@ async function main() {
   // stars go with it.
   if (communitySeeded) {
     await B.client.from('set_stars').delete().eq('user_id', B.userId);
-    await A.client.from('global_messages').delete().eq('body', CHAT_PROBE_A);
+    // `like`, not `eq`: the edit check (0025) changes this message's body to
+    // "… (edited)", and an exact match would leave it in the owner's live chat.
+    // Its reactions cascade with it.
+    await A.client.from('global_messages').delete().like('body', `${CHAT_PROBE_A}%`);
     await B.client.from('global_messages').delete().eq('body', CHAT_PROBE_B);
     // B's schedule for A's shared card. It would cascade when the set goes, but
     // only if 0022 let it be written at all — delete it explicitly so a re-run

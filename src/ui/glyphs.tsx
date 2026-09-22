@@ -31,6 +31,16 @@ export const GLYPH = {
   history: '☰',
   /** Start a new conversation. */
   newChat: '✎',
+  /**
+   * Change what a message says (NOTES §48).
+   *
+   * The same pencil as `newChat`, and named separately on purpose: a character
+   * shared by two meanings is fine, a NAME shared by two meanings is how one of
+   * them silently changes when the other is restyled.
+   */
+  edit: '✎',
+  /** Leave a reaction on a message. */
+  react: '☺',
 } as const;
 
 export type TabIconName = 'study' | 'notes' | 'community' | 'progress' | 'settings';

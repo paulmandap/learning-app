@@ -37,32 +37,65 @@ async function currentUserId(db: Db = supabase): Promise<string> {
  * what the account actually looks like.
  */
 export async function listFolders(db: Db = supabase): Promise<Folder[]> {
-  const { data, error } = await db.from('folders').select('id, name, created_at');
+  // `parent_id` arrives with 0025. Asked for separately so a build deployed
+  // before the migration still lists folders instead of failing the whole
+  // screen — the same rule as `listSets` and NOTES §19.4.
+  let { data, error } = await db.from('folders').select('id, name, created_at, parent_id');
+  if (isMissingColumn(error)) {
+    console.warn('[folders] no parent_id yet (apply migration 0025); no subfolders.');
+    ({ data, error } = await db.from('folders').select('id, name, created_at'));
+  }
 
   if (isMissingTable(error)) return [];
   if (error) throw new Error(error.message);
-  return (data ?? []) as Folder[];
+  return (data ?? []) as unknown as Folder[];
 }
 
-export async function createFolder(name: string, db: Db = supabase): Promise<Folder> {
+/**
+ * Make a folder, optionally inside another (0025).
+ *
+ * Two levels only, and a folder that already holds subfolders cannot go inside
+ * one. Both are enforced by `folders_shape_guard`, which raises 23514 — turned
+ * into the sentence it means here, because a database error is not something a
+ * person can act on.
+ */
+export async function createFolder(
+  name: string,
+  parentId: string | null = null,
+  db: Db = supabase,
+): Promise<Folder> {
   // Checked here so a blank or over-long name costs no round trip and the
   // person is told in words. The database still checks; this only saves the trip.
   const checked = checkFolderName(name);
   if (!checked.ok) throw new Error(checked.reason);
 
   const user_id = await currentUserId(db);
-  const { data, error } = await db
-    .from('folders')
-    .insert({ user_id, name: checked.name })
-    .select('id, name, created_at')
-    .single();
+  const make = (withParent: boolean) =>
+    db
+      .from('folders')
+      .insert({ user_id, name: checked.name, ...(withParent && parentId ? { parent_id: parentId } : {}) })
+      .select(withParent ? 'id, name, created_at, parent_id' : 'id, name, created_at')
+      .single();
 
+  let { data, error } = await make(true);
+
+  // Before 0025 there is no parent_id at all. A top-level folder can still be
+  // made — ask again without the column. A SUBfolder cannot, and says so rather
+  // than quietly making a top-level one somebody did not ask for.
+  if (isMissingColumn(error)) {
+    if (parentId) throw new FoldersUnavailableError();
+    ({ data, error } = await make(false));
+  }
+
+  // 23514 is `folders_shape_guard`: two levels, no loops, and a folder that
+  // already holds folders cannot go inside one.
+  if (error?.code === '23514') throw new Error(error.message.replace(/^.*?:\s*/, '') || 'Folders only go two deep.');
   if (isMissingTable(error)) throw new FoldersUnavailableError();
   // 23505: the unique on (user_id, lower(name)). Two tabs can still race past
   // the check above, and "already exists" is the honest answer either way.
   if (error?.code === '23505') throw new Error(`You already have a folder called "${checked.name}".`);
   if (error) throw new Error(error.message);
-  return data as Folder;
+  return data as unknown as Folder;
 }
 
 export async function renameFolder(id: string, name: string, db: Db = supabase): Promise<void> {

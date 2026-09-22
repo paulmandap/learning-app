@@ -772,7 +772,13 @@ describe('each screen gives its weight to the thing you came to do', () => {
     // outweighing Continue — the daily action (NOTES §35). The card is shaded
     // and its heading sits above it, from the owner's reference (§36).
     const home = code(read('app', '(tabs)', 'index.tsx'));
-    expect(home).toContain('action={<PillButton label="+ New set"');
+    // Both controls now sit on the heading (NOTES §48: "+ New folder" moved up
+    // from the bottom of the list), so the guard is the WEIGHT, not the
+    // arrangement: neither may be a filled `Button`, or Continue stops being
+    // the one primary action on the screen you open every day.
+    expect(home).toContain('<PillButton label="+ New set"');
+    expect(home).toContain('<PillButton label="+ Folder"');
+    expect(home).not.toMatch(/<Button label="\+ New set"/);
     expect(home).toMatch(/<SectionRow title="Continue where you left off" \/>\s*<ContinueCard[\s\S]*?actionLabel=/);
     expect(code(read('src', 'ui', 'home.tsx'))).toMatch(/backgroundColor: t\.feature[\s\S]*?<Button/);
   });

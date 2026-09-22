@@ -59,6 +59,72 @@ export const ALL_EMOJI: readonly string[] = EMOJI_GROUPS.flatMap((g) => g.emoji)
 export const QUICK_EMOJI: readonly string[] = ['👍', '😂', '🔥', '❤️', '🙏', '😭'];
 
 /**
+ * The reaction row on a message (NOTES §48).
+ *
+ * The owner named these six: *"heart, haha, wow, sad, angry, like, '+' for
+ * custom reaction."* In that order, which is Messenger's, so the muscle memory
+ * transfers. The "+" is not in this list — it opens the full panel above, and
+ * any emoji from there is a valid reaction.
+ *
+ * Each carries a word, because a row of six faces is six things a screen reader
+ * announces as "emoji" otherwise.
+ */
+export const REACTIONS: readonly { emoji: string; label: string }[] = [
+  { emoji: '❤️', label: 'Heart' },
+  { emoji: '😂', label: 'Haha' },
+  { emoji: '😮', label: 'Wow' },
+  { emoji: '😢', label: 'Sad' },
+  { emoji: '😠', label: 'Angry' },
+  { emoji: '👍', label: 'Like' },
+];
+
+/**
+ * Reactions on one message, gathered for display.
+ *
+ * Messenger shows one chip per distinct emoji with a count, not one chip per
+ * person — six hearts is "❤️ 6", and it is the count that tells you how a room
+ * felt. Ordered by count and then by the emoji itself, so the chips do not
+ * reshuffle when two are level.
+ */
+export interface Reaction {
+  /** Which message it is on — a chat fetches them all at once and buckets them. */
+  message_id: string;
+  emoji: string;
+  user_id: string;
+  name?: string | null;
+}
+
+export interface ReactionTally {
+  emoji: string;
+  count: number;
+  /** Did the person looking at it react this way? Drives the highlighted chip. */
+  mine: boolean;
+  /** Who, for the label a screen reader reads and the tooltip on a laptop. */
+  names: string[];
+}
+
+export function tallyReactions(
+  reactions: readonly Reaction[],
+  myUserId: string,
+): ReactionTally[] {
+  const byEmoji = new Map<string, ReactionTally>();
+
+  for (const r of reactions) {
+    const tally = byEmoji.get(r.emoji) ?? { emoji: r.emoji, count: 0, mine: false, names: [] };
+    tally.count++;
+    if (r.user_id === myUserId) tally.mine = true;
+    const name = (r.name ?? '').trim();
+    tally.names.push(r.user_id === myUserId ? 'You' : name.length > 0 ? name : 'Someone');
+    byEmoji.set(r.emoji, tally);
+  }
+
+  return [...byEmoji.values()].sort((a, b) => {
+    if (a.count !== b.count) return b.count - a.count;
+    return a.emoji < b.emoji ? -1 : a.emoji > b.emoji ? 1 : 0;
+  });
+}
+
+/**
  * Append an emoji to what somebody has typed.
  *
  * A space before it when the draft ends in a word, and none when it ends in a

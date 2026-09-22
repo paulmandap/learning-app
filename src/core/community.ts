@@ -41,7 +41,7 @@ export interface PublicSet {
   cards: number;
 }
 
-/** A row of `global_chat` (0021). */
+/** A row of `global_chat` (0021, plus `edited_at` in 0025). */
 export interface ChatMessage {
   id: string;
   author_id: string;
@@ -49,6 +49,40 @@ export interface ChatMessage {
   author_avatar: string | null;
   body: string;
   created_at: string;
+  /** When it was last edited, or null. Null before 0025, which reads the same. */
+  edited_at?: string | null;
+}
+
+/**
+ * How long after sending a message may still be edited (NOTES §48).
+ *
+ * The owner: *"we should implement that 'Edit' message too, but only within 20
+ * minutes of sending."* Mirrors `message_edit_window()` in migration 0025,
+ * which is the authority — this only decides whether to OFFER the option, so a
+ * screen never shows a control the database is about to refuse.
+ */
+export const EDIT_WINDOW_MINUTES = 20;
+
+/**
+ * Can this message still be edited?
+ *
+ * Yours, and inside the window. Both are checked again by
+ * `edit_global_message`, which is where it actually matters; this exists so the
+ * menu does not offer Edit on a message that is twenty-one minutes old.
+ */
+export function canEdit(
+  message: Pick<ChatMessage, 'author_id' | 'created_at'>,
+  myUserId: string,
+  now: number,
+): boolean {
+  if (message.author_id !== myUserId) return false;
+  const age = now - Date.parse(message.created_at);
+  return age >= 0 && age < EDIT_WINDOW_MINUTES * 60 * 1000;
+}
+
+/** "edited" beside the time, or nothing. The mark is what makes editing honest. */
+export function editedLabel(message: Pick<ChatMessage, 'edited_at'>): string | null {
+  return message.edited_at ? 'edited' : null;
 }
 
 /** A public set with its place in the ranking. */

@@ -1,7 +1,8 @@
 import { completeRows, supabase, type Db } from './supabase';
 import { isMissingColumn, isMissingTable } from '../core/db-errors';
 import type { ChatMessage, PublicSet, Visibility } from '../core/community';
-import { validateMessage } from '../core/community';
+import { EDIT_WINDOW_MINUTES, validateMessage } from '../core/community';
+import type { Reaction } from '../core/emoji';
 import type { StudySet } from './sets';
 
 /**
@@ -44,8 +45,9 @@ import type { StudySet } from './sets';
 const PUBLIC_SET_COLUMNS =
   'id, owner_id, owner_name, owner_avatar, title, published_at, updated_at, stars, cards';
 
-/** Columns of `global_chat`. */
-const CHAT_COLUMNS = 'id, author_id, author_name, author_avatar, body, created_at';
+/** Columns of `global_chat`. `edited_at` arrives with 0025 (NOTES §48). */
+const CHAT_COLUMNS = 'id, author_id, author_name, author_avatar, body, created_at, edited_at';
+const CHAT_COLUMNS_BEFORE_0025 = 'id, author_id, author_name, author_avatar, body, created_at';
 
 /**
  * Thrown when the database has not got 0021 yet.
@@ -276,16 +278,100 @@ export async function unstar(setId: string, db: Db = supabase): Promise<void> {
  * the last page.
  */
 export async function listMessages(limit = 100, db: Db = supabase): Promise<ChatMessage[]> {
-  const { data, error } = await db
-    .from('global_chat')
-    .select(CHAT_COLUMNS)
-    .order('created_at', { ascending: false })
-    .limit(limit);
+  const ask = (columns: string) =>
+    db.from('global_chat').select(columns).order('created_at', { ascending: false }).limit(limit);
+
+  let { data, error } = await ask(CHAT_COLUMNS);
+  // `edited_at` arrives with 0025. Asked for separately so a build deployed
+  // before the migration still shows the chat instead of answering PGRST204
+  // for the whole screen — the same rule as `listSets` and NOTES §19.4.
+  if (isMissingColumn(error)) {
+    console.warn('[community] no edited_at yet (apply migration 0025); chat without edit marks.');
+    ({ data, error } = await ask(CHAT_COLUMNS_BEFORE_0025));
+  }
 
   if (isMissingTable(error)) throw new CommunityUnavailableError();
   if (error) throw new Error(error.message);
   // No completeRows: this read is deliberately capped, so short IS the answer.
   return ((data ?? []) as unknown as ChatMessage[]).slice().reverse();
+}
+
+/**
+ * Change what a message says, for twenty minutes after sending it (NOTES §48).
+ *
+ * Through `edit_global_message` rather than an update, and 0025 records why in
+ * full: an UPDATE reaching the table could set `created_at` too, and somebody
+ * could move their own message forward and edit it for ever. The function
+ * writes exactly two columns and there is no update policy at all.
+ */
+export async function editMessage(id: string, raw: string, db: Db = supabase): Promise<void> {
+  const check = validateMessage(raw);
+  if (!check.ok) throw new Error(check.reason);
+
+  const { error } = await db.rpc('edit_global_message', { p_id: id, p_body: check.body });
+
+  if (isMissingTable(error) || error?.code === 'PGRST202') {
+    throw new Error('Editing messages is not switched on yet.');
+  }
+  if (error) {
+    // P0001 is the window closing. Its own wording is fine; the others are not
+    // things a person did wrong.
+    if (error.code === 'P0001') throw new Error(`You can only edit a message for ${EDIT_WINDOW_MINUTES} minutes after sending it.`);
+    if (error.code === 'P0002') throw new Error('That message is gone.');
+    throw new Error(error.message);
+  }
+}
+
+// ------------------------------------------------------------- reactions --
+
+/** Reactions on the messages on screen, with who left them (0025). */
+export async function listReactions(db: Db = supabase): Promise<Reaction[]> {
+  const { data, error } = await db
+    .from('message_reaction_people')
+    .select('message_id, user_id, name, emoji');
+
+  // Before 0025 nobody has reacted to anything, which is the honest answer and
+  // not an error — the chat renders exactly as it did.
+  if (isMissingTable(error)) return [];
+  if (error) throw new Error(error.message);
+  return (data ?? []) as unknown as Reaction[];
+}
+
+/**
+ * React, or take the reaction back.
+ *
+ * One of each emoji per person per message, so this is a toggle: tapping ❤️
+ * twice leaves no heart. Which way it goes is decided by the caller from what
+ * is already on screen, because the screen knows and the database would have to
+ * be asked.
+ */
+export async function react(
+  messageId: string,
+  emoji: string,
+  on: boolean,
+  db: Db = supabase,
+): Promise<void> {
+  const user_id = await currentUserId(db);
+
+  if (!on) {
+    const { error } = await db
+      .from('message_reactions')
+      .delete()
+      .eq('message_id', messageId)
+      .eq('user_id', user_id)
+      .eq('emoji', emoji);
+    if (isMissingTable(error)) throw new Error('Reactions are not switched on yet.');
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const { error } = await db
+    .from('message_reactions')
+    .insert({ message_id: messageId, user_id, emoji });
+
+  if (isMissingTable(error)) throw new Error('Reactions are not switched on yet.');
+  // 23505: already reacted that way. A double tap means the state it asked for.
+  if (error && error.code !== '23505') throw new Error(error.message);
 }
 
 /**
@@ -364,7 +450,15 @@ export async function hideMessage(id: string, db: Db = supabase): Promise<void> 
 export async function removeMyCommunityData(db: Db = supabase): Promise<void> {
   const user_id = await currentUserId(db);
 
-  for (const table of ['set_stars', 'global_messages', 'hidden_messages'] as const) {
+  for (const table of [
+    'set_stars',
+    'global_messages',
+    'hidden_messages',
+    // Reactions left on OTHER people's messages (0025). They do not cascade
+    // from anything of mine, so deleting my messages would leave every one of
+    // them behind — the same omission NOTES §40 found for notes and study days.
+    'message_reactions',
+  ] as const) {
     const { error } = await db.from(table).delete().eq('user_id', user_id);
     if (error && !isMissingTable(error)) throw new Error(error.message);
   }
