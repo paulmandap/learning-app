@@ -10,8 +10,10 @@ import { isSendable, MAX_PASTE_CHARS, type ChatTurn } from '../core/chat';
 import { appendEmoji, EMOJI_GROUPS } from '../core/emoji';
 import { actionCard, CARD_COUNTS, type NomiAction } from '../core/nomi-actions';
 import { revealedCount, revealSchedule, THINK_MS } from '../core/typing';
-import { nextGreetingDelay, type NomiState } from '../core/nomi-motion';
+import { nextGreetingDelay, nextIdleGesture, tapReaction, type NomiState } from '../core/nomi-motion';
+import { useNomiGaze } from './nomi-gaze';
 import { returnReaction } from '../core/celebrate';
+import { countChoices } from '../core/qa-pairs';
 import { useLastRound } from '../data/last-round';
 
 const NATIVE = Platform.OS !== 'web';
@@ -90,15 +92,17 @@ export function useTypedLine(line: string, active: boolean): { saying: Saying; s
   return { saying, shown, chars };
 }
 
-export function NomiCard({ line, onPress }: { line: string; onPress: () => void }) {
+export function NomiCard({ line, onPress, night = false }: { line: string; onPress: () => void; night?: boolean }) {
   const t = useTheme();
   const focused = useIsFocused();
   const reduce = useReducedMotion();
   const { saying, shown, chars } = useTypedLine(line, focused);
 
-  // A one-shot over the resting pose: the reaction to a round, or a wave.
+  // A one-shot over the resting pose: the reaction to a round, a wave, a tap.
   const [gesture, setGesture] = useState<NomiState | null>(null);
   const waves = useRef(0);
+  const lastIdle = useRef<NomiState | null>(null);
+  const lastTap = useRef<NomiState | null>(null);
 
   // Coming back to Home: react to a round that ended recently, once.
   useEffect(() => {
@@ -115,51 +119,81 @@ export function NomiCard({ line, onPress }: { line: string; onPress: () => void 
     if (!reduce) setGesture(reaction);
   }, [focused, reduce]);
 
-  // Idle once the line is said, with a wave now and then.
+  // Idle once the line is said, doing something now and then: a wave, a look
+  // around or a stretch, never the same twice running (NOTES §45, §49). Not at
+  // night, when Nomi is sleepy.
   useEffect(() => {
-    if (!focused || reduce !== false || saying !== 'said' || gesture !== null) return;
+    if (!focused || reduce !== false || saying !== 'said' || gesture !== null || night) return;
     const wave = setTimeout(() => {
       waves.current += 1;
-      setGesture('greeting');
+      const next = nextIdleGesture(Math.random, lastIdle.current);
+      lastIdle.current = next;
+      setGesture(next);
     }, nextGreetingDelay(waves.current === 0, Math.random));
     return () => clearTimeout(wave);
-  }, [focused, reduce, saying, gesture]);
+  }, [focused, reduce, saying, gesture, night]);
 
+  const rest: NomiState = night ? 'sleepy' : 'idle';
   const owl: NomiState =
-    gesture ?? (saying === 'thinking' ? 'thinking' : saying === 'typing' ? 'explaining' : 'idle');
+    gesture ?? (saying === 'thinking' ? 'thinking' : saying === 'typing' ? 'explaining' : rest);
+
+  // Eyes that follow the pointer while Nomi is only standing there (§49).
+  const { gaze, anchor } = useNomiGaze(focused && reduce === false && owl === 'idle');
+
+  // A tap is a hop, a stretch or a look around; holding Nomi makes it shy (§49).
+  const tap = () => {
+    if (reduce !== false) return;
+    const next = tapReaction(Math.random, lastTap.current);
+    lastTap.current = next;
+    setGesture(next);
+  };
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Talk to Nomi. ${line}`}
-      onPress={onPress}
-      style={({ pressed }) => ({ marginTop: space.sm, opacity: pressed ? 0.85 : 1 })}
+    <View
+      style={{
+        marginTop: space.sm,
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        gap: space.md,
+        borderRadius: radius.lg,
+        backgroundColor: t.infoBg,
+        paddingHorizontal: space.md,
+        paddingTop: space.md,
+      }}
     >
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'flex-end',
-          gap: space.md,
-          borderRadius: radius.lg,
-          backgroundColor: t.infoBg,
-          paddingHorizontal: space.md,
-          paddingTop: space.md,
-        }}
+      <Pressable
+        ref={anchor}
+        accessibilityRole="button"
+        accessibilityLabel="Pet Nomi"
+        accessibilityHint="Nomi hops, stretches or looks around. Hold to make Nomi shy."
+        onPress={tap}
+        onLongPress={() => reduce === false && setGesture('shy')}
+        delayLongPress={450}
+        style={{ width: 84, alignItems: 'center' }}
       >
-        <View style={{ width: 84, alignItems: 'center' }}>
-          <NomiCharacter
-            state={owl}
-            settle="idle"
-            size={92}
-            active={focused}
-            // A finished gesture hands back to thinking, typing or idle.
-            onDone={(done) => setGesture((current) => (current === done ? null : current))}
-          />
-        </View>
+        <NomiCharacter
+          state={owl}
+          settle={rest}
+          size={92}
+          active={focused}
+          gaze={gaze}
+          // A finished gesture hands back to thinking, typing, idle or sleepy.
+          onDone={(done) => setGesture((current) => (current === done ? null : current))}
+        />
+      </Pressable>
 
+      {/* The line is what opens the chat, as the whole card used to. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Talk to Nomi. ${line}`}
+        onPress={onPress}
+        // A row, so the bubble's own `flex: 1` still fills the width, as it did
+        // when the card's row held it directly.
+        style={({ pressed }) => ({ flex: 1, flexDirection: 'row', opacity: pressed ? 0.85 : 1 })}
+      >
         <SpeechBubble line={line} saying={saying} shown={shown} chars={chars} surface={t.card} marginBottom={space.lg} />
-      </View>
-    </Pressable>
+      </Pressable>
+    </View>
   );
 }
 
@@ -568,6 +602,10 @@ export function ActionCard({
   const t = useTheme();
   const card = actionCard(action);
   const counted = action.kind === 'make_set' || action.kind === 'add_notes' || action.kind === 'write_reviewer';
+  // With the student's own questions kept, their number is a count too — the
+  // one Nomi picked — as on Add notes (NOTES §49).
+  const own = 'kept' in action ? (action.kept ?? 0) : 0;
+  const counts = countChoices(CARD_COUNTS, own, null).counts;
 
   return (
     <View style={{ flexDirection: 'row', gap: space.sm }}>
@@ -587,10 +625,11 @@ export function ActionCard({
       >
         <Text style={[type.label, { color: t.textMuted }]}>{card.heading}</Text>
         <Text style={[type.bodyStrong, { color: t.text }]}>{card.detail}</Text>
+        {card.note ? <Text style={[type.caption, { color: t.textMuted }]}>{card.note}</Text> : null}
 
         {counted ? (
           <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.xs }}>
-            {CARD_COUNTS.map((count) => {
+            {counts.map((count) => {
               const chosen = count === action.count;
               return (
                 <Pressable
@@ -645,9 +684,41 @@ export function NomiWelcome({
   onPick: (text: string) => void;
 }) {
   const t = useTheme();
+  const reduce = useReducedMotion();
+  // Waves hello once, then stands there to be tapped, held, and followed with
+  // its eyes, as on Home (NOTES §49).
+  const [greeted, setGreeted] = useState(false);
+  const [gesture, setGesture] = useState<NomiState | null>(null);
+  const lastTap = useRef<NomiState | null>(null);
+  const owl: NomiState = gesture ?? (greeted ? 'idle' : 'greeting');
+  const { gaze, anchor } = useNomiGaze(reduce === false && owl === 'idle');
+
   return (
     <View style={{ alignItems: 'center', gap: space.md, paddingVertical: space.lg }}>
-      <NomiCharacter state="greeting" size={112} accessibilityLabel="Nomi, a small brown owl" />
+      <Pressable
+        ref={anchor}
+        accessibilityRole="button"
+        accessibilityLabel="Pet Nomi, a small brown owl"
+        accessibilityHint="Nomi hops, stretches or looks around. Hold to make Nomi shy."
+        onPress={() => {
+          if (reduce !== false) return;
+          const next = tapReaction(Math.random, lastTap.current);
+          lastTap.current = next;
+          setGesture(next);
+        }}
+        onLongPress={() => reduce === false && setGesture('shy')}
+        delayLongPress={450}
+      >
+        <NomiCharacter
+          state={owl}
+          size={112}
+          gaze={gaze}
+          onDone={(done) => {
+            if (done === 'greeting') setGreeted(true);
+            setGesture((current) => (current === done ? null : current));
+          }}
+        />
+      </Pressable>
       <Text style={[type.title, { color: t.text, textAlign: 'center' }]}>
         {name ? `Hi ${name}! I'm Nomi.` : "Hi! I'm Nomi."}
       </Text>

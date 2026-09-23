@@ -31,6 +31,12 @@ export async function startSet(input: {
   sources: (PasteSource | FileSource)[];
   count: number;
   apiKey: string;
+  /**
+   * Make the student's own questions and answers into cards exactly as written
+   * (NOTES §49). Off unless asked for: a reviewer Nomi wrote is Gemini's
+   * words, not the student's, and is made into cards the ordinary way.
+   */
+  keepWording?: boolean;
   /** "Reading your notes…", "Planning your cards…", for a screen that shows it. */
   onStatus?: (status: string) => void;
 }): Promise<{ setId: string }> {
@@ -65,10 +71,11 @@ export async function startSet(input: {
   if (documentIds.length === 0) throw firstFailure;
 
   input.onStatus?.('Planning your cards…');
+  const keep = { keepWording: input.keepWording === true, apiKey: input.apiKey };
   if (input.setId) {
-    await extendPlanForDocuments({ setId, documentIds, requestedCount: input.count });
+    await extendPlanForDocuments({ setId, documentIds, requestedCount: input.count, ...keep });
   } else {
-    await planSet(setId, input.count);
+    await planSet(setId, input.count, keep);
   }
   return { setId };
 }

@@ -324,7 +324,7 @@ export default function Blanks() {
       ) : current ? (
         <>
           {/* With Nomi reading beside the count (NOTES §45). */}
-          <StudyProgress value={index} total={queue.length} />
+          <StudyProgress value={index} total={queue.length} right={got} />
 
           <Card>
             {/* The sentence, from the notes, with the gap in it. This IS the

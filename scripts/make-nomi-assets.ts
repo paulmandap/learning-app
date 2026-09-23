@@ -440,6 +440,7 @@ function measureEye(guess) {
 const eyes = cfg.eyes.map(measureEye);
 report.eyes = eyes.map((e) => ({ cx: Math.round(e.cx * 10) / 10, cy: Math.round(e.cy * 10) / 10, r: Math.round(e.r * 10) / 10 }));
 
+const faces = [];
 eyes.forEach((e, i) => {
   const layer = i === 0 ? layers.eyeLeft : layers.eyeRight;
   const ringR = e.r + cfg.ringOffset;
@@ -459,6 +460,7 @@ eyes.forEach((e, i) => {
   }
   if (!faceN) throw new Error('no face colour around the eye at ' + Math.round(e.cx) + ',' + Math.round(e.cy));
   const faceColour = faceSum.map((c) => c / faceN);
+  faces.push(faceColour);
   for (let y = Math.floor(e.cy - e.r - 4); y <= Math.ceil(e.cy + e.r + 4); y++) {
     for (let x = Math.floor(e.cx - e.r - 4); x <= Math.ceil(e.cx + e.r + 4); x++) {
       if (x < 0 || y < 0 || x >= W || y >= H) continue;
@@ -570,6 +572,13 @@ const rig = {
   eyeLeftLine: (eyes[0].cy - minY) / TH,
   eyeRightLine: (eyes[1].cy - minY) / TH,
   eyeRadius: ((eyes[0].r + eyes[1].r) / 2) / TW,
+  // Where each eye is, and the face around it (NOTES §49): what the happy eyes,
+  // the sleepy lids and the blush are drawn at, in code, over these pictures.
+  eyeLeftCenter: [(eyes[0].cx - minX) / TW, (eyes[0].cy - minY) / TH],
+  eyeRightCenter: [(eyes[1].cx - minX) / TW, (eyes[1].cy - minY) / TH],
+  faceColour: '#' + [0, 1, 2]
+    .map((ch) => Math.round((faces[0][ch] + faces[1][ch]) / 2).toString(16).padStart(2, '0'))
+    .join(''),
 };
 
 // 9. Debug sheet: at rest, body alone, wings out + blink, wave, full wave + glance.

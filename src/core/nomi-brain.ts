@@ -33,6 +33,11 @@
  * null.
  */
 
+import { OPERATOR } from './legal';
+
+/** Who made Nomi, by first name, as Nomi says it in passing. The full name is `OPERATOR`. */
+export const MAKER = OPERATOR.split(' ')[0]!;
+
 export interface BrainSet {
   id: string;
   title: string;
@@ -186,9 +191,25 @@ const INTENTS: Intent[] = [
   },
   {
     name: 'who',
-    test: /^(who|what) are you ?\??$|\bwhat can you do\b/,
+    test: /^(who|what) are you ?\??$|\bwhat can you do\b|\bwhat'?s your name\b|\bwhat is your name\b|\banong pangalan mo\b/,
     answer: () =>
-      "I'm Nomi, your study companion. I can tell you what's due, what you missed and how your streak is going, and help with anything you're studying.",
+      `I'm Nomi, your study companion. ${MAKER} made me. I can tell you what's due, what you missed and how your streak is going, and help with anything you're studying.`,
+  },
+  // Who made Nomi, and what Nomi is (NOTES §49). The owner: *"i want nomi to know
+  // that it's name is Nomi, and i created Nomi."* Answered here, so it is right
+  // every time. Honest about Gemini, because the app already says so everywhere
+  // else — the privacy notice, Add notes, Settings — and an assistant that
+  // denied it would contradict its own app.
+  {
+    name: 'maker',
+    test: /\bwho (made|created|built|programmed|coded|designed|developed|invented|owns|runs) (you|nomi)\b|\bwho('?s| is) (your|nomi'?s) (creator|maker|developer|owner|dad|father|mom|mother|parent|boss)\b|\bsino (ang )?(gumawa|lumikha|nag ?gawa) (sa ?yo|sayo|kay nomi|ng nomi)\b/,
+    answer: () => `${OPERATOR} made me, to help you study. I use Google's Gemini to help me think.`,
+  },
+  {
+    name: 'what_ai',
+    test: /\bare you (an? )?(ai|bot|robot|chatbot|chat ?gpt|gemini|claude|copilot|real|human|a person|a real person)\b|\bwhat (ai|bot|model) are you\b|\bwhat (powers|runs) you\b/,
+    answer: () =>
+      `I'm Nomi, an AI study companion, not a person. ${MAKER} made me, and I use Google's Gemini to help me think.`,
   },
   {
     name: 'thanks',
@@ -213,15 +234,30 @@ export function answerLocally(message: string, snapshot: AppSnapshot): { intent:
   return null;
 }
 
+/** Late at night, when Nomi on Home is sleepy (NOTES §49): 10pm until 5am, by the device's clock. */
+export const NIGHT = { from: 22, until: 5 } as const;
+
+export function isNight(hour: number): boolean {
+  return hour >= NIGHT.from || hour < NIGHT.until;
+}
+
 /**
  * The one line Nomi says on Home, beside the owl.
  *
  * Always true and always short. The most useful thing first: cards you got
  * wrong, then cards due, then the streak — and when there is nothing to do,
  * an invitation rather than a manufactured observation.
+ *
+ * Late at night (`hour`, when given), a sleepy Nomi says one gentle line
+ * instead (§49): a quick review if anything is waiting, and rest if not.
  */
-export function homeLine(snapshot: AppSnapshot): string {
+export function homeLine(snapshot: AppSnapshot, hour?: number): string {
   if (snapshot.sets.length === 0) return "Add some notes and I'll help you study them.";
+  if (hour !== undefined && isNight(hour)) {
+    return snapshot.toRetry > 0 || snapshot.dueToday > 0
+      ? "It's late. One quick review, then sleep?"
+      : "It's late, and you're all caught up. Sleep well.";
+  }
   if (snapshot.toRetry > 0) {
     return `${plural(snapshot.toRetry, 'card')} to retry. Coming back to those is where it sticks.`;
   }

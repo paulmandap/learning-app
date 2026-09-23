@@ -18,6 +18,7 @@ import {
 import type { TierBudget } from '../core/planner';
 import type { AssistantContext } from '../core/chat';
 import { askLine, type NomiAction } from '../core/nomi-actions';
+import { OPERATOR } from '../core/legal';
 
 export const READ_SYSTEM_PROMPT = `You extract text from study notes, page by page.
 
@@ -393,6 +394,36 @@ export function buildRubricCheckPrompt(input: {
 }
 
 /**
+ * Point at the questions and answers in notes whose layout `findQaPairs` could
+ * not read (NOTES §49).
+ *
+ * The one prompt in this file that asks for the student's own text back. It is
+ * never trusted with it: `locatePointed` in `src/core/qa-pairs.ts` keeps a pair
+ * only when both halves are found in the notes, and then keeps the notes' own
+ * characters. So rule 1 is a request and the finding is the check — a model
+ * that "tidies" a question has pointed at nothing, and that pair is not kept.
+ */
+export function buildPointQaPrompt(input: { pages: readonly { page_index: number; text: string }[] }): string {
+  return [
+    'These study notes are written as questions with their answers, in a layout the app could not read by itself.',
+    'List every question and its answer, exactly as they are written in the notes.',
+    '',
+    'Rules:',
+    '1. Copy the characters exactly: the same words, spelling, punctuation and capital letters. Never fix, shorten,',
+    '   reword or translate anything.',
+    '2. "question" is the whole question as written. "answer" is the whole of its answer as written.',
+    '3. A label or number in front, like "Q:", "A:" or "1.", can be left out.',
+    '4. Only pairs that are really in the notes. Leave out a question with no answer written, and a multiple-choice',
+    '   question with options.',
+    '5. "page_index" is the [PAGE n] the pair is on.',
+    '6. If the notes are not written as questions with answers, return an empty list.',
+    '',
+    'NOTES:',
+    ...input.pages.map((p) => `[PAGE ${p.page_index}]\n${p.text}`),
+  ].join('\n');
+}
+
+/**
  * A reviewer on a topic the student named, for Nomi to make cards from (NOTES
  * §39). The owner: *"i want nomi to be the one to do it, not me handing things."*
  *
@@ -453,6 +484,11 @@ export function buildNomiSystemPrompt(input: {
 }): string {
   const lines = [
     "You are Nomi, a friendly owl who is the student's study companion inside their flashcard app.",
+    // Who made Nomi, and what it is (NOTES §49): *"i want nomi to know that it's
+    // name is Nomi, and i created Nomi."* Honest about Gemini, as the app is.
+    `${OPERATOR} made you, and built the app you live in. When they ask who made you, or about you, say so.`,
+    "If asked what you are or what runs you, say honestly that you're Nomi and you use Google's Gemini to help you",
+    'think. Never say you are ChatGPT, Gemini itself, or any other assistant.',
     "You're chatting with them like a friend in a messenger app.",
     '',
     'How to reply:',

@@ -40,6 +40,7 @@
 
 import { supportedFor } from './planner';
 import { normalize, splitSentences, wordCount } from './text';
+import { findQaPairs, keptTarget } from './qa-pairs';
 import { FACE_COUNT } from './avatar';
 import { MAX_NOTES_CHARS, MAX_QUESTION_CHARS, trimNotes, type ChatTurn } from './chat';
 import { TOPIC_CARD_COUNT, topicTitle } from './reviewer';
@@ -58,9 +59,23 @@ export const NOTES_MIN_WORDS = 50;
 /** The longest name Nomi gives a set or a note. */
 export const MAX_TITLE_CHARS = 80;
 
+/**
+ * `kept`: how many of the student's own questions and answers are made into
+ * cards exactly as written (NOTES §49). Absent or 0 when the notes hold none,
+ * or when they asked Nomi to reword them. `count` is still the count picked:
+ * the set makes all of their questions, and Nomi writes the rest (`keptTarget`).
+ */
 export type NomiAction =
-  | { kind: 'make_set'; title: string; notes: string; count: number; countPicked: boolean }
-  | { kind: 'add_notes'; setId: string; setTitle: string; notes: string; count: number; countPicked: boolean }
+  | { kind: 'make_set'; title: string; notes: string; count: number; countPicked: boolean; kept?: number }
+  | {
+      kind: 'add_notes';
+      setId: string;
+      setTitle: string;
+      notes: string;
+      count: number;
+      countPicked: boolean;
+      kept?: number;
+    }
   | { kind: 'write_reviewer'; topic: string; title: string; count: number; countPicked: boolean }
   | { kind: 'rename_set'; setId: string; from: string; to: string }
   | { kind: 'save_note'; title: string; body: string }
@@ -287,12 +302,15 @@ export function splitMessage(message: string): { instruction: string; notes: str
   return { instruction: '', notes: text };
 }
 
+/** "Q:", "1. Question:" — a label the student wrote, which is not part of any name (NOTES §49). */
+const QUESTION_LABEL = /^(?:\d{1,3}[.)]\s*)?(?:q|ques|question|tanong)\s*\d{0,3}\s*[:.)\-–—]\s*/i;
+
 /** A name for a set or note: the notes' first line, kept short. */
 export function suggestTitle(notes: string): string {
   const first =
     notes
       .split(/\r?\n/)
-      .map((line) => line.replace(/^#{1,6}\s+/, '').replace(/[:\s]+$/, '').trim())
+      .map((line) => line.replace(/^#{1,6}\s+/, '').replace(QUESTION_LABEL, '').replace(/[:\s]+$/, '').trim())
       .find((line) => line.length > 0) ?? '';
   const words = first.split(/\s+/).filter(Boolean);
   const short = words.length <= 8 ? first : words.slice(0, 6).join(' ');
@@ -531,10 +549,19 @@ export function proposeAction(message: string, snapshot: AppSnapshot): Proposal 
   // from a paragraph about someone's day. Gemini, reading it in the
   // conversation, can — and says so, which comes back through `proposeNotesSet`.
   if (!instruction && !long) return null;
-  if (!long && wordCount(notes) < NOTES_MIN_WORDS) return null;
+  if (!long && !enoughNotes(notes)) return null;
   if (!instruction && ASK.test(text)) return null;
 
   return offerForNotes(instruction, notes, snapshot);
+}
+
+/**
+ * Enough to make cards from: 50 words — or any of the student's own questions
+ * with their answers, which are cards already however few words they take
+ * (NOTES §49). Five short Q:A pairs are forty words.
+ */
+function enoughNotes(notes: string): boolean {
+  return wordCount(notes) >= NOTES_MIN_WORDS || findQaPairs(notes).length > 0;
 }
 
 /**
@@ -544,14 +571,22 @@ export function proposeAction(message: string, snapshot: AppSnapshot): Proposal 
  */
 export function proposeNotesSet(message: string, snapshot: AppSnapshot): Proposal | null {
   const { instruction, notes } = splitMessage(message);
-  if (wordCount(notes) < NOTES_MIN_WORDS) return null;
+  if (!enoughNotes(notes)) return null;
   return offerForNotes(instruction, notes, snapshot);
 }
 
-/** A new set from notes, or the notes added to the set the instruction names. */
+/**
+ * A new set from notes, or the notes added to the set the instruction names.
+ *
+ * The student's own questions are kept as written, and when they did not say
+ * how many cards, Nomi picks exactly as many as they wrote — their questions,
+ * nothing added. A bigger count is one tap on the card (NOTES §49).
+ */
 function offerForNotes(instruction: string, notes: string, snapshot: AppSnapshot): Proposal {
+  const kept = findQaPairs(notes).length;
   const stated = instruction ? statedCount(instruction) : null;
-  const count = stated ?? chooseCardCount(notes);
+  const count = stated ?? (kept > 0 ? kept : chooseCardCount(notes));
+  const own = kept > 0 ? { kept } : {};
 
   const add = instruction ? ADD_TO.exec(instruction) : null;
   if (add) {
@@ -564,6 +599,7 @@ function offerForNotes(instruction: string, notes: string, snapshot: AppSnapshot
       notes,
       count,
       countPicked: stated === null,
+      ...own,
     });
   }
 
@@ -573,6 +609,7 @@ function offerForNotes(instruction: string, notes: string, snapshot: AppSnapshot
     notes,
     count,
     countPicked: stated === null,
+    ...own,
   });
 }
 
@@ -621,6 +658,9 @@ export function amendProposal(message: string, pending: NomiAction): Proposal | 
   const titled = pending.kind === 'make_set' || pending.kind === 'write_reviewer';
   if (!titled && pending.kind !== 'add_notes') return null;
 
+  const wording = pending.kind === 'make_set' || pending.kind === 'add_notes' ? rewording(text, pending) : null;
+  if (wording) return wording;
+
   const title = titled ? readTitle(text) : null;
   const rest = title ? text.replace(title, ' ') : text;
   const onlyCount = COUNT_ONLY.exec(text)?.[1];
@@ -636,6 +676,39 @@ export function amendProposal(message: string, pending: NomiAction): Proposal | 
 
   const action = withChanges(pending, title, count);
   return { action, say: amendLine(action, { title: title !== null, count: count !== null }) };
+}
+
+/** "keep them as is", "don't reword", "word for word", "as I wrote them". Before REWORD: "don't reword" says reword. */
+const KEEP_WORDING =
+  /\b(?:keep (?:them|it|my (?:questions|wording|words))|as (?:is|written|i wrote (?:them|it))|(?:don'?t|do not|never|no need to) (?:change|reword|rewrite|rephrase)|word for word|exactly as)\b|\bwag (?:mong )?(?:baguhin|palitan)\b/i;
+/** "reword them", "rewrite them", "in your own words". */
+const REWORD = /\b(?:re-?word|re-?write|re-?phrase|paraphrase)\b|\b(?:your|in your) own words\b/i;
+
+/**
+ * Keeping the student's own questions as written, or letting Nomi reword them,
+ * changed on the offer before the tap (NOTES §49) — the chat's half of the
+ * choice Add notes offers. Null when the message says neither.
+ */
+function rewording(text: string, pending: Extract<NomiAction, { kind: 'make_set' | 'add_notes' }>): Proposal | null {
+  if (KEEP_WORDING.test(text)) {
+    const kept = findQaPairs(pending.notes).length;
+    if (kept === 0) {
+      return { action: pending, say: "I couldn't find questions with their answers in those notes, so I'll write the cards." };
+    }
+    return { action: { ...pending, kept }, say: `Okay, I'll keep your ${questions(kept)} exactly as you wrote them.` };
+  }
+  if (REWORD.test(text)) {
+    const { kept: _dropped, ...rest } = pending;
+    return { action: rest, say: "Okay, I'll write new questions from your notes." };
+  }
+  return null;
+}
+
+const questions = (n: number) => `${n} ${n === 1 ? 'question' : 'questions'}`;
+
+/** How many cards an offer makes: all of the student's own questions, and the count's worth. */
+function cardsOf(action: { count: number; kept?: number }): number {
+  return keptTarget(action.count, action.kept ?? 0).target;
 }
 
 /**
@@ -656,15 +729,27 @@ export function retitle(pending: NomiAction, raw: string): Proposal | null {
   return { action, say: amendLine(action, { title: true, count: false }) };
 }
 
+/** What Nomi adds when the student's own questions are kept: that they are, and anything written on top. */
+function keptLine(action: { count: number; kept?: number }): string {
+  const own = action.kept ?? 0;
+  const { extra } = keptTarget(action.count, own);
+  return (
+    ` I'll keep your ${questions(own)} exactly as you wrote them.` +
+    (extra > 0 ? ` And I'll write ${extra} more of my own.` : '')
+  );
+}
+
 /** Nomi asking whether to go ahead. */
 export function askLine(action: NomiAction): string {
   switch (action.kind) {
     case 'make_set':
+      if ((action.kept ?? 0) > 0) return `Want me to make a new set, "${action.title}", from your notes?${keptLine(action)}`;
       return (
         `Want me to make a new set, "${action.title}", with ${plural(action.count, 'card')}?` +
         (action.countPicked ? ` I picked ${action.count} for notes this long.` : '')
       );
     case 'add_notes':
+      if ((action.kept ?? 0) > 0) return `Want me to add these notes to "${action.setTitle}"?${keptLine(action)}`;
       return (
         `Want me to add these notes to "${action.setTitle}" and make ${plural(action.count, 'card')} from them?` +
         (action.countPicked ? ` I picked ${action.count} for notes this long.` : '')
@@ -691,9 +776,9 @@ export function askLine(action: NomiAction): string {
 export function doneLine(action: NomiAction): string {
   switch (action.kind) {
     case 'make_set':
-      return `Done. I'm making ${plural(action.count, 'card')} for "${action.title}" now.`;
+      return `Done. I'm making ${plural(cardsOf(action), 'card')} for "${action.title}" now.`;
     case 'add_notes':
-      return `Done. I'm adding ${plural(action.count, 'card')} to "${action.setTitle}" now.`;
+      return `Done. I'm adding ${plural(cardsOf(action), 'card')} to "${action.setTitle}" now.`;
     case 'write_reviewer':
       return `Done. Your reviewer is in Notes as "${action.title}", and I'm making ${plural(action.count, 'card')} from it now.`;
     case 'rename_set':
@@ -709,13 +794,22 @@ export function doneLine(action: NomiAction): string {
   }
 }
 
-/** The card Nomi shows under its question: what it is, the gist, and the button. */
-export function actionCard(action: NomiAction): { heading: string; detail: string; confirm: string } {
+/**
+ * The card Nomi shows under its question: what it is, the gist, and the button —
+ * and, when the student's own questions are kept, a line saying so (NOTES §49).
+ */
+export function actionCard(action: NomiAction): { heading: string; detail: string; confirm: string; note?: string } {
+  const kept = 'kept' in action && (action.kept ?? 0) > 0 ? { note: `Your ${questions(action.kept!)}, as you wrote them` } : {};
   switch (action.kind) {
     case 'make_set':
-      return { heading: 'New set', detail: `${action.title} · ${plural(action.count, 'card')}`, confirm: 'Make it' };
+      return { heading: 'New set', detail: `${action.title} · ${plural(cardsOf(action), 'card')}`, confirm: 'Make it', ...kept };
     case 'add_notes':
-      return { heading: 'Add to a set', detail: `${action.setTitle} · ${plural(action.count, 'card')}`, confirm: 'Add them' };
+      return {
+        heading: 'Add to a set',
+        detail: `${action.setTitle} · ${plural(cardsOf(action), 'card')}`,
+        confirm: 'Add them',
+        ...kept,
+      };
     case 'write_reviewer':
       return { heading: 'New reviewer', detail: `${action.title} · ${plural(action.count, 'card')}`, confirm: 'Write it' };
     case 'rename_set':

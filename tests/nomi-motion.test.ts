@@ -2,14 +2,23 @@ import { describe, expect, it } from 'vitest';
 import {
   CHANNELS,
   entryPose,
+  GAZE_MAX,
+  GAZE_REACH,
+  IDLE_GESTURES,
+  lookToward,
   motionFor,
   IDLE_GREETING,
   nextBlinkDelay,
   nextGreetingDelay,
+  nextIdleGesture,
   NOMI_STATES,
+  pickAgain,
   REST,
   scaleAmplitude,
   segments,
+  TAP_REACTIONS,
+  tapReaction,
+  zzz,
   type Channel,
   type Motion,
 } from '../src/core/nomi-motion';
@@ -39,6 +48,11 @@ const LIMITS: Record<Channel, [number, number]> = {
   wingRight: [0, 150],
   lookX: [-0.3, 0.3],
   lookY: [-0.3, 0.3],
+  happy: [0, 1],
+  blush: [0, 1],
+  // Half-closed at most: a lid all the way down is asleep, and Nomi on Home is
+  // only sleepy — it still says its line.
+  lid: [0, 0.6],
 };
 
 describe('every state is well formed', () => {
@@ -99,8 +113,9 @@ describe('a wave now and then on Home (NOTES §45)', () => {
 describe('loops', () => {
   const loops = all.filter((m) => m.loop);
 
-  it('are idle, studying and thinking — the states that can last', () => {
-    expect(loops.map((m) => m.state).sort()).toEqual(['idle', 'studying', 'thinking']);
+  it('are idle, studying, thinking and sleepy — the states that can last', () => {
+    // Sleepy since NOTES §49: Nomi on Home late at night, for as long as Home is open.
+    expect(loops.map((m) => m.state).sort()).toEqual(['idle', 'sleepy', 'studying', 'thinking']);
   });
 
   it('join up, so there is no jump at the seam', () => {
@@ -195,6 +210,57 @@ describe('the states keep their roles', () => {
     const thinking = motionFor('thinking');
     expect(lastFrame(thinking, 'lookY')).toBeLessThan(0);
     expect(thinking.blink!.minGapMs).toBeGreaterThan(motionFor('idle').blink!.minGapMs);
+  });
+});
+
+describe('more life (NOTES §49)', () => {
+  const peak = (state: Parameters<typeof motionFor>[0], channel: Channel) =>
+    Math.max(...(motionFor(state).tracks.find((t) => t.channel === channel)?.frames.map((f) => f.value) ?? [0]));
+
+  it('closes the eyes happy — the reference sheet’s "^ ^" — when things go well, and on a tap', () => {
+    for (const state of ['success', 'encouraging', 'hop', 'nod', 'shy', 'stretch'] as const) {
+      expect(peak(state, 'happy'), state).toBe(1);
+      // Closed eyes do not blink.
+      expect(motionFor(state).blink, state).toBeNull();
+    }
+    for (const state of ['idle', 'thinking', 'studying', 'greeting', 'explaining'] as const) {
+      expect(peak(state, 'happy'), state).toBe(0);
+    }
+  });
+
+  it('hops high enough to see, and the nod is small and quick', () => {
+    const hop = motionFor('hop').tracks.find((t) => t.channel === 'lift')!.frames.map((f) => f.value);
+    expect(Math.min(...hop)).toBeLessThanOrEqual(-0.05);
+    // The next card is never waiting on a nod.
+    expect(motionFor('nod').duration).toBeLessThanOrEqual(800);
+    expect(Math.max(...motionFor('nod').tracks.find((t) => t.channel === 'lift')!.frames.map((f) => f.value))).toBeLessThanOrEqual(0.03);
+  });
+
+  it('blushes only when held, and is sleepy only at night, with "z"s', () => {
+    for (const state of NOMI_STATES) expect(peak(state, 'blush') > 0, state).toBe(state === 'shy');
+    for (const state of NOMI_STATES) expect(peak(state, 'lid') > 0, state).toBe(state === 'sleepy');
+    expect(NOMI_STATES.filter(zzz)).toEqual(['sleepy']);
+    expect(motionFor('sleepy').blink!.closedMs).toBeGreaterThan(motionFor('idle').blink!.closedMs);
+  });
+
+  it('never does the same thing twice running, idle or tapped', () => {
+    for (const r of [0, 0.3, 0.6, 0.99]) {
+      for (const last of IDLE_GESTURES) expect(nextIdleGesture(() => r, last)).not.toBe(last);
+      for (const last of TAP_REACTIONS) expect(tapReaction(() => r, last)).not.toBe(last);
+    }
+    expect(new Set([0, 0.5, 0.99].map((r) => tapReaction(() => r, null)))).toEqual(new Set(TAP_REACTIONS));
+    expect(pickAgain(['only'], () => 0.5, 'only')).toBe('only');
+  });
+
+  it('follows the pointer with its eyes — further the further away, never past the limit', () => {
+    expect(lookToward({ x: 0, y: 0 }, { x: 0, y: 0 })).toEqual({ x: 0, y: 0 });
+    const far = lookToward({ x: 100, y: 100 }, { x: 100 + GAZE_REACH * 3, y: 100 });
+    expect(far.x).toBeCloseTo(GAZE_MAX, 10);
+    expect(far.y).toBeCloseTo(0, 10);
+    const near = lookToward({ x: 0, y: 0 }, { x: 0, y: -GAZE_REACH / 2 });
+    expect(near.y).toBeCloseTo(-GAZE_MAX / 2, 10);
+    const diagonal = lookToward({ x: 0, y: 0 }, { x: 1000, y: 1000 });
+    expect(Math.hypot(diagonal.x, diagonal.y)).toBeCloseTo(GAZE_MAX, 10);
   });
 });
 

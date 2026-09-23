@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   actionCard,
+  amendProposal,
   askLine,
   CARD_COUNTS,
   chooseCardCount,
@@ -380,5 +381,91 @@ describe('turnsForModel — what Gemini is sent (NOTES §45)', () => {
     ]);
     expect(sent[0]!.text).toMatch(/^Pasted notes, 201 words: "/);
     expect(sent[2]!.text).toMatch(/^Pasted notes, 300 words:\n/);
+  });
+});
+
+describe('his own questions, kept as he wrote them (NOTES §49)', () => {
+  /** Five Q:A pairs: 40-odd words, under the 50 a paste of prose needs. */
+  const QA = [
+    'Q: What is osmosis?',
+    'A: Water moving across a membrane.',
+    'Q: What is diffusion?',
+    'A: Particles spreading out.',
+    'Q: What is ATP?',
+    'A: The energy of the cell.',
+    'Q: Why do cells divide?',
+    'A: To grow and to repair.',
+    'Q: What is a gene?',
+    'A: A unit of heredity.',
+  ].join('\n');
+
+  const offerFor = (message: string) => proposeAction(message, snapshot)?.action as Extract<
+    NomiAction,
+    { kind: 'make_set' }
+  >;
+
+  it('offers a set for Q:A notes too short to count as a paste of prose', () => {
+    const action = offerFor(`make flashcards from these\n${QA}`);
+    expect(action).toMatchObject({ kind: 'make_set', kept: 5, count: 5 });
+  });
+
+  it('names the set without his "Q:" label', () => {
+    expect(offerFor(`make flashcards from these\n${QA}`).title).toBe('What is osmosis?');
+    expect(suggestTitle('1. Question: Ano ang photosynthesis?\nAnswer: …')).toBe('Ano ang photosynthesis?');
+  });
+
+  it('says it will keep them, and picks exactly as many as he wrote', () => {
+    const action = offerFor(`make flashcards from these\n${QA}`);
+    expect(askLine(action)).toBe(
+      `Want me to make a new set, "${action.title}", from your notes? I'll keep your 5 questions exactly as you wrote them.`,
+    );
+    expect(actionCard(action)).toEqual({
+      heading: 'New set',
+      detail: `${action.title} · 5 cards`,
+      confirm: 'Make it',
+      note: 'Your 5 questions, as you wrote them',
+    });
+    expect(doneLine(action)).toBe(`Done. I'm making 5 cards for "${action.title}" now.`);
+  });
+
+  it('writes the rest of a bigger count, and says so', () => {
+    const action = { ...offerFor(`make 20 flashcards from these\n${QA}`) };
+    expect(action).toMatchObject({ kept: 5, count: 20 });
+    expect(askLine(action)).toMatch(/I'll keep your 5 questions exactly as you wrote them\. And I'll write 15 more of my own\.$/);
+    expect(actionCard(action).detail).toMatch(/· 20 cards$/);
+  });
+
+  it('never makes fewer than his questions, whatever count is tapped', () => {
+    const action = { ...offerFor(`make flashcards from these\n${QA}`), count: 2 };
+    expect(doneLine(action)).toMatch(/making 5 cards/);
+  });
+
+  it('lets Nomi reword them when he says so, and keeps them again when he says that', () => {
+    const offered = offerFor(`make flashcards from these\n${QA}`);
+
+    const reworded = amendProposal('reword them please', offered)!;
+    expect(reworded.say).toBe("Okay, I'll write new questions from your notes.");
+    expect(reworded.action).not.toHaveProperty('kept');
+    expect(askLine(reworded.action!)).toMatch(/^Want me to make a new set, ".+", with 5 cards\?/);
+
+    const keptAgain = amendProposal("keep them as is, don't reword", reworded.action!)!;
+    expect(keptAgain.say).toBe("Okay, I'll keep your 5 questions exactly as you wrote them.");
+    expect(keptAgain.action).toMatchObject({ kept: 5 });
+  });
+
+  it('says so when there is nothing of his to keep', () => {
+    const prosey = proposeAction(`make flashcards from these\n${NOTES}`, snapshot)!.action!;
+    expect(prosey).not.toHaveProperty('kept');
+    expect(amendProposal('keep them word for word', prosey)!.say).toMatch(/couldn't find questions/);
+  });
+
+  it('keeps his questions when Gemini is the one who saw they were notes', () => {
+    expect(proposeNotesSet(QA, snapshot)!.action).toMatchObject({ kind: 'make_set', kept: 5 });
+  });
+
+  it('leaves prose offers exactly as they were', () => {
+    const action = proposeAction(`make flashcards from these\n${NOTES}`, snapshot)!.action!;
+    expect(askLine(action)).toMatch(/with 10 cards\? I picked 10 for notes this long\.$/);
+    expect(actionCard(action)).not.toHaveProperty('note');
   });
 });

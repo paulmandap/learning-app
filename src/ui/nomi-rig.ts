@@ -18,5 +18,14 @@ export const NOMI_RIG = {
   ],
   "eyeLeftLine": 0.3355,
   "eyeRightLine": 0.4055,
-  "eyeRadius": 0.1396
+  "eyeRadius": 0.1396,
+  "eyeLeftCenter": [
+    0.311,
+    0.3355
+  ],
+  "eyeRightCenter": [
+    0.723,
+    0.4055
+  ],
+  "faceColour": "#fce1c2"
 } as const;

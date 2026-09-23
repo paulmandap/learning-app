@@ -408,6 +408,54 @@ export function parseChatResult(payload: unknown): import('./provider').ChatRepl
   return reply.answer || reply.reviewerTopic || reply.setTitle || reply.pastedNotes ? reply : null;
 }
 
+// ------------------------------------------------------------ Q:A pointer --
+
+const pointedPairSchema = z.object({
+  page_index: z.number().int(),
+  question: z.string(),
+  answer: z.string(),
+});
+
+/**
+ * The questions and answers in notes the keeper could not read (NOTES §49).
+ * What comes back is only a pointer: `locatePointed` finds each half in the
+ * notes, and a pair it cannot find is not kept.
+ */
+export const POINT_QA_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    pairs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          page_index: { type: 'integer' },
+          question: { type: 'string' },
+          answer: { type: 'string' },
+        },
+        required: ['page_index', 'question', 'answer'],
+      },
+    },
+  },
+  required: ['pairs'],
+} as const;
+
+/** The entries that parse, one by one — a malformed one costs that pair, never the rest. */
+export function parsePointedPairs(payload: unknown): { page_index: number; question: string; answer: string }[] {
+  const container =
+    typeof payload === 'object' && payload !== null && 'pairs' in payload
+      ? (payload as { pairs: unknown }).pairs
+      : payload;
+  if (!Array.isArray(container)) return [];
+  return container
+    .map((raw) => pointedPairSchema.safeParse(raw))
+    .filter(
+      (r): r is { success: true; data: { page_index: number; question: string; answer: string } } => r.success,
+    )
+    .map((r) => r.data)
+    .filter((p) => p.question.trim().length > 0 && p.answer.trim().length > 0);
+}
+
 // -------------------------------------------------------------- reviewer --
 
 /** A reviewer on a topic (NOTES §39): the notes, as one plain-text field. */

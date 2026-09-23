@@ -36,7 +36,7 @@ import { getAppSnapshot } from '../../src/data/nomi';
 import { useSessionStore } from '../../src/data/session';
 import { formatSetTitle } from '../../src/core/title';
 import { greetingName } from '../../src/core/avatar';
-import { homeLine } from '../../src/core/nomi-brain';
+import { homeLine, isNight } from '../../src/core/nomi-brain';
 import { dueFirst } from '../../src/core/set-order';
 
 /**
@@ -160,7 +160,12 @@ export default function Home() {
           empty snapshot would say "add some notes" to someone with nine sets
           for the second it took to load. */}
       {knowsStudent && snapshot ? (
-        <NomiCard line={homeLine(snapshot)} onPress={() => router.push('/nomi')} />
+        // The hour decides a sleepy Nomi and its late-night line together (NOTES §49).
+        <NomiCard
+          line={homeLine(snapshot, new Date().getHours())}
+          night={isNight(new Date().getHours())}
+          onPress={() => router.push('/nomi')}
+        />
       ) : null}
 
       {!profileLoading && !hasKey ? (

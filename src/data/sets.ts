@@ -1,5 +1,6 @@
 import { supabase, type Db } from './supabase';
 import type { Plan } from '../core/planner';
+import type { KeptPairs } from '../core/qa-pairs';
 import { isMissingColumn, isMissingTable } from '../core/db-errors';
 import { removeAvatarPhotos } from './profile';
 import { removeAllNoteImages } from './notes';
@@ -47,6 +48,13 @@ export interface StudySet {
 export interface StoredPlan extends Plan {
   completedSectionIds: string[];
   requestedCount: number;
+  /**
+   * The student's own questions and answers, made into cards as written (NOTES
+   * §49). Absent on every plan stored before it, on notes with none, and when
+   * the student chose to let Nomi reword them. `requestedCount` then counts
+   * them too; the sections plan only the cards Nomi writes on top.
+   */
+  keep?: KeptPairs;
 }
 
 async function currentUserId(): Promise<string> {

@@ -3,6 +3,7 @@ import {
   answerLocally,
   EMPTY_SNAPSHOT,
   homeLine,
+  isNight,
   modelBrief,
   suggestion,
   type AppSnapshot,
@@ -78,6 +79,59 @@ describe('questions that only LOOK like app questions go to Gemini', () => {
     expect(
       answerLocally('hi so I was wondering what my streak means for the exam next week and how to plan', paul),
     ).toBeNull();
+  });
+});
+
+describe('who made Nomi, and what Nomi is (NOTES §49)', () => {
+  it.each([
+    ['who made you?', 'maker'],
+    ['who created you', 'maker'],
+    ["who's your creator", 'maker'],
+    ['who built nomi', 'maker'],
+    ['sino gumawa sayo', 'maker'],
+    ['are you chatgpt?', 'what_ai'],
+    ['are you an AI', 'what_ai'],
+    ['are you real', 'what_ai'],
+    ['what ai are you', 'what_ai'],
+    ["what's your name?", 'who'],
+  ])('%s → %s', (message, intent) => {
+    expect(intentOf(message)).toBe(intent);
+  });
+
+  it('names its maker, and says it uses Gemini', () => {
+    expect(answerLocally('who made you?', paul)!.text).toBe(
+      "Paul Christian Mandap made me, to help you study. I use Google's Gemini to help me think.",
+    );
+    expect(answerLocally('are you chatgpt', paul)!.text).toBe(
+      "I'm Nomi, an AI study companion, not a person. Paul made me, and I use Google's Gemini to help me think.",
+    );
+    expect(answerLocally('who are you', paul)!.text).toMatch(/^I'm Nomi, your study companion\. Paul made me\./);
+  });
+
+  it.each([
+    'who made the first computer',
+    'who created facebook',
+    'who built the pyramids',
+    'who invented the telephone',
+    'are you sure',
+    'are you there',
+    'what is ai',
+  ])('%s → Gemini', (message) => {
+    expect(answerLocally(message, paul)).toBeNull();
+  });
+});
+
+describe('Home late at night (NOTES §49)', () => {
+  it('is night from 10pm until 5am', () => {
+    expect([21, 22, 23, 0, 4, 5, 12].map(isNight)).toEqual([false, true, true, true, true, false, false]);
+  });
+
+  it('says one gentle line instead: a quick review if anything waits, rest if not', () => {
+    expect(homeLine(paul, 23)).toBe("It's late. One quick review, then sleep?");
+    expect(homeLine({ ...paul, toRetry: 0, dueToday: 0 }, 2)).toBe("It's late, and you're all caught up. Sleep well.");
+    // By day, and when no hour is given, exactly as before.
+    expect(homeLine(paul, 14)).toBe(homeLine(paul));
+    expect(homeLine(EMPTY_SNAPSHOT, 23)).toBe("Add some notes and I'll help you study them.");
   });
 });
 

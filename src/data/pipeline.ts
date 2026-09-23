@@ -27,8 +27,19 @@ import {
   type SentenceSpan,
 } from '../core/coverage';
 import { normalize, splitSentences } from '../core/text';
-import { summariseDrops, validateItems, type DroppedItem, type ExistingCard } from '../core/validate';
+import { summariseDrops, validateItems, type DroppedItem, type ExistingCard, type ValidatedItem } from '../core/validate';
 import { numberSetPages, type SetPage, type SetPages } from '../core/set-pages';
+import {
+  findQaPairs,
+  keptOnPages,
+  keptTarget,
+  locatePointed,
+  looksLikeQa,
+  mergeKept,
+  newCards,
+  pairToItem,
+  type KeptPairs,
+} from '../core/qa-pairs';
 import {
   createDocument,
   listDocuments,
@@ -194,14 +205,88 @@ function plannerPage(p: SetPage): PageInput {
   return { page_index: p.set_page, text: p.text, readability: p.readability, headings: p.headings };
 }
 
-/** Build and persist the plan for everything currently in the set. */
-export async function planSet(setId: string, requestedCount: number): Promise<StoredPlan> {
+/**
+ * Most characters sent for Gemini to point at, in one document. Past this the
+ * notes are made into cards the ordinary way, and it is logged: pointing means
+ * the reply repeats the notes back, and a reply that long is one that gets cut
+ * off halfway.
+ */
+export const MAX_POINT_CHARS = 20_000;
+
+/**
+ * The student's own questions and answers in these documents (NOTES §49).
+ *
+ * Read by the keeper, `findQaPairs`, with no model at all. Where a page still
+ * looks like Q:A in a layout the keeper cannot read, Gemini is asked to point at
+ * the pairs, and `locatePointed` keeps the ones really in the notes. A pointer
+ * that fails costs only that: the notes are made into cards as they were before
+ * any of this existed.
+ */
+async function findKept(pages: readonly SetPage[], documentIds: readonly string[], apiKey?: string): Promise<KeptPairs> {
+  const keep: KeptPairs = { documentIds: [...documentIds], pointed: [], pairs: 0 };
+  for (const documentId of documentIds) {
+    const own = pages.filter((p) => p.document_id === documentId && p.readability >= MIN_READABILITY);
+    const found = new Map(own.map((p) => [p.page_index, findQaPairs(p.text, p.headings)]));
+    for (const pairs of found.values()) keep.pairs += pairs.length;
+
+    const unread = own.filter((p) => looksLikeQa(p.text, found.get(p.page_index) ?? [], p.headings));
+    if (!apiKey || unread.length === 0) continue;
+    const chars = unread.reduce((n, p) => n + p.text.length, 0);
+    if (chars > MAX_POINT_CHARS) {
+      console.warn(`[pipeline] Q:A pointer skipped: ${chars} characters is more than ${MAX_POINT_CHARS}`);
+      continue;
+    }
+    try {
+      const provider = new GeminiBrowserProvider(apiKey);
+      const pointed = await new CallQueue().run(() =>
+        provider.pointQaPairs({ pages: unread.map((p) => ({ page_index: p.page_index, text: p.text })) }),
+      );
+      let kept = 0;
+      for (const page of unread) {
+        const located = locatePointed(
+          page.text,
+          pointed.filter((x) => x.page_index === page.page_index),
+          found.get(page.page_index) ?? [],
+        );
+        keep.pointed.push(...located.map((l) => ({ documentId, pageIndex: page.page_index, span: l.span })));
+        kept += located.length;
+      }
+      keep.pairs += kept;
+      console.warn(`[pipeline] Q:A pointer: ${pointed.length} named, ${kept} found in the notes and kept`);
+    } catch (err) {
+      console.warn(`[pipeline] Q:A pointer failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return keep;
+}
+
+/** What `planSet` and `extendPlanForDocuments` are told about keeping the student's wording. */
+export interface KeepOptions {
+  /** Make the student's own questions and answers into cards as written (NOTES §49). */
+  keepWording?: boolean;
+  /** For asking Gemini to point at pairs in a layout the keeper cannot read. */
+  apiKey?: string;
+}
+
+/**
+ * Build and persist the plan for everything currently in the set.
+ *
+ * With `keepWording`, the student's own pairs are made into cards as written,
+ * all of them, and the sections plan only what the count asks for on top
+ * (`keptTarget`, NOTES §49).
+ */
+export async function planSet(setId: string, requestedCount: number, options: KeepOptions = {}): Promise<StoredPlan> {
   const { pages } = await setPages(setId);
-  const plan = buildPlan(pages.map(plannerPage), requestedCount);
+  const keep = options.keepWording
+    ? await findKept(pages, [...new Set(pages.map((p) => p.document_id))], options.apiKey)
+    : null;
+  const { target, extra } = keptTarget(requestedCount, keep?.pairs ?? 0);
+  const plan = buildPlan(pages.map(plannerPage), extra);
   const stored: StoredPlan = {
     ...plan,
     completedSectionIds: [],
-    requestedCount,
+    requestedCount: target,
+    ...(keep && keep.pairs > 0 ? { keep } : {}),
   };
 
   await updateSet(setId, { plan: stored, status: 'generating' });
@@ -219,11 +304,13 @@ export async function planSet(setId: string, requestedCount: number): Promise<St
  * them exactly as it would after a refresh. Nothing is regenerated, and no
  * existing card is touched.
  */
-export async function extendPlanForDocuments(input: {
-  setId: string;
-  documentIds: string[];
-  requestedCount: number;
-}): Promise<StoredPlan> {
+export async function extendPlanForDocuments(
+  input: {
+    setId: string;
+    documentIds: string[];
+    requestedCount: number;
+  } & KeepOptions,
+): Promise<StoredPlan> {
   const { setId, documentIds, requestedCount } = input;
 
   const set = await getSet(setId);
@@ -232,7 +319,11 @@ export async function extendPlanForDocuments(input: {
   const adding = new Set(documentIds);
   const newPages = (await setPages(setId)).pages.filter((p) => adding.has(p.document_id));
 
-  const addition = buildPlan(newPages.map(plannerPage), requestedCount);
+  // The student's own pairs in what is being added, and only there: a set's
+  // earlier notes keep whatever was decided when they were added (NOTES §49).
+  const keep = input.keepWording ? await findKept(newPages, documentIds, input.apiKey) : null;
+  const { target, extra } = keptTarget(requestedCount, keep?.pairs ?? 0);
+  const addition = buildPlan(newPages.map(plannerPage), extra);
 
   // Section ids are derived from page index. Set page numbers no longer collide
   // with an earlier document's, but a plan stored before §43 numbered every
@@ -258,8 +349,10 @@ export async function extendPlanForDocuments(input: {
     // Everything previously generated stays marked done, so only the new
     // sections run.
     completedSectionIds: existing?.completedSectionIds ?? [],
-    requestedCount: (existing?.requestedCount ?? 0) + requestedCount,
+    requestedCount: (existing?.requestedCount ?? 0) + target,
   };
+  const kept = mergeKept(existing?.keep, keep);
+  if (kept) merged.keep = kept;
 
   await updateSet(setId, { plan: merged, status: 'generating' });
   return merged;
@@ -330,6 +423,11 @@ export async function generateSet(input: {
   const numbered = await setPages(setId);
   const pageText = new Map(numbered.pages.map((p) => [p.set_page, p.text]));
 
+  // The student's own questions and answers, where the plan keeps them (NOTES
+  // §49): the pages they are on, and every line they cover — lines the
+  // card-writer is kept off, so what Nomi writes comes from the rest.
+  const kept = plan.keep ? keptOnPages(numbered.pages, plan.keep, MIN_READABILITY) : null;
+
   const done = new Set(plan.completedSectionIds ?? []);
   const pending = plan.sections.filter((s) => !done.has(s.id));
 
@@ -342,10 +440,12 @@ export async function generateSet(input: {
   let dbMs = 0;
   let calls = 0;
 
+  // Sections only: `done` also holds the kept pairs' own marks (`verbatim:…`).
+  const sectionsDone = () => plan.sections.filter((s) => done.has(s.id)).length;
   const report = () =>
     onProgress?.({
       phase: 'generating',
-      sectionsDone: done.size,
+      sectionsDone: sectionsDone(),
       sectionsTotal: plan.sections.length,
       itemsSoFar: itemsCreated,
     });
@@ -375,9 +475,12 @@ export async function generateSet(input: {
       maxTotal: number;
       /** A fill pass: any level, this part of the notes, and — while strict — only these lines. */
       fill?: { span: SentenceSpan; angles: boolean; onlyLines?: Line[] };
+      /** Only these lines, outside a fill pass: the ones that are not the student's own pairs (NOTES §49). */
+      only?: Line[];
     },
   ): Promise<number> => {
     const bands = request.bands.filter((b) => b.quota > 0);
+    const onlyLines = request.fill?.onlyLines ?? request.only;
     const callStart = Date.now();
     const generated = await provider.generateItems({
       sectionText: renderPagesForPrompt(pagesOf(section), request.fill?.span ?? section.span),
@@ -391,7 +494,7 @@ export async function generateSet(input: {
       avoid: seen.length > 0 ? [...seen] : undefined,
       flexibleLevels: request.fill !== undefined,
       angles: request.fill?.angles,
-      onlyLines: request.fill?.onlyLines,
+      onlyLines,
     });
     generateMs += Date.now() - callStart;
     calls++;
@@ -400,7 +503,6 @@ export async function generateSet(input: {
     // owed is the total. The same validators run either way.
     const n = request.maxTotal;
     const caps: TierBudget = request.fill ? { remember: n, understand: n, apply: n } : request.budget;
-    const onlyLines = request.fill?.onlyLines;
     const { kept, dropped: lost } = validateItems(generated, pageText, caps, seen, {
       bands,
       maxTotal: n,
@@ -416,6 +518,51 @@ export async function generateSet(input: {
     return inserted;
   };
 
+  // ------------------------------------------ the student's own, as written --
+  //
+  // NOTES §49. No model: each pair IS the card, read out of the notes by
+  // `findQaPairs` (or pointed at by Gemini when the plan was made, and found in
+  // the notes). First, because they are instant and the student's own, and
+  // before the card-writer, whose avoid-list then carries them. Marked done per
+  // document, and never inserted twice either way — `newCards` drops a pair
+  // already in the set, so a run cut off between the two still resumes cleanly.
+  const keptRun = await Promise.allSettled([
+    (async () => {
+      if (!plan.keep || !kept) return;
+      const titleOf = (setPage: number): string => {
+        const page = numbered.pages.find((p) => p.set_page === setPage);
+        return plan.sections.find((s) => s.pages.includes(setPage))?.title ?? page?.headings[0] ?? 'Your notes';
+      };
+      for (const documentId of plan.keep.documentIds) {
+        const mark = `verbatim:${documentId}`;
+        if (done.has(mark)) continue;
+        const items = numbered.pages
+          .filter((p) => p.document_id === documentId)
+          .flatMap((p) => (kept.byPage.get(p.set_page) ?? []).map((pair) => pairToItem(p.text, p.set_page, pair)))
+          .filter((item): item is ValidatedItem => item !== null);
+        const fresh = newCards(items, seen);
+
+        // Filed under the section the plan gives their page, like every other card.
+        const byTitle = new Map<string, ValidatedItem[]>();
+        for (const item of fresh) {
+          const title = titleOf(item.page_index);
+          byTitle.set(title, [...(byTitle.get(title) ?? []), item]);
+        }
+        const dbStart = Date.now();
+        for (const [title, group] of byTitle) {
+          itemsCreated += await insertItems(setId, numbered.locate, title, group);
+          for (const k of group) seen.push({ prompt: k.prompt, answer: k.answer, excerpt: k.source_excerpt });
+        }
+        await markSectionComplete(setId, mark);
+        dbMs += Date.now() - dbStart;
+        done.add(mark);
+        console.warn(`[pipeline] kept as written: ${fresh.length} of ${items.length} pair(s) in one document`);
+        report();
+      }
+    })(),
+  ]);
+  failure = failureOf(keptRun, failure);
+
   // ------------------------------------------------------ every section once --
   //
   // Sections run THROUGH THE QUEUE, concurrently. This used to be a sequential
@@ -426,12 +573,15 @@ export async function generateSet(input: {
   const results = await Promise.allSettled(
     pending.map((section) =>
       queue.run(async () => {
-        const lines = flattenLines(pagesOf(section), section.span);
+        const all = flattenLines(pagesOf(section), section.span);
+        // Never the student's own pairs: those are cards already, as written.
+        const lines = kept ? all.filter((line) => !kept.lines.has(lineKey(line))) : all;
         if (lines.length > 0) {
           await ask(section, {
             budget: section.budget,
             bands: planBands(lines, section.total),
             maxTotal: section.total,
+            ...(lines.length < all.length ? { only: lines } : {}),
           });
         }
         const dbStart = Date.now();
@@ -478,6 +628,9 @@ export async function generateSet(input: {
       const usedText = new Set(
         cited.map((ref) => normalize(splitSentences(pageText.get(ref.page) ?? '')[ref.sentence] ?? '')),
       );
+      // Every line of the student's own pairs has its card: the question AND
+      // the answer, where a citation only names the line it starts on (§49).
+      for (const text of kept?.texts ?? []) usedText.add(text);
       const have = new Map(plan.sections.map((s) => [s.id, cited.filter((ref) => inSection(s, ref)).length]));
       const owed = shortfallBySection(plan.sections, have, short);
       const strict = !relaxed && pass < MAX_FILL_PASSES;
@@ -616,7 +769,7 @@ export async function generateSet(input: {
 
   onProgress?.({
     phase: finished ? 'done' : 'failed',
-    sectionsDone: done.size,
+    sectionsDone: sectionsDone(),
     sectionsTotal: plan.sections.length,
     itemsSoFar: itemsCreated,
     // Carried on the last event, so the screen still has the reason once the

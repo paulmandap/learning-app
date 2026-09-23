@@ -606,6 +606,20 @@ describe("the owner's third round (NOTES §37)", () => {
     expect(code(read('src', 'data', 'nomi-agent.ts'))).toContain('startSet(');
   });
 
+  it("keeps the student's own questions as written from both, and never a reviewer's (NOTES §49)", () => {
+    // Raw source for new.tsx, for the reason above.
+    expect(read('app', 'new.tsx')).toMatch(/await startSet\(\{[\s\S]*?keepWording,[\s\S]*?\}\)/);
+    const agent = code(read('src', 'data', 'nomi-agent.ts'));
+    const calls = agent.match(/startSet\(\{[\s\S]*?\}\)/g) ?? [];
+    expect(calls).toHaveLength(2);
+    // make_set / add_notes: kept when the offer kept them.
+    expect(calls[0]).toContain('keepWording: (action.kept ?? 0) > 0');
+    // write_reviewer: Gemini's facts, not the student's words — never kept as written.
+    expect(calls[1]).not.toContain('keepWording');
+    // And off unless asked for, so a caller that says nothing gets the old behaviour.
+    expect(code(read('src', 'data', 'start-set.ts'))).toContain('keepWording: input.keepWording === true');
+  });
+
   it('Progress draws the week as columns against a count axis', () => {
     const progress = code(read('app', '(tabs)', 'progress.tsx'));
     expect(progress).toContain('forecastShortLabel(');
@@ -679,6 +693,40 @@ describe('Nomi celebrates a finished round, never a single answer (NOTES §43)',
       expect(source, screen).toContain('<StudyProgress');
       expect(source, screen).not.toContain('<ProgressBar');
     }
+  });
+
+  it('nods at a right answer beside the count, and nowhere else (NOTES §49)', () => {
+    // The owner reversed "never after a single answer" for this one small nod.
+    // The celebration above is still the round's end only; the nod is kept to
+    // the one component every study screen already shows, so a reaction to
+    // each answer cannot turn up anywhere by accident.
+    const nodders = [...tsxUnder('app'), ...tsxUnder(join('src', 'ui'))].filter((f) =>
+      /['"]nod['"]/.test(code(readFileSync(f, 'utf8'))),
+    );
+    expect(nodders.map((f) => f.split(/[\\/]/).pop())).toEqual(['nomi-studying.tsx']);
+    for (const screen of ['flashcards.tsx', 'quiz.tsx', 'blanks.tsx']) {
+      expect(code(read('app', 'set', '[id]', screen)), screen).toMatch(/<StudyProgress[\s\S]*?right=\{/);
+    }
+  });
+});
+
+describe('Nomi on Home has more life (NOTES §49)', () => {
+  const nomi = code(read('src', 'ui', 'nomi.tsx'));
+
+  it('reacts to a tap on the owl, while the line still opens the chat', () => {
+    expect(nomi).toMatch(/accessibilityLabel="Pet Nomi"[\s\S]*?onPress=\{tap\}[\s\S]*?onLongPress=/);
+    expect(nomi).toMatch(/accessibilityLabel=\{`Talk to Nomi\. \$\{line\}`\}[\s\S]*?onPress=\{onPress\}/);
+  });
+
+  it('follows the pointer with its eyes only while it is just standing there', () => {
+    expect(nomi).toContain("useNomiGaze(focused && reduce === false && owl === 'idle')");
+  });
+
+  it('is sleepy at night, and Home says so in the same breath', () => {
+    const home = code(read('app', '(tabs)', 'index.tsx'));
+    expect(home).toMatch(/homeLine\(snapshot, new Date\(\)\.getHours\(\)\)/);
+    expect(home).toMatch(/night=\{isNight\(new Date\(\)\.getHours\(\)\)\}/);
+    expect(nomi).toContain("const rest: NomiState = night ? 'sleepy' : 'idle';");
   });
 });
 
@@ -762,7 +810,8 @@ describe("Nomi's screen describes the present", () => {
 
   it('opens a new conversation with Nomi saying hello, not a description of Nomi', () => {
     expect(code(screen)).toContain('<NomiWelcome');
-    expect(code(screen)).toContain('homeLine(chat.snapshot)');
+    // With the hour since NOTES §49, so a late-night welcome says it is late.
+    expect(code(screen)).toMatch(/homeLine\(chat\.snapshot(, new Date\(\)\.getHours\(\))?\)/);
   });
 });
 

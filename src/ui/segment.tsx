@@ -100,28 +100,35 @@ export function LevelSegment({
  * that is always absent here or an optional one that is easy to forget there.
  * The appearance is shared; the promise is not.
  *
- * Used by the Community tab for Sets / Top sets / Chat.
+ * Used by the Community tab for Sets / Top sets / Chat — and, as `role="radio"`,
+ * by Add notes for keeping the student's own questions as written or not (NOTES
+ * §49), which is a choice of how, not of where, and is announced as one.
  */
 export function Segment<T extends string>({
   value,
   options,
   onChange,
+  role = 'tab',
 }: {
   value: T;
   options: readonly { key: T; label: string }[];
   onChange: (key: T) => void;
+  role?: 'tab' | 'radio';
 }) {
   const t = useTheme();
 
   return (
-    <View style={{ flexDirection: 'row', gap: space.sm }} accessibilityRole="tablist">
+    <View
+      style={{ flexDirection: 'row', gap: space.sm }}
+      accessibilityRole={role === 'radio' ? 'radiogroup' : 'tablist'}
+    >
       {options.map((o) => {
         const selected = value === o.key;
         return (
           <Pressable
             key={o.key}
-            accessibilityRole="tab"
-            accessibilityState={{ selected }}
+            accessibilityRole={role}
+            accessibilityState={role === 'radio' ? { checked: selected } : { selected }}
             accessibilityLabel={o.label}
             onPress={() => onChange(o.key)}
             style={{

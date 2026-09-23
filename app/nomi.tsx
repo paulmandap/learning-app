@@ -85,7 +85,7 @@ export default function Nomi() {
           {empty ? (
             <NomiWelcome
               name={chat.snapshot.name}
-              line={homeLine(chat.snapshot)}
+              line={homeLine(chat.snapshot, new Date().getHours())}
               suggestions={SUGGESTIONS}
               onPick={(text) => void chat.send(text)}
             />

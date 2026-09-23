@@ -47,6 +47,9 @@ export async function carryOut(action: NomiAction, input: { apiKey: string }): P
         sources: [{ text: action.notes }],
         count: action.count,
         apiKey: input.apiKey,
+        // The student's own questions, as written, unless they asked Nomi to
+        // reword them (NOTES §49). A reviewer below is Gemini's words, and never.
+        keepWording: (action.kept ?? 0) > 0,
       });
       return { text: doneLine(action), openSetId: setId };
     }

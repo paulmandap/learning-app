@@ -144,6 +144,13 @@ export interface AIProvider {
    * (NOTES §39). Null when nothing usable came back.
    */
   writeReviewer(input: { topic: string; facts: number }): Promise<string | null>;
+  /**
+   * The questions and answers in notes whose layout the keeper could not read
+   * (NOTES §49). A pointer only — `locatePointed` keeps what is really there.
+   */
+  pointQaPairs(input: {
+    pages: readonly { page_index: number; text: string }[];
+  }): Promise<{ page_index: number; question: string; answer: string }[]>;
   /** Three wrong answers per card, from the notes, for the quiz (NOTES §38). */
   writeWrongOptions(input: {
     notes: string;

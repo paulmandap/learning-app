@@ -45,6 +45,15 @@ export const NOMI_STATES = [
   'success',
   'studying',
   'goodbye',
+  // More life (NOTES §49): the owner, *"maybe it's time too to add more 'life'
+  // to nomi. more animations, interactions"*, choosing all four offered — tap to
+  // react, eyes that follow, new faces, and reacting during study.
+  'hop',
+  'stretch',
+  'lookAround',
+  'nod',
+  'shy',
+  'sleepy',
 ] as const;
 
 export type NomiState = (typeof NOMI_STATES)[number];
@@ -63,7 +72,15 @@ export type Channel =
   | 'wingRight'
   /** Where the eyes look, as a fraction of an eye's radius. */
   | 'lookX'
-  | 'lookY';
+  | 'lookY'
+  /**
+   * Faces, drawn in code over the pictures at the eyes the rig measured (NOTES
+   * §49), 0 to 1. `happy` closes the eyes into the reference sheet's "^ ^";
+   * `blush` is pink in the cheeks; `lid` lowers a sleepy eyelid.
+   */
+  | 'happy'
+  | 'blush'
+  | 'lid';
 
 export const CHANNELS: readonly Channel[] = [
   'lift',
@@ -74,6 +91,9 @@ export const CHANNELS: readonly Channel[] = [
   'wingRight',
   'lookX',
   'lookY',
+  'happy',
+  'blush',
+  'lid',
 ];
 
 /** Every channel at rest: the canonical pose, fully visible. */
@@ -86,6 +106,9 @@ export const REST: Readonly<Record<Channel, number>> = {
   wingRight: 0,
   lookX: 0,
   lookY: 0,
+  happy: 0,
+  blush: 0,
+  lid: 0,
 };
 
 export type Easing = 'inOut' | 'out' | 'in' | 'linear';
@@ -137,6 +160,24 @@ const EVERYDAY_BLINK: Blink = { minGapMs: 4000, maxGapMs: 8000, closedMs: 110 };
 
 function hold(channel: Channel, value: number, duration: number): Track {
   return { channel, frames: [{ at: 0, value }, { at: duration, value }] };
+}
+
+/** Eyes closed happy — "^ ^" — quickly, until `until`, then open again by the end. */
+function happyFace(duration: number, until: number, closeBy = 200): Track {
+  return {
+    channel: 'happy',
+    frames: [
+      { at: 0, value: 0 },
+      { at: closeBy, value: 1, easing: 'out' },
+      { at: until, value: 1 },
+      { at: duration, value: 0, easing: 'inOut' },
+    ],
+  };
+}
+
+/** Both wings out to `degrees` and back, the same way. */
+function bothWings(frames: Keyframe[]): Track[] {
+  return (['wingLeft', 'wingRight'] as const).map((channel) => ({ channel, frames }));
 }
 
 const IDLE: Motion = {
@@ -339,9 +380,12 @@ const MOTIONS: Record<NomiState, Motion> = {
           { at: 1400, value: 0, easing: 'inOut' },
         ],
       },
+      // The reference sheet's "^ ^", which the pictures alone could never show (§49).
+      happyFace(1400, 1150),
     ],
     next: 'idle',
-    blink: EVERYDAY_BLINK,
+    // Eyes closed happy: nothing to blink.
+    blink: null,
   },
 
   /** Two hops with both wings out. A round that went well. */
@@ -374,6 +418,7 @@ const MOTIONS: Record<NomiState, Motion> = {
           ],
         }),
       ),
+      happyFace(1400, 1100),
     ],
     next: 'idle',
     blink: null,
@@ -412,7 +457,253 @@ const MOTIONS: Record<NomiState, Motion> = {
     next: null,
     blink: null,
   },
+
+  /**
+   * A tap on Nomi (NOTES §49): a crouch, one hop with the eyes closed happy and
+   * the wings a little out, and a small landing.
+   */
+  hop: {
+    state: 'hop',
+    duration: 1000,
+    loop: false,
+    tracks: [
+      {
+        channel: 'lift',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 120, value: 0.015, easing: 'out' },
+          { at: 320, value: -0.07, easing: 'out' },
+          { at: 560, value: 0, easing: 'in' },
+          { at: 700, value: 0.01, easing: 'out' },
+          { at: 1000, value: 0, easing: 'inOut' },
+        ],
+      },
+      {
+        channel: 'scale',
+        frames: [
+          { at: 0, value: 1 },
+          { at: 120, value: 0.96, easing: 'out' },
+          { at: 320, value: 1.04, easing: 'out' },
+          { at: 560, value: 0.98, easing: 'inOut' },
+          { at: 1000, value: 1, easing: 'inOut' },
+        ],
+      },
+      ...bothWings([
+        { at: 0, value: 0 },
+        { at: 320, value: 28, easing: 'out' },
+        { at: 700, value: 0, easing: 'inOut' },
+        { at: 1000, value: 0 },
+      ]),
+      happyFace(1000, 780, 120),
+    ],
+    next: 'idle',
+    blink: null,
+  },
+
+  /** Both wings out, up on its toes, eyes closed contentedly. Idle, now and then, and a tap. */
+  stretch: {
+    state: 'stretch',
+    duration: 1600,
+    loop: false,
+    tracks: [
+      ...bothWings([
+        { at: 0, value: 0 },
+        { at: 600, value: 70, easing: 'inOut' },
+        { at: 1000, value: 70 },
+        { at: 1500, value: 0, easing: 'inOut' },
+        { at: 1600, value: 0 },
+      ]),
+      {
+        channel: 'lift',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 600, value: -0.02, easing: 'inOut' },
+          { at: 1000, value: -0.02 },
+          { at: 1500, value: 0, easing: 'inOut' },
+          { at: 1600, value: 0 },
+        ],
+      },
+      happyFace(1600, 1100, 500),
+    ],
+    next: 'idle',
+    blink: null,
+  },
+
+  /** A glance one way, then the other, the head following a little. Idle, now and then, and a tap. */
+  lookAround: {
+    state: 'lookAround',
+    duration: 2000,
+    loop: false,
+    tracks: [
+      {
+        channel: 'lookX',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 350, value: -0.3, easing: 'inOut' },
+          { at: 800, value: -0.3 },
+          { at: 1200, value: 0.3, easing: 'inOut' },
+          { at: 1600, value: 0.3 },
+          { at: 2000, value: 0, easing: 'inOut' },
+        ],
+      },
+      {
+        channel: 'tilt',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 400, value: -2, easing: 'inOut' },
+          { at: 800, value: -2 },
+          { at: 1200, value: 2, easing: 'inOut' },
+          { at: 1600, value: 2 },
+          { at: 2000, value: 0, easing: 'inOut' },
+        ],
+      },
+    ],
+    next: 'idle',
+    blink: null,
+  },
+
+  /**
+   * A card answered right, beside the count (NOTES §49): two small bobs and the
+   * eyes closed happy — then back to reading, which `StudyProgress` asks for.
+   * Quick, so the next card is never waiting on it. The owner chose this over
+   * §43's "never after a single answer"; the end-of-round celebration is still
+   * `success` and `encouraging`, and only `NomiFinish` may ask for those.
+   */
+  nod: {
+    state: 'nod',
+    duration: 700,
+    loop: false,
+    tracks: [
+      {
+        channel: 'lift',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 150, value: 0.02, easing: 'out' },
+          { at: 300, value: 0, easing: 'inOut' },
+          { at: 450, value: 0.015, easing: 'out' },
+          { at: 700, value: 0, easing: 'inOut' },
+        ],
+      },
+      happyFace(700, 500, 120),
+    ],
+    next: 'idle',
+    blink: null,
+  },
+
+  /** Held: a shy lean, pink in the cheeks, eyes closed happy. */
+  shy: {
+    state: 'shy',
+    duration: 1600,
+    loop: false,
+    tracks: [
+      {
+        channel: 'blush',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 300, value: 1, easing: 'out' },
+          { at: 1300, value: 1 },
+          { at: 1600, value: 0, easing: 'inOut' },
+        ],
+      },
+      {
+        channel: 'tilt',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 350, value: 3, easing: 'inOut' },
+          { at: 1250, value: 3 },
+          { at: 1600, value: 0, easing: 'inOut' },
+        ],
+      },
+      happyFace(1600, 1300, 250),
+    ],
+    next: 'idle',
+    blink: null,
+  },
+
+  /**
+   * Late at night, on Home (NOTES §49): lids half down, slow deep breathing,
+   * the head lolling a little, and heavy blinks. The floating "z"s are drawn by
+   * `nomi-character.tsx`, which asks `zzz(state)`.
+   */
+  sleepy: {
+    state: 'sleepy',
+    duration: 5200,
+    loop: true,
+    tracks: [
+      {
+        channel: 'lift',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 2600, value: -0.015, easing: 'inOut' },
+          { at: 5200, value: 0, easing: 'inOut' },
+        ],
+      },
+      {
+        channel: 'tilt',
+        frames: [
+          { at: 0, value: 0 },
+          { at: 2600, value: 2, easing: 'inOut' },
+          { at: 5200, value: 0, easing: 'inOut' },
+        ],
+      },
+      hold('lid', 0.55, 5200),
+    ],
+    next: null,
+    blink: { minGapMs: 2500, maxGapMs: 5000, closedMs: 450 },
+  },
 };
+
+/** Whether a state has floating "z"s beside Nomi. */
+export function zzz(state: NomiState): boolean {
+  return state === 'sleepy';
+}
+
+/**
+ * One of `options`, at random, and never the one before — so a wave is not
+ * followed by a wave, nor a hop by a hop. `random` is injected, as everywhere
+ * here, so this stays pure.
+ */
+export function pickAgain<T>(options: readonly T[], random: () => number, last: T | null): T {
+  const pool = options.length > 1 && last !== null ? options.filter((o) => o !== last) : options;
+  const r = Math.min(0.999999, Math.max(0, random()));
+  return pool[Math.floor(r * pool.length)]!;
+}
+
+/** What Nomi on Home does now and then while idle — a wave, and more than a wave (§49). */
+export const IDLE_GESTURES = ['greeting', 'lookAround', 'stretch'] as const satisfies readonly NomiState[];
+export function nextIdleGesture(random: () => number, last: NomiState | null): NomiState {
+  return pickAgain<NomiState>(IDLE_GESTURES, random, last);
+}
+
+/** What a tap on Nomi does (§49). Holding is `shy`. */
+export const TAP_REACTIONS = ['hop', 'stretch', 'lookAround'] as const satisfies readonly NomiState[];
+export function tapReaction(random: () => number, last: NomiState | null): NomiState {
+  return pickAgain<NomiState>(TAP_REACTIONS, random, last);
+}
+
+/**
+ * The most the eyes turn to follow a finger or the mouse, as a fraction of an
+ * eye's radius — the same limit every state keeps to.
+ */
+export const GAZE_MAX = 0.3;
+/** How far away the pointer must be for a full glance, in points. Nearer, less. */
+export const GAZE_REACH = 240;
+/** How long a glance holds after the pointer stops, before the eyes come back. */
+export const GAZE_RETURN_MS = 2000;
+
+/**
+ * Where the eyes look to follow a point (NOTES §49): toward it, further the
+ * further away it is, up to `GAZE_MAX`. From Nomi's own centre, in screen
+ * points; y down, as the screen has it.
+ */
+export function lookToward(from: { x: number; y: number }, to: { x: number; y: number }): { x: number; y: number } {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance < 1) return { x: 0, y: 0 };
+  const reach = Math.min(1, distance / GAZE_REACH) * GAZE_MAX;
+  return { x: (dx / distance) * reach, y: (dy / distance) * reach };
+}
 
 /**
  * The motion for a state.

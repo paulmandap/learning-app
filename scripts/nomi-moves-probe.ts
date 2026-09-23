@@ -13,8 +13,9 @@
  *     the count must move through several poses with its eyes on the page;
  *  2. every card is answered "Got it" — then back to Home, where Nomi must hop
  *     (success) as it comes into view;
- *  3. Home left alone — Nomi must raise a wing to wave within the first wave's
- *     window after its line is said.
+ *  3. Home left alone — Nomi must do something within the first wave's window
+ *     after its line is said: since NOTES §49 a wave, a stretch or a look
+ *     around, picked at random, so any of the three passes and it says which.
  *
  * Reads each layer's transform as react-native-web writes it — the figure's
  * first translateY is the lift, the right wing's rotate is the wave — sampled
@@ -58,11 +59,13 @@ const SAMPLER = String.raw`(() => {
       wing: Math.abs(nums(wing, 'rotate')[0] ?? 0),
       lookX: nums(eye, 'translateX')[0] ?? 0,
       lookY: nums(eye, 'translateY')[0] ?? 0,
+      // The iris fades while the eyes are closed happy (NOTES §49).
+      open: eye && eye.style.opacity !== '' ? Number(eye.style.opacity) : 1,
     };
   });
 })()`;
 
-type Pose = { height: number; lift: number; tilt: number; wing: number; lookX: number; lookY: number };
+type Pose = { height: number; lift: number; tilt: number; wing: number; lookX: number; lookY: number; open: number };
 
 async function sample(page: Page, ms: number): Promise<Pose[]> {
   const poses: Pose[] = [];
@@ -141,8 +144,14 @@ async function main() {
       `studying beside the count: ${distinct(studying)} poses in ${studying.length} samples, eyes down in ${eyesDown}, owl ${studying[0]?.height ?? 0}px`,
     );
 
-    // 2. Every card "Got it", then Home.
-    for (let i = 0; i < 3; i++) {
+    // 2. Every card "Got it", then Home. The first one watched: Nomi beside the
+    //    count nods, eyes closed happy, and goes back to reading (NOTES §49).
+    await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight' }))`);
+    const nod = await sample(page, 1200);
+    const happiest = Math.min(...nod.map((p) => p.open));
+    const reading = nod.at(-1)?.open ?? 0;
+    check(happiest < 0.5 && reading === 1, `a right answer: nodded, eyes closed happy (iris ${happiest.toFixed(2)}), then back to reading`);
+    for (let i = 1; i < 3; i++) {
       await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight' }))`);
       await new Promise((r) => setTimeout(r, 500));
     }
@@ -157,10 +166,17 @@ async function main() {
     const hop = Math.min(...back.map((p) => p.lift));
     check(hop <= -0.04 * (back[0]?.height ?? 92), `back on Home after 3 of 3: highest hop ${hop.toFixed(1)}px on a ${back[0]?.height ?? 0}px owl`);
 
-    // 3. A wave, within the first wave's window once the line is said.
+    // 3. Something, within the first wave's window once the line is said: a
+    //    wave (a wing past 100°), a stretch (both wings out, past 60°) or a look
+    //    around (the eyes a quarter of the way across) — NOTES §49.
     const waiting = await sample(page, 6000 + IDLE_GREETING.firstMs[1] + 2000);
-    const wave = Math.max(...waiting.map((p) => p.wing));
-    check(wave >= 100, `left on Home for ${(waiting.length / 10).toFixed(0)}s: wing raised to ${wave.toFixed(0)}°`);
+    const wing = Math.max(...waiting.map((p) => p.wing));
+    const glance = Math.max(...waiting.map((p) => Math.abs(p.lookX)));
+    const did = wing >= 100 ? 'waved' : wing >= 60 ? 'stretched' : glance >= 2 ? 'looked around' : 'nothing';
+    check(
+      did !== 'nothing',
+      `left on Home for ${(waiting.length / 10).toFixed(0)}s: ${did} (wing ${wing.toFixed(0)}°, eyes ${glance.toFixed(1)}px across)`,
+    );
   } finally {
     const errors = page.logs().filter((l) => l.startsWith('[exception]') || l.startsWith('[error]'));
     if (errors.length) console.log(`--- page errors ---\n${errors.slice(-10).join('\n')}`);

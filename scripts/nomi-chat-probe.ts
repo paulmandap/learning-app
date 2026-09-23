@@ -1,7 +1,12 @@
 /**
  * Talk to Nomi for real: its own brain, then Gemini, then the saved history.
  *
- *   npx tsx --env-file=.env scripts/nomi-chat-probe.ts
+ *   npx tsx --env-file=.env scripts/nomi-chat-probe.ts [--ask "<message>" …]
+ *
+ * With `--ask`, sends those messages in its place, one after another in one
+ * conversation, and prints who answered each — Nomi's brain or Gemini. Used for
+ * who made Nomi (NOTES §49): "who made you?" must be the brain, "tell me about
+ * yourself" is Gemini and must still name Nomi and its maker.
  *
  * Replaces `assistant-probe.ts`, which drove the one-question `askAssistant`
  * that Nomi's chat replaced (NOTES §36). Signs in as TEST_USER_A, reads the
@@ -32,6 +37,24 @@ async function main() {
   // read that as an outage (NOTES §36). GEMINI_API_KEY from .env is a real one.
   const apiKey = process.env.GEMINI_API_KEY || ((await fetchProfile())?.gemini_api_key ?? '');
   const history: ChatTurn[] = [];
+
+  const asks = process.argv.flatMap((a, i) => (a === '--ask' && process.argv[i + 1] ? [process.argv[i + 1]!] : []));
+  if (asks.length > 0) {
+    let conversationId: string | null = null;
+    for (const text of asks) {
+      const t = Date.now();
+      const reply = await sendToNomi({ text, conversationId, history, snapshot, context: { kind: 'none' }, apiKey });
+      conversationId = reply.conversationId ?? conversationId;
+      const who = reply.ok ? reply.source.toUpperCase() : 'FAILED';
+      console.log(`${who.padEnd(7)} ${Date.now() - t}ms  ${JSON.stringify(text)}\n        → ${reply.ok ? reply.text : reply.message}`);
+      if (reply.ok) history.push({ role: 'user', text }, { role: 'nomi', text: reply.text });
+    }
+    if (conversationId) {
+      await deleteConversation(conversationId);
+      console.log('CLEANED UP conversation', conversationId);
+    }
+    process.exit(0);
+  }
 
   const t0 = Date.now();
   const first = await sendToNomi({ text: "what's my streak?", conversationId: null, history, snapshot, context: { kind: 'none' }, apiKey });

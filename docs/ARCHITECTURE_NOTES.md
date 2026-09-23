@@ -7220,6 +7220,228 @@ probe **18/18** over three runs · isolation **61/61** · scroll probe **7/7**.
 **Migration 0025 not yet applied.**
 
 
+## 49. His own questions kept as written, who made Nomi, and more life (2026-09-23)
+
+The owner, in one message: his Question:Answer notes *"still getting reworded"*,
+with *"an option to choose or maybe nomi already knows"*; Nomi *"to know that
+it's name is Nomi, and i created Nomi"*; whether Nomi should have *"its own
+brain"* — trained on collected data — with workers around it *"kinda like how
+Jev works"*, and *"you are free to disagree if it's not really that impactful"*;
+and *"more 'life' to nomi. more animations, interactions"*, with a prompt for
+Gemini to draw what it needs. A plan was written and approved; his answers to
+three questions shaped it:
+
+- **Formats:** all four offered — `Q:` / `A:`, `Question? : Answer`, a question
+  with its answer on the next line, `Term: definition` — and *"nomi must be able
+  to identify it whichever format it may serve."*
+- **Count:** *"My 25 + 15 from Nomi"* — every one of his pairs, and when the
+  count picked is higher, Nomi writes the rest.
+- **Life:** all four — tap to react, eyes that follow, new faces and props, and
+  a reaction during study (reversing HANDOFF #20 for that one thing).
+
+### 49.1 The rewording was the prompt doing its job, on the wrong notes
+
+`buildGeneratePrompt` says *"WRITE IN YOUR OWN WORDS … If the notes are ALREADY
+a quiz, do not copy it."* Kept on purpose for ordinary notes (§9: answers copied
+out of prose come back as paragraphs), and wrong for a card the student already
+wrote. **Nothing checks it afterwards** — a word-for-word card passes every
+validator — so a prompt rule "keep their wording" was possible, and would have
+been a wish. Instead those cards never pass through a model.
+
+**The keeper** (`src/core/qa-pairs.ts`, pure). Six shapes, strongest first, each
+line in at most one pair:
+
+1. **Labelled** — `Q:`/`A:`, `Question:`/`Answer:`, `Ans:`, `Tanong:`/`Sagot:`,
+   numbered or not, inline or on two lines, a question running over lines, an
+   answer running on to the next blank line; and an unlabelled question whose
+   answer is labelled. A label says "this is a card", so **one** counts.
+2. **Two-column tables** — how the reader returns a Q&A page from a PDF or photo
+   — headed as Q/A or term/definition, or with questions down the first column.
+3. **One line**, `…? : …` (and `-`, `–`, `—`, `=`, `->`).
+4. **Alternating labels** nobody listed (`Frage:`/`Antwort:`), when the first
+   label asks the questions.
+5. **A question, then its answer on the next line.**
+6. **`Term: definition`**, the card asking the term.
+
+3–6 carry no label and each has an innocent twin (prose with a rhetorical
+question, a play's speakers, `Note: exam on Friday`), so they count only when
+repeated `MIN_REPEATS` (3) times, and 5–6 only when they cover `MIN_SHARE` (half)
+of what is left of the page. **Shape 5 is judged on the question and the FIRST
+answer line only** — the first test run showed why: in prose with no blank
+lines an answer "runs on" to the next question, so three rhetorical questions
+covered a whole page of prose and passed. A lettered multiple-choice question
+(`A.` followed by `B.`) is never a pair; it stays with the card writer. A
+repeated "term" is a label (a script's `JOHN:`), never a card.
+
+**Gemini points, code checks.** Where a page still looks like Q:A the keeper
+cannot read (`looksLikeQa`: 3+ lines asking something, a quarter of the page, most
+unmatched), one call (`pointQaPairs`) names the pairs and `locatePointed` keeps a
+pair only when both halves are found in the notes — by normalised text, mapped
+back to the page's own characters, so a "tidied" question keeps his spelling. A
+question must end at its `?`, its line end or a separator (a comma is half a
+question); the answer must start within 3 lines. Stored on the plan as
+character offsets, because the keeper can find its own pairs again and `listSets`
+reads every plan.
+
+**Where it runs.** `planSet` / `extendPlanForDocuments` find the pairs
+(`keepWording`, passed through `startSet` by Add notes and by Nomi's chat —
+never by a reviewer, which is Gemini's words; `tests/screens.test.ts` holds
+that). `keptTarget`: the target is the larger of the count and the pairs, and
+the sections plan only the extra. `generateSet` inserts the pairs first, with no
+model, marked `verbatim:<documentId>` and deduplicated by `newCards` (same
+question AND answer — True/False notes have one answer many times), then keeps
+the card writer off every sentence a pair covers (`only` lines), and the fill
+rounds count those lines as having a card. The plan is JSON: **no migration**.
+
+**Measured, live, 2026-09-23** (`scripts/qa-keep-probe.ts`, TEST_USER_A,
+GEMINI_API_KEY from `.env`, served mostly by `gemini-3.5-flash-lite` after
+`gemini-3.6-flash` shed load):
+
+```
+labelled (typos, Taglish, bullet answer, inline)   5 of 5 word for word · card writer 0 calls
+one line                                           4 of 4 · 0 calls
+next line                                          4 of 4 · 0 calls
+term: definition                                   5 of 5 · 0 calls
+table                                              3 of 3 · 0 calls
+alternating (Frage/Antwort)                        3 of 3 · 0 calls
+pointed (">>", no rule reads it)                   Gemini named 4, 4 found and kept · 0 calls
+with extras (5 pairs, 10 asked)                    his 5 + Nomi's 5, none repeating his answers
+every set run again (a refresh)                    nothing stored twice; every set "ready"
+```
+
+Nomi's five extra cards all came from the prose above his pairs. A pure Q:A set
+now costs one Gemini call (quiz choices) where it cost the card writer's too.
+
+**The choice** (`app/new.tsx`): the paste is counted as it is typed ("Found 3
+questions in your notes"), with *Keep as written* / *Let Nomi reword* (`Segment`,
+now with a radio role). A file or a note's pictures are read only when the set is
+made, so there the choice is asked ahead. **Seen in the first photograph and
+changed:** the count started at 20, so three questions defaulted to "Nomi adds 17
+more" and the smallest button, 10, meant nobody could make three questions into
+just three cards. His number is now a count of its own, chosen until he taps
+another (`countChoices`) — the same default Nomi's chat picks. In the chat the
+offer says *"I'll keep your 3 questions exactly as you wrote them"*, the card
+adds *"Your 3 questions, as you wrote them"*, *"reword them"* and *"keep them as
+is"* change it, and a set is no longer named `Q: What is osmosis?`
+(`suggestTitle` drops the label). Q:A notes under 50 words are notes too.
+
+**Fast enough to type into:** twenty thousand lines of each worst case — a
+script, 10,000 pairs, 20,000 labelled lines — read in about 120 ms each. Two
+things had to change for that: the heading above a pair is found in one pass,
+not one per pair, and a run of labels is read once.
+
+### 49.2 His own brain: declined again, on evidence, and grown instead
+
+He asked this before (§36, the top of `src/core/nomi-brain.ts`). Checked again,
+2026-09-23:
+
+- The Gemini API and AI Studio have had **no tunable model since May 2025**;
+  supervised tuning is on Google's paid enterprise platform only.
+- An open model (Gemma 4 E2B/E4B) **can** be tuned free on a Colab T4 with
+  QLoRA — and then has nowhere to run. This app has no server; in the iPhone
+  PWA it would be a download of 1.5 GB or more, slow, and a drain on battery; a
+  GPU server costs money every month. It would also be worse than Gemini at the
+  hardest job here, reading PDFs and photos. Five users do not make the data to
+  beat it.
+- **Jev** (TypeSafe AI) is a fast model for typed decisions made *before* a
+  language model speaks — route, rank, stop. Nomi already works that way:
+  actions and instant answers first, Gemini last (`sendToNomi`). And it already
+  has nine single-job workers — reader, card writer, quiz-choice writer,
+  rephraser, checklist checker, grader, reviewer writer, label finder, chat —
+  each checked by code.
+
+So nothing was trained; the combined brain grew. The keeper is a tenth worker,
+mostly code, and the one place Gemini works on it (pointing) cannot change a
+word. **What would reopen training:** money for a server every month, and
+thousands of his own corrected cards to learn from. Keeping a card's before and
+after when he edits it is the first step toward the second, and is not built.
+
+### 49.3 Nomi knows who made it
+
+`nomi-brain.ts` answers instantly: *"who made you"* → *"Paul Christian Mandap made
+me, to help you study. I use Google's Gemini to help me think."* (`OPERATOR`,
+from `legal.ts`); *"are you ChatGPT / an AI / real"* → *"I'm Nomi, an AI study
+companion, not a person. Paul made me, and I use Google's Gemini to help me
+think."*; "who are you" and "what's your name" name Paul too. Near-misses go to
+Gemini ("who made the first computer", "who built the pyramids", "are you
+sure"). The system prompt carries the same, for everything the patterns miss.
+**Honest about Gemini on purpose:** the privacy notice, Add notes and Settings
+already say notes go to Google's Gemini, and an assistant that denied it would
+contradict its own app.
+
+Live (`scripts/nomi-chat-probe.ts --ask …`, which gained `--ask` for this):
+"who made you?" and "are you chatgpt?" from the brain in about 1 s; *"sino ba
+talaga ang gumawa sa iyo…"* from Gemini: *"Si Paul Christian Mandap ang gumawa sa
+akin, at ginagamit ko ang Google's Gemini para mag-isip."* The first wording
+("if asked who made you") left Paul out of *"tell me about yourself"*; widened
+to "or about you", it says *"…your study companion built by Paul Christian
+Mandap"*, and a study question in the same chat carries no identity talk.
+
+### 49.4 More life, with no new picture
+
+Three new channels — `happy`, `blush`, `lid` — and six states: `hop`,
+`stretch`, `lookAround` (a tap, or now and then while idle), `shy` (held),
+`nod` (a right answer) and `sleepy` (Home, 10pm–5am). `success` and
+`encouraging` close their eyes happy, as the reference sheet always drew them.
+
+**Faces are drawn in code, at eyes the rig measured.** The pictures are one pose
+with one face, and a new picture cannot line up with the cut layers (§41's
+lesson). `make-nomi-assets.ts` already measured each eye's centre and the face
+colour around it and threw them away; it now writes them to the rig
+(`eyeLeftCenter`, `eyeRightCenter`, `faceColour` `#fce1c2`). **Re-cut, all five
+layer pictures came out byte-for-byte identical** (SHA-256 compared before and
+after). Happy is an arc per eye while the iris squashes and fades — squashed
+alone it left a thin dark line through each "^", seen in the first photograph;
+sleepy is a face-coloured lid clipped to each eye; shy is pink in the cheeks;
+the "z"s are text rising in one loop that is empty at its seam.
+
+**A bug in every loop, found by the sleepy lid.** Photographed at night, the "z"s
+showed and the lids did not. Sampled every 0.7 s, the lid closed over each 5.2 s
+cycle and sprang open at the next: `Animated.loop` resets every value to the one
+it was **created** with before each cycle, and Nomi on Home is created thinking,
+lid open. The three loops before this only ever ran on owls created in a pose
+where that happened to be right. Loops now cycle by hand, each run from where
+the last ended — safe because every loop's last frame is its first
+(`tests/nomi-motion.test.ts`). Measured after: the lid held at −9.29 px for
+fourteen samples running.
+
+**Measured in the built app** (dark, phone width, reduce motion pinned off):
+the tap, the hold and the mouse photographed on Home, and sleepy with its line
+under a time zone set to night; `scripts/nomi-moves-probe.ts` **5/5**, including
+a new check that a "Got it" makes Nomi beside the count close its eyes happy
+(iris opacity 0.00) and go back to reading. Its Home check now accepts any idle
+move — it was a wave every time, and the owner chose more than a wave.
+
+Eyes follow the pointer (`useNomiGaze`) only while Nomi is idle, so a state that
+looks somewhere of its own is never pulled off it. On an iPhone that is where a
+finger touches or drags. Tap and hold are on the owl; the speech bubble still
+opens the chat.
+
+### 49.5 Decisions changed
+
+- **Q:A notes are kept as written** (new HANDOFF deviation). The "own words"
+  rule stands for everything else.
+- **HANDOFF #20 widened again:** a nod on each right answer, beside the count,
+  and only there — `tests/screens.test.ts` holds `'nod'` to `nomi-studying.tsx`,
+  as it holds `success`/`encouraging` to `nomi-finish.tsx`.
+- **Four loops, not three** — `sleepy` joins idle, studying and thinking.
+- **Nomi names its maker and says it uses Gemini.**
+
+### 49.6 Not built yet
+
+- **Props** — book, lightbulb, magnifying glass, pencil, graduation cap,
+  nightcap, heart, mug, sparkles — wait on the picture the owner generates from
+  the plan's Gemini prompt, saved as `design-reference/nomi-props.png`. The cutter
+  and where each shows are planned, not written: a grid Gemini actually returns
+  decides the numbers.
+- A talking beak (the beak cut as its own layer), and keeping a card's before and
+  after for "Nomi learns your style".
+
+typecheck clean with and without `.expo/` · **1268 tests**, 3 skipped (1177
+before) · `qa-keep-probe` all eight layouts · `nomi-moves-probe` **5/5** ·
+built and booted. **Not deployed; not committed.**
+
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)
@@ -7236,3 +7458,6 @@ probe **18/18** over three runs · isolation **61/61** · scroll probe **7/7**.
 - [Expo Router static rendering](https://docs.expo.dev/router/reference/static-rendering/)
 - [Expo SDK 56 reference](https://docs.expo.dev/versions/v56.0.0.md)
 - [Expo SDK 55 changelog](https://expo.dev/changelog/sdk-55)
+- [Gemini API — fine-tuning (none available since May 2025)](https://ai.google.dev/gemini-api/docs/model-tuning)
+- [Gemma 4 fine-tuning guide (Unsloth)](https://unsloth.ai/docs/models/gemma-4/train)
+- [Jev AI review — decision models for agent workflows](https://wavect.io/blog/jev-ai-decision-model-review/)

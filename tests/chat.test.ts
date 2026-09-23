@@ -207,6 +207,13 @@ describe('buildNomiSystemPrompt', () => {
     expect(p).not.toMatch(/only help with/i);
   });
 
+  it('knows who made it, and is honest that it uses Gemini (NOTES §49)', () => {
+    const p = buildNomiSystemPrompt({ brief, context: { kind: 'none' } });
+    expect(p).toContain('Paul Christian Mandap made you');
+    expect(p).toMatch(/use Google's Gemini to help you\s+think/);
+    expect(p).toMatch(/Never say you are ChatGPT, Gemini itself, or any other assistant/);
+  });
+
   it('carries the facts about the student, and forbids inventing any', () => {
     const p = buildNomiSystemPrompt({ brief, context: { kind: 'none' } });
     expect(p).toContain('Name: Paul');

@@ -25,6 +25,7 @@ import { MAX_REPLY_TOKENS, type AssistantContext } from '../core/chat';
 import {
   buildGeneratePrompt,
   buildGradePrompt,
+  buildPointQaPrompt,
   buildReviewerPrompt,
   buildRubricCheckPrompt,
   buildVariantPrompt,
@@ -36,8 +37,10 @@ import {
   GRADE_RESPONSE_SCHEMA,
   parseGradeResult,
   parseItemsLoose,
+  parsePointedPairs,
   parseReadResult,
   parseChatResult,
+  POINT_QA_RESPONSE_SCHEMA,
   parseReviewerResult,
   parseRubricCheck,
   parseVariantResult,
@@ -447,6 +450,29 @@ export class GeminiBrowserProvider implements AIProvider {
       },
     });
     return parseWrongOptions(payload);
+  }
+
+  /**
+   * Point at the questions and answers in notes the keeper could not read
+   * (NOTES §49).
+   *
+   * Temperature 0: this is copying, and the answer to "what is written here"
+   * should not change between asks. What comes back is a pointer only —
+   * `locatePointed` keeps a pair when both halves are found in the notes, in the
+   * notes' own characters.
+   */
+  async pointQaPairs(input: {
+    pages: readonly { page_index: number; text: string }[];
+  }): Promise<{ page_index: number; question: string; answer: string }[]> {
+    const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
+      contents: [{ role: 'user', parts: [{ text: buildPointQaPrompt(input) }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: POINT_QA_RESPONSE_SCHEMA,
+        temperature: 0,
+      },
+    });
+    return parsePointedPairs(payload);
   }
 
   /**

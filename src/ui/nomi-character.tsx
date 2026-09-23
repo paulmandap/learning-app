@@ -7,6 +7,7 @@ import {
   Platform,
   View,
 } from 'react-native';
+import { useTheme } from './theme';
 import bodyArt from '../../assets/nomi-body.webp';
 import wingLeftArt from '../../assets/nomi-wing-left.webp';
 import wingRightArt from '../../assets/nomi-wing-right.webp';
@@ -19,6 +20,7 @@ import {
   nextBlinkDelay,
   segments,
   SETTLE_MS,
+  zzz,
   type Channel,
   type Easing,
   type NomiState,
@@ -54,6 +56,16 @@ import { useReducedMotion } from './motion';
  *    screen that is not focused), and while the app is in the background, and
  *    no timer outlives the component.
  *
+ * ## Faces, drawn in code (NOTES §49)
+ *
+ * The pictures are one pose with one face. The reference sheet's other faces —
+ * "^ ^" when happy, a sleepy lid — are drawn here, over the eyes, at the centres
+ * and in the face colour that `scripts/make-nomi-assets.ts` measured into the
+ * rig: an arc for each happy eye while the iris squashes away (the face is
+ * already painted behind it, for blinking), a face-coloured lid clipped to each
+ * eye, and pink in the cheeks. A drawing cut from a new picture could not line
+ * up with these layers; a shape drawn at the measured spot always does.
+ *
  * ## Reduced motion
  *
  * Honoured from the system setting, live. The canonical pose holds still;
@@ -61,6 +73,10 @@ import { useReducedMotion } from './motion';
  * known — one tick — nothing starts, so someone who asked for less motion never
  * sees the first half-second of a wave.
  */
+
+/** The dark of Nomi's eyes, for the happy arcs and the lid's edge. */
+const INK = '#3a2519';
+const BLUSH = '#f0928f';
 
 const NATIVE = Platform.OS !== 'web';
 
@@ -91,8 +107,15 @@ export function NomiCharacter({
   onDone,
   active = true,
   accessibilityLabel,
+  gaze,
 }: {
   state: NomiState;
+  /**
+   * Somewhere else to look, on top of the state's own look — a finger or the
+   * mouse (NOTES §49). Values the caller moves, so following the pointer
+   * never re-renders anything; `lookToward` keeps them inside `GAZE_MAX`.
+   */
+  gaze?: { x: Animated.Value; y: Animated.Value };
   /** Height in points. The width follows the art. */
   size: number;
   /**
@@ -147,9 +170,8 @@ export function NomiCharacter({
     // A one-shot starts its tracks at once, from wherever each channel is,
     // and only the channels it leaves alone ease back to rest alongside. So a
     // goodbye is not preceded by a quarter-second of nothing — leaving the
-    // screen waits for it. A loop settles first, because Animated.loop
-    // restarts each cycle from where the first one began, and that has to be
-    // the loop's own first frame or every cycle opens with a jump.
+    // screen waits for it. A loop settles first, onto its own first frame, and
+    // then each cycle runs on from where the last one ended.
     const tracked = new Set(motion.tracks.map((track) => track.channel));
     const settleChannels = motion.loop ? CHANNELS : CHANNELS.filter((c) => !tracked.has(c));
     const settleAnim = Animated.parallel(
@@ -162,34 +184,60 @@ export function NomiCharacter({
         }),
       ),
     );
-    const tracks = Animated.parallel(
-      motion.tracks.map((track) =>
-        Animated.sequence(
-          segments(track).map((s) =>
-            Animated.timing(v[track.channel], {
-              toValue: s.toValue,
-              duration: s.duration,
-              easing: EASINGS[s.easing],
-              useNativeDriver: NATIVE,
-            }),
+    const tracks = () =>
+      Animated.parallel(
+        motion.tracks.map((track) =>
+          Animated.sequence(
+            segments(track).map((s) =>
+              Animated.timing(v[track.channel], {
+                toValue: s.toValue,
+                duration: s.duration,
+                easing: EASINGS[s.easing],
+                useNativeDriver: NATIVE,
+              }),
+            ),
           ),
         ),
-      ),
-    );
+      );
 
-    // An empty loop is never started: Animated.loop over nothing restarts
-    // itself synchronously, forever. Reduced-motion idle is exactly that.
-    const animation = motion.loop
-      ? Animated.sequence(motion.tracks.length > 0 ? [settleAnim, Animated.loop(tracks)] : [settleAnim])
-      : Animated.parallel([settleAnim, tracks]);
-
-    animation.start(({ finished }) => {
-      if (!finished || motion.loop) return;
-      onDoneRef.current?.(motion.state);
-      const next = motion.next === 'idle' ? (settleRef.current ?? 'idle') : motion.next;
-      if (next) setPlaying(next);
-    });
-    return () => animation.stop();
+    let animation: Animated.CompositeAnimation;
+    let stopped = false;
+    if (motion.loop) {
+      // Each cycle is a new animation, run from where the last one ended — its
+      // own first frame, because every loop joins up (tests/nomi-motion.test.ts).
+      //
+      // Not Animated.loop, which before every cycle resets each value to the
+      // one it was CREATED with. That is only right for a channel whose first
+      // state began where this loop does, and measured on the sleepy lid (NOTES
+      // §49) it was not: Nomi on Home is created thinking, lid open, so the lid
+      // closed over each 5.2s cycle and sprang open again at the next.
+      //
+      // An empty loop never cycles — over nothing it would restart itself at
+      // once, forever. Reduced-motion idle is exactly that.
+      const cycle = () => {
+        if (stopped || motion.tracks.length === 0) return;
+        animation = tracks();
+        animation.start(({ finished }) => {
+          if (finished) cycle();
+        });
+      };
+      animation = settleAnim;
+      settleAnim.start(({ finished }) => {
+        if (finished) cycle();
+      });
+    } else {
+      animation = Animated.parallel([settleAnim, tracks()]);
+      animation.start(({ finished }) => {
+        if (!finished) return;
+        onDoneRef.current?.(motion.state);
+        const next = motion.next === 'idle' ? (settleRef.current ?? 'idle') : motion.next;
+        if (next) setPlaying(next);
+      });
+    }
+    return () => {
+      stopped = true;
+      animation.stop();
+    };
   }, [playing, running, reduce, v]);
 
   useEffect(() => {
@@ -237,12 +285,18 @@ export function NomiCharacter({
       { translateY: H / 2 - py },
     ];
     const eyeRadius = NOMI_RIG.eyeRadius * W;
+    // The state's own look, and a pointer's on top of it when one is followed.
+    const lookX = gaze ? Animated.add(v.lookX, gaze.x) : v.lookX;
+    const lookY = gaze ? Animated.add(v.lookY, gaze.y) : v.lookY;
+    // Shut by a blink, and squashed away while the eyes are closed happy — the
+    // arcs drawn over them are the eyes then (NOTES §49).
+    const open = Animated.multiply(blink, v.happy.interpolate({ inputRange: [0, 1], outputRange: [1, 0.04] }));
     // One eye: looks with the other, and blinks toward its OWN line.
     const eye = (line: number) => [
-      { translateX: v.lookX.interpolate({ inputRange: [-1, 1], outputRange: [-eyeRadius, eyeRadius] }) },
-      { translateY: v.lookY.interpolate({ inputRange: [-1, 1], outputRange: [-eyeRadius, eyeRadius] }) },
+      { translateX: lookX.interpolate({ inputRange: [-1, 1], outputRange: [-eyeRadius, eyeRadius] }) },
+      { translateY: lookY.interpolate({ inputRange: [-1, 1], outputRange: [-eyeRadius, eyeRadius] }) },
       { translateY: line * H - H / 2 },
-      { scaleY: blink },
+      { scaleY: open },
       { translateY: H / 2 - line * H },
     ];
 
@@ -264,8 +318,11 @@ export function NomiCharacter({
       ),
       eyeLeft: eye(NOMI_RIG.eyeLeftLine),
       eyeRight: eye(NOMI_RIG.eyeRightLine),
+      // Gone while closed happy: squashed alone, an iris left a thin dark line
+      // through each "^" (§49, seen in the first screenshot).
+      eyeOpacity: v.happy.interpolate({ inputRange: [0, 0.6, 1], outputRange: [1, 0, 0] }),
     };
-  }, [W, H, v, blink]);
+  }, [W, H, v, blink, gaze]);
 
   // Explicit pixel sizes on every picture — §8.1's lesson on react-native-web,
   // where the other two ways of sizing an image cropped it or collapsed it.
@@ -281,12 +338,13 @@ export function NomiCharacter({
     >
       <Animated.View style={{ width: W, height: H, opacity: v.opacity, transform: transforms.figure }}>
         <Image source={bodyArt} style={layer} />
-        <Animated.View style={[layer, { transform: transforms.eyeLeft }]}>
+        <Animated.View style={[layer, { opacity: transforms.eyeOpacity, transform: transforms.eyeLeft }]}>
           <Image source={eyeLeftArt} style={layer} />
         </Animated.View>
-        <Animated.View style={[layer, { transform: transforms.eyeRight }]}>
+        <Animated.View style={[layer, { opacity: transforms.eyeOpacity, transform: transforms.eyeRight }]}>
           <Image source={eyeRightArt} style={layer} />
         </Animated.View>
+        <Faces W={W} H={H} v={v} />
         <Animated.View style={[layer, { transform: transforms.wingLeft }]}>
           <Image source={wingLeftArt} style={layer} />
         </Animated.View>
@@ -294,6 +352,139 @@ export function NomiCharacter({
           <Image source={wingRightArt} style={layer} />
         </Animated.View>
       </Animated.View>
+      {running && !reduce && zzz(playing) ? <Zzz W={W} H={H} /> : null}
     </View>
+  );
+}
+
+/**
+ * The faces the pictures cannot show (NOTES §49), each at an eye the rig
+ * measured and all at rest invisible, so the canonical owl is exactly the
+ * pictures until a state asks for more.
+ */
+function Faces({ W, H, v }: { W: number; H: number; v: Record<Channel, Animated.Value> }) {
+  const r = NOMI_RIG.eyeRadius * W;
+  const eyes = [NOMI_RIG.eyeLeftCenter, NOMI_RIG.eyeRightCenter].map(([fx, fy], i) => ({
+    x: fx * W,
+    y: fy * H,
+    // Outward, for the cheeks: left of the left eye, right of the right.
+    side: i === 0 ? -1 : 1,
+  }));
+  const lid = r * 1.08;
+
+  return (
+    <>
+      {eyes.map((e, i) => (
+        <View key={`face-${i}`} style={{ position: 'absolute', left: 0, top: 0, width: W, height: H }}>
+          {/* A sleepy lid: the face's own colour, coming down over the eye, with a dark edge. */}
+          <View
+            style={{
+              position: 'absolute',
+              left: e.x - lid,
+              top: e.y - lid,
+              width: lid * 2,
+              height: lid * 2,
+              borderRadius: lid,
+              overflow: 'hidden',
+            }}
+          >
+            <Animated.View
+              style={{
+                width: lid * 2,
+                height: lid * 2,
+                backgroundColor: NOMI_RIG.faceColour,
+                borderBottomWidth: Math.max(1, r * 0.18),
+                borderBottomColor: INK,
+                transform: [{ translateY: v.lid.interpolate({ inputRange: [0, 1], outputRange: [-lid * 2, 0] }) }],
+              }}
+            />
+          </View>
+          {/* Closed happy: "^". */}
+          <Animated.View
+            style={{
+              position: 'absolute',
+              left: e.x - r * 1.05,
+              top: e.y - r * 0.55,
+              width: r * 2.1,
+              height: r * 1.05,
+              borderTopLeftRadius: r * 1.05,
+              borderTopRightRadius: r * 1.05,
+              borderWidth: Math.max(1, r * 0.22),
+              borderBottomWidth: 0,
+              borderColor: INK,
+              opacity: v.happy,
+            }}
+          />
+          {/* Pink in the cheek, below and a little outside the eye. */}
+          <Animated.View
+            style={{
+              position: 'absolute',
+              left: e.x - r * 0.62 + e.side * r * 0.45,
+              top: e.y + r * 0.95,
+              width: r * 1.24,
+              height: r * 0.62,
+              borderRadius: r * 0.62,
+              backgroundColor: BLUSH,
+              opacity: v.blush.interpolate({ inputRange: [0, 1], outputRange: [0, 0.6] }),
+            }}
+          />
+        </View>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Three "z"s rising from beside the head, one after another, while Nomi is
+ * sleepy. Each is seen in its own part of one loop, and all three are gone at
+ * the seam, so the loop never jumps.
+ */
+function Zzz({ W, H }: { W: number; H: number }) {
+  const t = useTheme();
+  const clock = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(clock, { toValue: 1, duration: 3600, easing: RNEasing.linear, useNativeDriver: NATIVE }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [clock]);
+
+  return (
+    <>
+      {[0, 1, 2].map((i) => {
+        const from = i * 0.2;
+        return (
+          <Animated.Text
+            key={i}
+            accessible={false}
+            style={{
+              position: 'absolute',
+              left: W * (0.8 + i * 0.09),
+              top: H * (0.14 - i * 0.07),
+              fontSize: Math.max(8, H * (0.13 - i * 0.025)),
+              fontWeight: '700',
+              color: t.textMuted,
+              opacity: clock.interpolate({
+                inputRange: [from, from + 0.1, from + 0.5, from + 0.6],
+                outputRange: [0, 1, 1, 0],
+                extrapolate: 'clamp',
+              }),
+              transform: [
+                {
+                  translateY: clock.interpolate({
+                    inputRange: [from, from + 0.6],
+                    outputRange: [0, -H * 0.1],
+                    extrapolate: 'clamp',
+                  }),
+                },
+              ],
+            }}
+          >
+            z
+          </Animated.Text>
+        );
+      })}
+    </>
   );
 }

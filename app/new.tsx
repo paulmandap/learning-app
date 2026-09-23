@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Platform, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -14,6 +14,8 @@ import { extractHeadings } from '../src/ai/gemini';
 import { downloadNoteImages, fetchNote, linkNoteToSet, noteImageUrls } from '../src/data/notes';
 import { noteTitle } from '../src/core/notes';
 import { imagePaths } from '../src/core/rich-note';
+import { countChoices, countLine, findQaPairs, keepDetail, keepHeading, looksLikeQa } from '../src/core/qa-pairs';
+import { Segment } from '../src/ui/segment';
 
 /** The same four Nomi chooses between, so the two can never offer different counts. */
 const COUNTS = CARD_COUNTS;
@@ -60,7 +62,15 @@ export default function NewSet() {
   const [text, setText] = useState('');
   const [file, setFile] = useState<{ blob: Blob; name: string; mime: string } | null>(null);
   const [title, setTitle] = useState('');
-  const [count, setCount] = useState<number>(20);
+  // The count tapped, or null until one is: then 20, or exactly the student's
+  // own questions when there are some to keep (`countChoices`, NOTES §49).
+  const [picked, setPicked] = useState<number | null>(null);
+  // The student's own questions and answers, kept as written unless they say
+  // otherwise (NOTES §49): *"i'd like to have an option to choose or maybe nomi
+  // already knows"* — both. Counted from the pasted text as it is typed.
+  const [keepWording, setKeepWording] = useState(true);
+  const typed = useDeferredValue(text);
+  const found = useMemo(() => findQaPairs(typed), [typed]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +98,12 @@ export default function NewSet() {
   // only pictures is still something to make cards from.
   const notePictures = fromNote && note?.content ? imagePaths(note.content) : [];
   const hasInput = text.trim().length > 0 || file !== null || notePictures.length > 0;
+  // A chosen file replaces the pasted text, so its questions are not counted;
+  // a file or a note's pictures are read only once the set is made, so for
+  // those the choice is offered before anyone knows.
+  const pairs = file ? 0 : found.length;
+  const offerKeep = pairs > 0 || file !== null || notePictures.length > 0 || looksLikeQa(typed, found);
+  const { counts, count } = countChoices(COUNTS, keepWording ? pairs : 0, picked);
   const { data: pictureUrls = {} } = useQuery({
     queryKey: ['noteImageUrls', noteId, notePictures.join('|')],
     queryFn: () => noteImageUrls(notePictures),
@@ -174,6 +190,7 @@ export default function NewSet() {
         sources: [main, ...pictureSources],
         count,
         apiKey,
+        keepWording,
         onStatus: setStatus,
       });
 
@@ -271,14 +288,31 @@ export default function NewSet() {
       <Card>
         <Field label="Name" value={title} onChangeText={setTitle} placeholder="Cardiac Conduction" autoCapitalize="sentences" />
 
+        {offerKeep ? (
+          <>
+            <Body>{keepHeading(pairs)}</Body>
+            <Segment
+              role="radio"
+              value={keepWording ? 'keep' : 'reword'}
+              options={[
+                { key: 'keep', label: 'Keep as written' },
+                { key: 'reword', label: 'Let Nomi reword' },
+              ]}
+              onChange={(key) => setKeepWording(key === 'keep')}
+            />
+            <Body muted>{keepDetail(keepWording)}</Body>
+          </>
+        ) : null}
+
         <Body>How many cards?</Body>
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-          {COUNTS.map((c) => (
-            <View key={c} style={{ flexGrow: 1, minWidth: 68 }}>
+          {counts.map((c) => (
+            // Five fit a phone's width at 56; four always had room at 68.
+            <View key={c} style={{ flexGrow: 1, minWidth: counts.length > COUNTS.length ? 56 : 68 }}>
               <Button
                 label={String(c)}
                 variant={count === c ? 'primary' : 'secondary'}
-                onPress={() => setCount(c)}
+                onPress={() => setPicked(c)}
               />
             </View>
           ))}
@@ -286,8 +320,9 @@ export default function NewSet() {
 
         {/* It said "up to this many … you'll get fewer rather than filler", and
             on the owner's pasted song "fewer" meant 2 of 10. The count asked
-            for is now the count made (NOTES §37). */}
-        <Body muted>We'll make this many, from all through your notes.</Body>
+            for is now the count made (NOTES §37) — and every one of the
+            student's own questions on top of it, never fewer (§49). */}
+        <Body muted>{countLine(count, pairs, keepWording)}</Body>
       </Card>
 
       <Button label="Make my study set" onPress={make} busy={busy} disabled={!hasInput} />

@@ -77,6 +77,8 @@ export default function Flashcards() {
 
   const [revealed, setRevealed] = useState(false);
   const [missed, setMissed] = useState<Set<string>>(new Set());
+  // Right answers this round, for Nomi's nod beside the count (NOTES §49).
+  const [rights, setRights] = useState(0);
   const [reported, setReported] = useState<string | null>(null);
   /** The card being corrected, as a draft. Null when nothing is being edited. */
   const [editing, setEditing] = useState<{ prompt: string; answer: string } | null>(null);
@@ -283,6 +285,8 @@ export default function Flashcards() {
     if (!card) return;
     if (!gotIt) {
       setMissed((prev) => new Set(prev).add(card.id));
+    } else {
+      setRights((n) => n + 1);
     }
     // Every answer is logged (D8) — the missed pile and Home's "Continue" are
     // both built from attempts, so a flashcard that is never recorded is a
@@ -465,8 +469,8 @@ export default function Flashcards() {
         </Card>
       ) : card ? (
         <>
-          {/* With Nomi reading beside the count (NOTES §45). */}
-          <StudyProgress value={index} total={items.length} />
+          {/* With Nomi reading beside the count (NOTES §45), nodding at each right answer (§49). */}
+          <StudyProgress value={index} total={items.length} right={rights} />
           {dueNow > 0 ? (
             <Body muted>
               {dueNow} due for review today — those come first.

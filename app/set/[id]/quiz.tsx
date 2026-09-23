@@ -453,7 +453,11 @@ export default function Quiz() {
       ) : item ? (
         <>
           {/* With Nomi reading beside the count (NOTES §45). */}
-          <StudyProgress value={index} total={items.length} />
+          <StudyProgress
+            value={index}
+            total={items.length}
+            right={answered.filter((a) => a.graded.result === 'correct').length}
+          />
 
           <Card>
             <Body>{promptFor(item)}</Body>

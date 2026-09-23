@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1177 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1268 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§48 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§49 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -263,6 +263,10 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     (§45.9): one of several lines for how the round went, in a speech bubble,
     never the same line twice running, and cheering below half — the owner's
     words. `tests/celebrate.test.ts` holds the tough and none lines to that.
+    **Widened again in §49, at the owner's request:** Nomi beside the count
+    nods, eyes closed happy, at each right answer — `nod`, from
+    `StudyProgress` only (`tests/screens.test.ts`). The celebration proper is
+    still the round's end.
 21. **A note's `body` is derived; `content` is the note** (NOTES §43). Every save
     writes both, `body` by `docToText`, so everything that reads notes reads
     plain text as before. Pictures are stored by path, never by link.
@@ -357,6 +361,29 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     against silent edits stands; editing is allowed for 20 minutes only because
     it is visible. Through `edit_global_message` only — there is no update
     policy on `global_messages`, so `created_at` cannot be moved.
+39. **The student's own questions and answers are cards as written** (NOTES
+    §49, the owner's decision). The "own words" rule stands for everything else;
+    pairs never reach the card writer — `findQaPairs` reads them (six shapes),
+    and where it cannot, Gemini only POINTS and `locatePointed` keeps a pair
+    whose halves are both in the notes, in the notes' own characters. All of his
+    pairs are always made; a bigger count adds Nomi's cards from the other
+    lines (*"my 25 + 15 from Nomi"*). On by default with a choice on Add notes
+    and in the chat; **never for a reviewer**, which is Gemini's words.
+    Stored on the plan (`keep`) — JSON, no migration.
+40. **Nomi names its maker and says it uses Gemini** (NOTES §49). "Who made
+    you" is answered by the brain with `OPERATOR`; the system prompt says the
+    same. Never deny Gemini: the privacy notice, Add notes and Settings all say
+    notes go to it.
+41. **Loops cycle by hand, not with `Animated.loop`** (NOTES §49), which resets
+    every value to the one it was CREATED with before each cycle — the sleepy
+    lid opened every 5.2 s because Home's Nomi is created thinking. Every loop's
+    last frame must stay its first (`tests/nomi-motion.test.ts`).
+42. **Nomi's faces are drawn in code at the rig's measured eyes** (NOTES §49) —
+    happy "^ ^", sleepy lids, blush — never cut from a new picture, which would
+    not line up with the layers (§41). `make-nomi-assets.ts` writes
+    `eyeLeftCenter`, `eyeRightCenter` and `faceColour` into the rig; re-cut, the
+    five pictures came out byte-for-byte the same. Props from a Gemini picture
+    are planned (§49.6), not built.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -564,7 +591,8 @@ npx tsx scripts/make-pet-assets.ts            # cuts every assets/*-stages.*
 npx tsx scripts/make-nomi-assets.ts [--debug <dir>]   # Nomi's five layers + src/ui/nomi-rig.ts, from design-reference/nomi-updated-look-interactions-references.png (gitignored)
 npx tsx scripts/make-icons.ts [--preview <dir>]       # every app icon size, from design-reference/nomi-app-icon.png (gitignored)
 npx tsx scripts/make-splash.ts                         # Nomi's layers into public/nomi/ and their positions into public/index.html — rerun after make-nomi-assets
-npx tsx --env-file=.env scripts/nomi-chat-probe.ts    # Nomi's brain + one real Gemini reply + what was saved
+npx tsx --env-file=.env scripts/nomi-chat-probe.ts [--ask "<message>" …]   # Nomi's brain + one real Gemini reply + what was saved; --ask sends yours and says who answered
+npx tsx --env-file=.env scripts/qa-keep-probe.ts [--only labelled] [--keep]   # his Q:A pairs in every layout, made into cards word for word, on the live DB (NOTES §49)
 npx tsx --env-file=.env scripts/reviewer-probe.ts [--runs 3] [--only rename] [--counts 20,60] [--out r.txt]   # patterns vs Gemini's topic/title, and written reviewers
 npx tsx --env-file=.env scripts/nomi-offer-probe.ts --out <dir>   # Nomi's offers in the built app, photographed; checks a refused reviewer saved nothing
 npx tsx --env-file=.env scripts/generation-probe.ts --file notes.txt --count 60   # model output vs dropped vs stored, and which lines
@@ -576,7 +604,7 @@ npx tsx --env-file=.env scripts/splash-probe.ts [--runs 3] [--phone]   # what is
 npx tsx --env-file=.env scripts/chat-length-probe.ts [--out <dir>]    # a long message and a paste in the built app: shown, offered, saved
 npx tsx --env-file=.env scripts/pasted-notes-probe.ts [--runs 3]      # does Gemini tell notes from a message? real calls
 npx tsx --env-file=.env scripts/push-probe.ts          # a real reminder through Google's push service to headless Chrome
-npx tsx --env-file=.env scripts/nomi-moves-probe.ts [--out <dir>]   # Nomi studying beside the count, hopping back on Home, waving — read from the layers
+npx tsx --env-file=.env scripts/nomi-moves-probe.ts [--out <dir>]   # Nomi studying beside the count, nodding at a right answer, hopping back on Home, an idle move — read from the layers (the --out dir must exist)
 npx tsx --env-file=.env scripts/send-reminders.ts --slot evening --dry-run   # who would get tonight's reminder (needs 0020)
 npx tsx --env-file=.env scripts/reminders-e2e-probe.ts [--out <dir>]    # on from Settings → saved → counted → sent to that device only → shown → marked → off
 npx tsx --env-file=.env scripts/finish-lines-probe.ts [--out <dir>]     # what Nomi says after 3/3, 1/3 twice and 0/3, photographed
