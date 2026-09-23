@@ -26,7 +26,9 @@ import {
   type NomiState,
 } from '../core/nomi-motion';
 import { NOMI_RIG } from './nomi-rig';
+import { NOMI_PROP_ART } from './nomi-prop-art';
 import { useReducedMotion } from './motion';
+import { PROP_PLACES, propsFor, type NomiProp } from '../core/nomi-props';
 
 /**
  * Nomi, drawn and moving.
@@ -108,8 +110,15 @@ export function NomiCharacter({
   active = true,
   accessibilityLabel,
   gaze,
+  prop,
 }: {
   state: NomiState;
+  /**
+   * What Nomi holds or wears here — a book beside the count, a magnifying glass
+   * while notes are read (NOTES §50). The screen's to choose; a moment's own
+   * floating prop, and a sleepy Nomi's nightcap, come from `propsFor`.
+   */
+  prop?: NomiProp | null;
   /**
    * Somewhere else to look, on top of the state's own look — a finger or the
    * mouse (NOTES §49). Values the caller moves, so following the pointer
@@ -324,6 +333,8 @@ export function NomiCharacter({
     };
   }, [W, H, v, blink, gaze]);
 
+  const props = propsFor(playing, prop);
+
   // Explicit pixel sizes on every picture — §8.1's lesson on react-native-web,
   // where the other two ways of sizing an image cropped it or collapsed it.
   const layer = { position: 'absolute' as const, left: 0, top: 0, width: W, height: H };
@@ -351,6 +362,18 @@ export function NomiCharacter({
         <Animated.View style={[layer, { transform: transforms.wingRight }]}>
           <Image source={wingRightArt} style={layer} />
         </Animated.View>
+        {/* Over the wings, as a thing held is. Still under reduced motion: a
+            book is not a movement. */}
+        {props.held ? <Prop name={props.held} W={W} H={H} /> : null}
+        {props.floating && running && !reduce ? (
+          <FloatingProp
+            key={`${props.floating}-${playing}`}
+            name={props.floating}
+            W={W}
+            H={H}
+            duration={motionFor(playing).duration}
+          />
+        ) : null}
       </Animated.View>
       {running && !reduce && zzz(playing) ? <Zzz W={W} H={H} /> : null}
     </View>
@@ -434,6 +457,57 @@ function Faces({ W, H, v }: { W: number; H: number; v: Record<Channel, Animated.
   );
 }
 
+/** Where a prop's picture goes, in points, from its place on the owl and its own shape. */
+function propBox(name: NomiProp, W: number, H: number) {
+  const place = PROP_PLACES[name];
+  const art = NOMI_PROP_ART[name];
+  const width = place.width * W;
+  const height = (width * art.height) / art.width;
+  return {
+    position: 'absolute' as const,
+    left: place.cx * W - width / 2,
+    top: place.cy * H - height / 2,
+    width,
+    height,
+    transform: [{ rotate: `${place.rotate}deg` }],
+  };
+}
+
+/** A prop Nomi holds or wears (NOTES §50). */
+function Prop({ name, W, H }: { name: NomiProp; W: number; H: number }) {
+  const box = propBox(name, W, H);
+  return <Image source={NOMI_PROP_ART[name].source} style={box} />;
+}
+
+/**
+ * A moment's prop (NOTES §50): it pops up, drifts a little higher, and is gone
+ * by the time the moment is — all inside `duration`, so it never outstays the
+ * hop or the line it belongs to.
+ */
+function FloatingProp({ name, W, H, duration }: { name: NomiProp; W: number; H: number; duration: number }) {
+  const t = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const run = Animated.timing(t, { toValue: 1, duration, easing: RNEasing.linear, useNativeDriver: NATIVE });
+    run.start();
+    return () => run.stop();
+  }, [t, duration]);
+  const { transform, ...box } = propBox(name, W, H);
+  return (
+    <Animated.Image
+      source={NOMI_PROP_ART[name].source}
+      style={{
+        ...box,
+        opacity: t.interpolate({ inputRange: [0, 0.15, 0.8, 1], outputRange: [0, 1, 1, 0] }),
+        transform: [
+          ...transform,
+          { translateY: t.interpolate({ inputRange: [0, 1], outputRange: [H * 0.04, -H * 0.04] }) },
+          { scale: t.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0.6, 1, 1] }) },
+        ],
+      }}
+    />
+  );
+}
+
 /**
  * Three "z"s rising from beside the head, one after another, while Nomi is
  * sleepy. Each is seen in its own part of one loop, and all three are gone at
@@ -460,8 +534,9 @@ function Zzz({ W, H }: { W: number; H: number }) {
             accessible={false}
             style={{
               position: 'absolute',
-              left: W * (0.8 + i * 0.09),
-              top: H * (0.14 - i * 0.07),
+              // Clear of the head and of the nightcap's tip, which droops right.
+              left: W * (0.98 + i * 0.1),
+              top: H * (0.24 - i * 0.08),
               fontSize: Math.max(8, H * (0.13 - i * 0.025)),
               fontWeight: '700',
               color: t.textMuted,

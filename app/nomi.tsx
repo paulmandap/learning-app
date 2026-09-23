@@ -115,6 +115,9 @@ export default function Nomi() {
               }
             />
           ) : null}
+          {/* Writing a reviewer takes a while, and it is Nomi doing the writing:
+              thinking, pencil in wing (NOTES §50). */}
+          {chat.acting && chat.pending?.kind === 'write_reviewer' ? <ThinkingBubble prop="pencil" /> : null}
           {chat.note ? (
             <Text style={[type.caption, { color: t.textMuted, textAlign: 'center' }]}>{chat.note}</Text>
           ) : null}

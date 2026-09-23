@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Animated, Easing, Platform, Text, View } from 'react-native';
 import { useIsFocused } from 'expo-router';
 import { Button } from './components';
@@ -37,10 +37,16 @@ export function StatePanel({
   detail,
   action,
   secondary,
+  picture,
 }: {
   kind: StateKind;
   title: string;
   detail?: string;
+  /**
+   * In place of the kind's own drawing — Nomi reading your notes with a
+   * magnifying glass, or writing your cards with a pencil (NOTES §50).
+   */
+  picture?: ReactNode;
   /** The one filled button: red on a problem, the accent otherwise. */
   action?: StateAction;
   /** A quieter second choice, when there genuinely is one. */
@@ -68,7 +74,7 @@ export function StatePanel({
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
       >
-        {kind === 'working' ? <Spinner /> : problem ? <WarningSign /> : <NoteAndPencil />}
+        {picture ?? (kind === 'working' ? <Spinner /> : problem ? <WarningSign /> : <NoteAndPencil />)}
       </View>
       <Text style={[type.title, { color: t.text, textAlign: 'center' }]}>{title}</Text>
       {detail ? <Text style={[type.body, { color: t.textMuted, textAlign: 'center' }]}>{detail}</Text> : null}

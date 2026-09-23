@@ -34,6 +34,8 @@ export function StudyProgress({ value, total, right = 0 }: { value: number; tota
       <NomiCharacter
         state={nodding ? 'nod' : 'studying'}
         settle="studying"
+        // Reading its book, as the reference sheet's studying Nomi does (§50).
+        prop="book"
         size={56}
         active={focused}
         onDone={(done) => {

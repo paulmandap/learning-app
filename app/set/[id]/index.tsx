@@ -15,6 +15,7 @@ import {
   Screen,
 } from '../../../src/ui/components';
 import { StatePanel } from '../../../src/ui/states';
+import { NomiCharacter } from '../../../src/ui/nomi-character';
 import { OverflowMenu } from '../../../src/ui/menu';
 import { space } from '../../../src/ui/theme';
 import { formatSetTitle } from '../../../src/core/title';
@@ -578,6 +579,15 @@ export default function SetScreen() {
         ) : (
           <StatePanel kind="working"
             title={progress?.phase === 'reading' ? 'Reading your notes' : 'Making your flashcards'}
+            // Nomi at work, eyes down: a magnifying glass over your notes, then a
+            // pencil for your cards (NOTES §50).
+            picture={
+              <NomiCharacter
+                state="studying"
+                size={88}
+                prop={progress?.phase === 'reading' ? 'magnifier' : 'pencil'}
+              />
+            }
             detail={
               itemCount > 0
                 ? `${itemCount}${requested > itemCount ? ` of ${requested}` : ''} ready. You can start on these while the rest are made.`

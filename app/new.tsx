@@ -16,6 +16,7 @@ import { noteTitle } from '../src/core/notes';
 import { imagePaths } from '../src/core/rich-note';
 import { countChoices, countLine, findQaPairs, keepDetail, keepHeading, looksLikeQa } from '../src/core/qa-pairs';
 import { Segment } from '../src/ui/segment';
+import { NomiCharacter } from '../src/ui/nomi-character';
 
 /** The same four Nomi chooses between, so the two can never offer different counts. */
 const COUNTS = CARD_COUNTS;
@@ -326,7 +327,16 @@ export default function NewSet() {
       </Card>
 
       <Button label="Make my study set" onPress={make} busy={busy} disabled={!hasInput} />
-      {status ? <Notice tone="warn">{status}</Notice> : null}
+      {status ? (
+        // Nomi reading your notes with its magnifying glass while they are read
+        // and planned (NOTES §50) — a file can take a while.
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+          <NomiCharacter state="studying" size={56} prop="magnifier" />
+          <View style={{ flex: 1 }}>
+            <Notice tone="warn">{status}</Notice>
+          </View>
+        </View>
+      ) : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
     </Screen>
   );

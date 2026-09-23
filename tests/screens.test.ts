@@ -710,6 +710,25 @@ describe('Nomi celebrates a finished round, never a single answer (NOTES §43)',
   });
 });
 
+describe("Nomi's props are where the plan put them (NOTES §50)", () => {
+  it('reads its book beside the count, and earns its cap only on a perfect round', () => {
+    expect(code(read('src', 'ui', 'nomi-studying.tsx'))).toContain('prop="book"');
+    expect(code(read('src', 'ui', 'nomi-finish.tsx'))).toContain("prop={total > 0 && right === total ? 'cap' : null}");
+  });
+
+  it('reads your notes with a magnifying glass, and makes your cards with a pencil', () => {
+    // Raw source for new.tsx, for the reason given above.
+    expect(read('app', 'new.tsx')).toMatch(/<NomiCharacter state="studying" size=\{56\} prop="magnifier" \/>/);
+    expect(code(read('app', 'set', '[id]', 'index.tsx'))).toMatch(/prop=\{progress\?\.phase === 'reading' \? 'magnifier' : 'pencil'\}/);
+    expect(code(read('app', 'nomi.tsx'))).toMatch(/chat\.pending\?\.kind === 'write_reviewer' \? <ThinkingBubble prop="pencil" \/>/);
+  });
+
+  it('holds a mug in the morning and wears a nightcap at night, on Home', () => {
+    expect(code(read('src', 'ui', 'nomi.tsx'))).toContain("prop={night ? 'nightcap' : morning ? 'mug' : null}");
+    expect(code(read('app', '(tabs)', 'index.tsx'))).toMatch(/morning=\{isMorning\(new Date\(\)\.getHours\(\)\)\}/);
+  });
+});
+
 describe('Nomi on Home has more life (NOTES §49)', () => {
   const nomi = code(read('src', 'ui', 'nomi.tsx'));
 

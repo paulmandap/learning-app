@@ -40,7 +40,8 @@ export function NomiFinish({ right, total }: { right: number; total: number }) {
       accessibilityLabel={`${reaction === 'success' ? 'Nomi, celebrating' : 'Nomi, cheering you on'}: ${line}`}
       style={{ flexDirection: 'row', alignItems: 'flex-end', gap: space.md }}
     >
-      <NomiCharacter state={reaction} settle="idle" size={84} />
+      {/* A perfect round earns the cap (NOTES §50); `success` brings its own sparkles. */}
+      <NomiCharacter state={reaction} settle="idle" size={84} prop={total > 0 && right === total ? 'cap' : null} />
       <SpeechBubble line={line} saying={typed.saying} shown={typed.shown} chars={typed.chars} surface={t.bg} />
     </View>
   );

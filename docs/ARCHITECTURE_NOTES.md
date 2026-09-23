@@ -7439,7 +7439,76 @@ opens the chat.
 
 typecheck clean with and without `.expo/` · **1268 tests**, 3 skipped (1177
 before) · `qa-keep-probe` all eight layouts · `nomi-moves-probe` **5/5** ·
-built and booted. **Not deployed; not committed.**
+built and booted. **Not deployed; not committed.** (Committed and pushed by the
+owner the same day; deploy held until the props below were done.)
+
+
+## 50. Nomi's props, from the owner's Gemini picture (2026-09-23)
+
+The owner made the props sheet with §49's prompt and saved it as
+`design-reference/nomi-props.jfif`, asking whether JFIF was a problem. It is not:
+JFIF is JPEG's file format, and `scripts/make-nomi-props.ts` reads it as
+`image/jpeg` (and PNG or WebP). 1024 × 1024, nine props on a flat
+(246, 243, 235) background — pale and neutral enough for the same paper test
+`make-nomi-assets.ts` uses — with outlines, no text, nothing touching.
+
+### 50.1 Cut
+
+A 3 × 3 grid, each cell flooded with paper from its edges. What the flood cannot
+reach is the prop, so the magnifier's pale lens and the book's cream pages stay:
+their outlines keep the flood out. Every piece is kept, not only the largest —
+the mug has its steam, the sparkles are three — and pieces under 60 pixels are
+dropped as JPEG specks. A prop touching its cell's edge fails the run.
+
+```
+book 1 piece · lightbulb 1 · magnifier 1 · pencil 1 · cap 1 · nightcap 1
+heart 1 · mug 2 · sparkles 3                        0 specks, nothing at an edge
+```
+
+Nine WebPs, 4.4–11.4 KB, **72 KB together**, checked on dark and light with
+`--debug`: no pale fringe. They are separate files in `dist/assets/`; the
+first download carries only their names (entry bundle 612,390 bytes gzipped),
+so a picture is fetched when Nomi first shows it.
+
+### 50.2 Where and when (`src/core/nomi-props.ts`)
+
+Places are fractions of the owl's box, like everything in `nomi-motion.ts`, so a
+prop sits in the same spot at 36 px and at 112 px. Two kinds:
+
+- **Held or worn — the screen's choice**, because only the screen knows what
+  Nomi is doing there, and kept through a tap's hop: the **book** beside the
+  count; the **magnifying glass** beside "Reading your notes…" on Add notes;
+  the **pencil** on "Making your flashcards", and while Nomi writes a reviewer in
+  the chat; the **cap** after a perfect round; the **mug** on Home 5–9am; the
+  **nightcap** at night (and on any sleepy Nomi).
+- **Floating — a moment's own** (`propsFor`): a **heart** on a tap's hop,
+  **sparkles** on success, a **lightbulb** while Nomi says its line. Each pops
+  up, drifts higher and is gone inside its moment's own duration.
+
+**The plan was wrong about one place.** It put the magnifying glass on the set
+screen's "Reading your notes" panel; wiring it showed that panel never reports
+reading — `generateSet` only ever says "generating", and reading happens on Add
+notes, before the set screen opens. So the magnifying glass went to Add notes,
+beside the status it was meant for. The set screen's pencil is Nomi in the
+panel's picture slot (`StatePanel` gained `picture`), where the spinner was.
+
+### 50.3 Seen, and changed
+
+Every prop was photographed on Nomi in the built app — dark, phone width,
+reduce motion off, the time of day set by time zone, and the "working" moments
+held open by pausing their requests (`Fetch.enable`). Two changes came of it:
+
+- **The nightcap** first perched on top of the head, wide, and its tip hid the
+  "z"s. Now lower and narrower, brim on the brow, and the "z"s rise clear of it.
+- **The magnifying glass** was below the fold in the first photograph at
+  900 px, so it was taken again at 1,350 px, where it reads beside its status.
+
+`nomi-moves-probe` **5/5** with the book in hand (the eye layer it samples is
+unchanged); the probe sets were deleted and the test account holds its two sets
+as before.
+
+typecheck clean with and without `.expo/` · **1277 tests**, 3 skipped · built and
+booted. **Not deployed.**
 
 
 ## Sources

@@ -14,6 +14,7 @@ import { nextGreetingDelay, nextIdleGesture, tapReaction, type NomiState } from 
 import { useNomiGaze } from './nomi-gaze';
 import { returnReaction } from '../core/celebrate';
 import { countChoices } from '../core/qa-pairs';
+import type { NomiProp } from '../core/nomi-props';
 import { useLastRound } from '../data/last-round';
 
 const NATIVE = Platform.OS !== 'web';
@@ -92,7 +93,18 @@ export function useTypedLine(line: string, active: boolean): { saying: Saying; s
   return { saying, shown, chars };
 }
 
-export function NomiCard({ line, onPress, night = false }: { line: string; onPress: () => void; night?: boolean }) {
+export function NomiCard({
+  line,
+  onPress,
+  night = false,
+  morning = false,
+}: {
+  line: string;
+  onPress: () => void;
+  night?: boolean;
+  /** Early morning: Nomi holds a mug (NOTES §50). At night it wears its nightcap. */
+  morning?: boolean;
+}) {
   const t = useTheme();
   const focused = useIsFocused();
   const reduce = useReducedMotion();
@@ -177,6 +189,8 @@ export function NomiCard({ line, onPress, night = false }: { line: string; onPre
           size={92}
           active={focused}
           gaze={gaze}
+          // Held through a tap's hop, so the cap does not come off and go back on.
+          prop={night ? 'nightcap' : morning ? 'mug' : null}
           // A finished gesture hands back to thinking, typing, idle or sleepy.
           onDone={(done) => setGesture((current) => (current === done ? null : current))}
         />
@@ -343,13 +357,13 @@ export function ChatBubble({ turn, showOwl }: { turn: ChatTurn; showOwl: boolean
   );
 }
 
-/** Nomi, visibly thinking, while a reply is on its way. */
-export function ThinkingBubble() {
+/** Nomi, visibly thinking, while a reply is on its way — with a pencil while it writes (NOTES §50). */
+export function ThinkingBubble({ prop }: { prop?: NomiProp } = {}) {
   const t = useTheme();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: space.sm }}>
       <View style={{ width: 30, alignItems: 'center' }}>
-        <NomiCharacter state="thinking" size={36} />
+        <NomiCharacter state="thinking" size={36} prop={prop} />
       </View>
       <View
         style={{

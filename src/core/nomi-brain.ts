@@ -241,6 +241,13 @@ export function isNight(hour: number): boolean {
   return hour >= NIGHT.from || hour < NIGHT.until;
 }
 
+/** Early morning, when Nomi on Home holds a mug (NOTES §50): 5am until 9am. */
+export const MORNING = { from: 5, until: 9 } as const;
+
+export function isMorning(hour: number): boolean {
+  return hour >= MORNING.from && hour < MORNING.until;
+}
+
 /**
  * The one line Nomi says on Home, beside the owl.
  *

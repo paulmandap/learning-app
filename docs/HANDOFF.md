@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1268 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1277 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§49 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§50 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -382,8 +382,13 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     happy "^ ^", sleepy lids, blush — never cut from a new picture, which would
     not line up with the layers (§41). `make-nomi-assets.ts` writes
     `eyeLeftCenter`, `eyeRightCenter` and `faceColour` into the rig; re-cut, the
-    five pictures came out byte-for-byte the same. Props from a Gemini picture
-    are planned (§49.6), not built.
+    five pictures came out byte-for-byte the same.
+43. **Props are separate pictures placed over the owl, never a redrawn Nomi**
+    (NOTES §50). Cut from `design-reference/nomi-props.jfif` by
+    `scripts/make-nomi-props.ts`, placed by `PROP_PLACES` (fractions of the
+    owl's box) in `src/core/nomi-props.ts`. Held props are the screen's choice
+    (`prop` on `NomiCharacter`); floating ones belong to a moment (`propsFor`).
+    Re-photograph any place you change — every number there was tuned by eye.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -589,6 +594,7 @@ npx tsx --env-file=.env scripts/study-probe.ts <set-id>
 npx tsx --env-file=.env scripts/seed-progress.ts [--days 30] [--clear]
 npx tsx scripts/make-pet-assets.ts            # cuts every assets/*-stages.*
 npx tsx scripts/make-nomi-assets.ts [--debug <dir>]   # Nomi's five layers + src/ui/nomi-rig.ts, from design-reference/nomi-updated-look-interactions-references.png (gitignored)
+npx tsx scripts/make-nomi-props.ts [--debug <dir>]   # Nomi's nine props + src/ui/nomi-prop-art.ts, from design-reference/nomi-props.jfif (gitignored)
 npx tsx scripts/make-icons.ts [--preview <dir>]       # every app icon size, from design-reference/nomi-app-icon.png (gitignored)
 npx tsx scripts/make-splash.ts                         # Nomi's layers into public/nomi/ and their positions into public/index.html — rerun after make-nomi-assets
 npx tsx --env-file=.env scripts/nomi-chat-probe.ts [--ask "<message>" …]   # Nomi's brain + one real Gemini reply + what was saved; --ask sends yours and says who answered
