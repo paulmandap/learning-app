@@ -7508,7 +7508,15 @@ unchanged); the probe sets were deleted and the test account holds its two sets
 as before.
 
 typecheck clean with and without `.expo/` · **1277 tests**, 3 skipped · built and
-booted. **Not deployed.**
+booted.
+
+**Deployed 2026-09-23 13:06 UTC**, at the owner's word once the props were done:
+`deploy-status.ts` says *production is exactly HEAD* (`ecefa40`) and the live
+bundle matches the local build (`ab0c6ffc7a78`). The same deploy shipped §48's
+round (`bfb4f78`) for the first time; **migration 0025 is still waiting**, so
+subfolders, reactions and edits stay "not switched on" until it is applied —
+the state §48 built them to be in, and `deploy-status.ts` rates 0025 safe to
+apply at any time.
 
 
 ## Sources
