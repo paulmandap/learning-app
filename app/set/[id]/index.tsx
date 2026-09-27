@@ -418,6 +418,9 @@ export default function SetScreen() {
                       label: `See ${authorName(readable.owner?.owner_name)}'s profile`,
                       onPress: () => router.push(`/person/${readable.owner?.owner_id}`),
                     },
+                    // Pass a good set on (NOTES §52): it arrives in the feed with
+                    // its cards flippable, and its owner's name on it.
+                    { label: 'Post about this set', onPress: () => router.push(`/post/new?set=${setId}`) },
                     { label: 'Report this set', onPress: () => setReportingSet(true) },
                   ]}
                 />
@@ -443,6 +446,11 @@ export default function SetScreen() {
                             ? { label: 'Stop sharing', onPress: () => setConfirmShare('private') }
                             : { label: 'Share with everyone', onPress: () => setConfirmShare('public') },
                         ]
+                      : []),
+                    // Only a shared set can go in a post — 0027 refuses a
+                    // private one, since nobody reading the post could open it.
+                    ...(set.status === 'ready' && visibility === 'public'
+                      ? [{ label: 'Post about this set', onPress: () => router.push(`/post/new?set=${setId}`) }]
                       : []),
                     ...(hasFiles
                       ? [{ label: 'Free up space', onPress: () => setConfirmFree(true) }]

@@ -54,6 +54,20 @@ describe('what counts as a dangerous migration', () => {
     ).toHaveLength(1);
   });
 
+  it('forgives a constraint dropped and added back by name — and only that one (NOTES §52)', () => {
+    // 0026 and 0027 recreate their views; 0027 also widens reports_kind_check by
+    // dropping it and adding it back, which is `add constraint`, not `create`.
+    expect(destructiveDrops(sql('0026_friends_blocks_and_reports.sql'))).toEqual([]);
+    expect(destructiveDrops(sql('0027_posts_and_feed.sql'))).toEqual([]);
+    expect(
+      destructiveDrops('alter table t drop constraint if exists c1;\nalter table t add constraint c1 check (x > 0);'),
+    ).toEqual([]);
+    // A different constraint added does not excuse the one that went.
+    expect(
+      destructiveDrops('alter table t drop constraint if exists c1;\nalter table t add constraint c2 check (x > 0);'),
+    ).toHaveLength(1);
+  });
+
   it('never forgives a drop whose name is built at run time', () => {
     // Finding a constraint by WHAT IT CHECKS rather than by a guessed name is
     // the correct way to write it (HANDOFF) — and it means there is no literal

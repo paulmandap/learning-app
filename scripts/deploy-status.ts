@@ -191,6 +191,11 @@ async function main() {
  * is matched with the KIND of object and, where there is one, its literal name.
  * A drop is forgiven only if the same file creates that same name again.
  *
+ * A constraint is created again with `alter table … add constraint <name>`, not
+ * `create`, so that counts too (NOTES §52: 0027 widens `reports_kind_check` by
+ * dropping and re-adding it, which this called dangerous until it knew the
+ * word). 0022's drop is still caught — nothing in 0022 adds that name back.
+ *
  * A drop with no literal name — `execute format('… drop constraint %I', …)`
  * inside a DO block, which is how a constraint is correctly found by what it
  * checks rather than by a guessed name — can never be proved to be recreated,
@@ -213,10 +218,10 @@ export function destructiveDrops(sql: string): string[] {
 
     if (name) {
       // Replaced, not removed? `create view public.x` after `drop view public.x`.
-      const recreated = new RegExp(
-        `\\bcreate\\s+(?:or\\s+replace\\s+)?(?:${KINDS})\\b[^;]*?\\b${name.replace(/[.$]/g, '\\$&')}\\b`,
-        'i',
-      ).test(code);
+      const escaped = name.replace(/[.$]/g, '\\$&');
+      const recreated =
+        new RegExp(`\\bcreate\\s+(?:or\\s+replace\\s+)?(?:${KINDS})\\b[^;]*?\\b${escaped}\\b`, 'i').test(code) ||
+        (kind === 'constraint' && new RegExp(`\\badd\\s+constraint\\s+${escaped}\\b`, 'i').test(code));
       if (recreated) continue;
       found.push(`drops ${kind} ${name}`);
     } else {

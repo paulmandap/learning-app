@@ -50,3 +50,19 @@ export async function shrinkImage(file: Blob, maxSide: number, quality = 0.85): 
     URL.revokeObjectURL(url);
   }
 }
+
+/**
+ * A picture's width and height — for a post, which keeps its photo's shape so
+ * the feed holds the right space before the picture arrives (NOTES §52).
+ */
+export async function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new window.Image();
+    img.src = url;
+    await img.decode();
+    return { width: img.naturalWidth, height: img.naturalHeight };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

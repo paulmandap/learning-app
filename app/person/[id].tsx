@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Body,
   Button,
@@ -17,6 +17,9 @@ import { StatePanel } from '../../src/ui/states';
 import { OverflowMenu } from '../../src/ui/menu';
 import { PersonAvatar } from '../../src/ui/avatar';
 import { BlockSheet, ReportSheet } from '../../src/ui/people';
+import { PostList } from '../../src/ui/post';
+import { listFeed, PostsUnavailableError } from '../../src/data/posts';
+import { joinPages, nextCursor, type FeedCursor } from '../../src/core/posts';
 import { space, type, useTheme } from '../../src/ui/theme';
 import {
   acceptFriendRequest,
@@ -62,6 +65,16 @@ export default function PersonPage() {
   const links = useQuery({ queryKey: ['friend-links'], queryFn: () => listFriendLinks(), retry });
   const blocked = useQuery({ queryKey: ['blocked'], queryFn: () => listBlocked(), retry });
   const sets = useQuery({ queryKey: ['public-sets'], queryFn: () => listPublicSets() });
+  // Their posts — the ones the rule in 0027 lets me see: everything they post
+  // to everyone, and to friends when we are (NOTES §52).
+  const posts = useInfiniteQuery({
+    queryKey: ['person-posts', personId],
+    queryFn: ({ pageParam }) => listFeed(pageParam, personId),
+    initialPageParam: null as FeedCursor | null,
+    getNextPageParam: (last) => nextCursor(last),
+    retry: (count, err) => !(err instanceof PostsUnavailableError) && count < 1,
+  });
+  const theirPosts = useMemo(() => joinPages(posts.data?.pages ?? []), [posts.data]);
 
   const off = links.error instanceof SocialUnavailableError;
   const blockedIds = useMemo(() => new Set((blocked.data ?? []).map((b) => b.person_id)), [blocked.data]);
@@ -214,6 +227,37 @@ export default function PersonPage() {
               onPress={() => router.push(`/set/${set.id}`)}
             />
           ))}
+        </View>
+      ) : null}
+
+      {/* Posts, after the sets: a page is who somebody is before what they said. */}
+      {state !== 'blocked' && !(posts.error instanceof PostsUnavailableError) ? (
+        <View style={{ gap: space.sm }}>
+          <SectionRow title="Posts" />
+          {posts.isLoading ? <LoadingState /> : null}
+          {posts.data && theirPosts.length === 0 ? (
+            <EmptyState
+              title={state === 'self' ? "You haven't posted yet" : 'No posts to show'}
+              detail={
+                state === 'self' || state === 'friends'
+                  ? undefined
+                  : 'Posts for friends only show here once you are friends.'
+              }
+            />
+          ) : null}
+          <PostList
+            posts={theirPosts}
+            myId={me}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['person-posts', personId] })}
+          />
+          {posts.hasNextPage ? (
+            <Button
+              label="Show older posts"
+              variant="secondary"
+              onPress={() => void posts.fetchNextPage()}
+              busy={posts.isFetchingNextPage}
+            />
+          ) : null}
         </View>
       ) : null}
 

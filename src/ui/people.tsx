@@ -156,7 +156,7 @@ export function RowButton({
  * Probe B" in small grey type read as a caption over the list rather than as
  * what the whole sheet was for.
  */
-function SheetTitle({ children }: { children: string }) {
+export function SheetTitle({ children }: { children: string }) {
   const t = useTheme();
   return (
     <Text style={[type.title, { color: t.text }]} accessibilityRole="header">
@@ -165,8 +165,11 @@ function SheetTitle({ children }: { children: string }) {
   );
 }
 
-/** The sheet both of the below sit in — the same one the chat's message menu uses. */
-function Sheet({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+/**
+ * The sheet both of the below sit in — the same one the chat's message menu
+ * uses — and a post's menu too (src/ui/post.tsx, NOTES §52).
+ */
+export function Sheet({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   const t = useTheme();
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>

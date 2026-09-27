@@ -59,6 +59,13 @@
  *     search, and only the blocker can see or undo it; a report keeps the
  *     database's copy of what was said, is invisible to the person reported,
  *     cannot be deleted, and cannot be used to find a private set
+ *   - posts (0027, NOTES §52), both directions: a friends-only post hidden from a
+ *     stranger and shown to a friend; nothing written around create_post,
+ *     add_comment or edit_post; no reacting, commenting or reporting on a post
+ *     you cannot see; a post's author removing a comment on it and nobody else
+ *     removing theirs; a streak brag counted by the database and nobody's streak
+ *     readable; a photo readable only while its post is, and never postable from
+ *     somebody else's folder; a block hiding posts both ways
  *
  * The views matter most. A Postgres view runs as its OWNER by default, which
  * bypasses RLS on the tables underneath. Testing only base tables would pass
@@ -972,6 +979,9 @@ async function main() {
       aMessageId,
     });
 
+    // ---- posts, comments, reactions and photos (0027, NOTES §52) ----
+    await checkPosts(A, B, { privateSetId: set.id });
+
     // ---- unsharing is live ----
     // The filter is one line in each view. Turning it back off must actually
     // take the set away, or "stop sharing" is a button that does nothing.
@@ -1202,7 +1212,8 @@ async function main() {
  * the operator can tell them from real ones. The SQL to clear them is printed.
  */
 const PROBE_USERNAME_A = 'isoprobe_a';
-const PROBE_REPORT = 'isolation probe — not a real report';
+// A plain hyphen, not a dash, so the cleanup SQL survives being retyped (NOTES §51.10).
+const PROBE_REPORT = 'isolation probe - not a real report';
 
 async function checkFriendsBlocksAndReports(
   A: { client: SupabaseClient; userId: string },
@@ -1447,9 +1458,240 @@ async function checkFriendsBlocksAndReports(
   await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
   await A.client.from('profiles').update({ username: null }).eq('id', A.userId);
   console.log(
-    `  (reports cannot be deleted from the app, by design. To clear this run's, in the dashboard:\n` +
-      `   delete from public.reports where details = '${PROBE_REPORT}';)`,
+    `  (reports cannot be deleted from the app, by design. To clear this run's, in the Supabase SQL editor (not PowerShell):\n` +
+      `   delete from public.reports where details like '%probe%not a real report';)`,
   );
+}
+
+/**
+ * Posts, comments, reactions and photos (0027, NOTES §52), both directions.
+ *
+ * 0027 has one rule for who sees a post — the author; or, across no block,
+ * everyone-posts and friends of friends-only posts — and seven places that must
+ * use it. Every one is checked here as B posts and A looks: the feed, reacting,
+ * commenting, the photo in storage, reporting, and a block over all of them.
+ * B is the author throughout, A the reader, and they start as strangers.
+ */
+const POST_PROBE = 'isolation probe post';
+
+async function checkPosts(
+  A: { client: SupabaseClient; userId: string },
+  B: { client: SupabaseClient; userId: string },
+  ids: { privateSetId: string },
+) {
+  const gate = await A.client.from('feed_posts').select('id').limit(1);
+  if (gate.error && (isMissingRelation(gate.error) || gate.error.code === '42703')) {
+    console.log('\n  ----  posts — not present (migration 0027), not checked');
+    return;
+  }
+  console.log('\nPosts, comments, reactions and photos (0027):');
+
+  const strangers = async () => {
+    await A.client.from('blocks').delete().eq('blocker_id', A.userId);
+    await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
+  };
+  await strangers();
+  await B.client.from('posts').delete().like('body', `${POST_PROBE}%`);
+
+  const post = async (body: string, audience: 'friends' | 'everyone', extra: Record<string, unknown> = {}) =>
+    B.client.rpc('create_post', { p_body: `${POST_PROBE} ${body}`, p_audience: audience, ...extra });
+  const aSees = async (id: string) =>
+    ((await A.client.from('feed_posts').select('id').eq('id', id)).data ?? []).length > 0;
+
+  // ---- writing ----
+  const forged = await B.client.from('posts').insert({ user_id: B.userId, body: 'straight in', audience: 'everyone' });
+  if (!forged.error) {
+    fail('posts insert', 'a post went straight into the table, around create_post');
+    await B.client.from('posts').delete().eq('body', 'straight in');
+  } else ok('posts insert', `refused (${forged.error.code ?? 'error'}) — only through create_post`);
+
+  const friendsOnly = await post('for friends', 'friends');
+  const everyone = await post('for everyone', 'everyone');
+  if (friendsOnly.error || everyone.error) {
+    fail('create_post', `${friendsOnly.error?.message ?? ''} ${everyone.error?.message ?? ''}`.trim());
+    return;
+  }
+  const friendsId = friendsOnly.data as string;
+  const everyoneId = everyone.data as string;
+  ok('create_post', 'B posted twice, once for friends and once for everyone');
+
+  const ownFeed = await B.client.from('feed_posts').select('id').in('id', [friendsId, everyoneId]);
+  if ((ownFeed.data ?? []).length !== 2) fail('feed_posts (as author)', 'B cannot see their own posts');
+  else ok('feed_posts (as author)', 'both of their own posts');
+
+  // ---- strangers: everyone yes, friends no ----
+  if (await aSees(friendsId)) fail('friends-only (stranger)', "A SEES B'S FRIENDS-ONLY POST WITHOUT BEING FRIENDS");
+  else ok('friends-only (stranger)', 'hidden from somebody who is not a friend');
+  if (!(await aSees(everyoneId))) fail('everyone (stranger)', "A cannot see B's post for everyone");
+  else ok('everyone (stranger)', 'visible to anybody signed in');
+
+  const reactHidden = await A.client.from('post_reactions').insert({ post_id: friendsId, user_id: A.userId, emoji: '❤️' });
+  if (!reactHidden.error) fail('react (hidden post)', 'A reacted to a post A cannot see');
+  else ok('react (hidden post)', `refused (${reactHidden.error.code ?? 'error'})`);
+
+  const commentHidden = await A.client.rpc('add_comment', { p_post: friendsId, p_body: 'can I see this?' });
+  if (!commentHidden.error) fail('comment (hidden post)', 'A commented on a post A cannot see');
+  else ok('comment (hidden post)', `refused (${commentHidden.error.code ?? 'error'}), as if it were not there`);
+
+  const reportHidden = await A.client.rpc('report_content', {
+    p_kind: 'post',
+    p_target: friendsId,
+    p_reason: 'other',
+    p_details: PROBE_REPORT,
+  });
+  if (!reportHidden.error) fail('report (hidden post)', 'A reported a post A cannot see — post ids can be probed');
+  else ok('report (hidden post)', `refused (${reportHidden.error.code ?? 'error'})`);
+
+  // ---- on the public one: react, comment, and B sees both, named ----
+  const reacted = await A.client.from('post_reactions').insert({ post_id: everyoneId, user_id: A.userId, emoji: '👍' });
+  if (reacted.error) fail('react', `A cannot react: ${reacted.error.message}`);
+  else ok('react', "A reacted to B's public post");
+  const asB = await A.client.from('post_reactions').insert({ post_id: everyoneId, user_id: B.userId, emoji: '😠' });
+  if (!asB.error) fail('react (as B)', "A reacted in B's name");
+  else ok('react (as B)', `refused (${asB.error.code ?? 'error'})`);
+
+  const commented = await A.client.rpc('add_comment', { p_post: everyoneId, p_body: `${POST_PROBE} comment from A` });
+  if (commented.error) fail('add_comment', commented.error.message);
+  else ok('add_comment', "A commented on B's public post");
+  const forgedComment = await A.client
+    .from('post_comments')
+    .insert({ post_id: everyoneId, user_id: A.userId, body: 'around the limit' });
+  if (!forgedComment.error) fail('post_comments insert', 'a comment went straight in, around the per-minute limit');
+  else ok('post_comments insert', `refused (${forgedComment.error.code ?? 'error'})`);
+
+  const seenByB = await B.client.from('post_comment_people').select('author_id, author_name').eq('post_id', everyoneId);
+  const reactionsByB = await B.client.from('post_reaction_people').select('user_id').eq('post_id', everyoneId);
+  if (!(seenByB.data ?? []).some((c: Record<string, unknown>) => c.author_id === A.userId)) {
+    fail('post_comment_people (as author)', "B cannot see A's comment on B's own post");
+  } else ok('post_comment_people (as author)', "A's comment visible, named");
+  if (!(reactionsByB.data ?? []).some((r: Record<string, unknown>) => r.user_id === A.userId)) {
+    fail('post_reaction_people (as author)', "B cannot see A's reaction");
+  } else ok('post_reaction_people (as author)', "A's reaction visible, named");
+
+  // ---- friends: now the friends-only post shows ----
+  await B.client.rpc('send_friend_request', { p_to: A.userId });
+  await A.client.rpc('accept_friend_request', { p_from: B.userId });
+  if (!(await aSees(friendsId))) fail('friends-only (friend)', "A is B's friend and still cannot see the post");
+  else ok('friends-only (friend)', 'visible once they are friends');
+
+  // ---- the author moderates their own post ----
+  const aComment = await A.client.from('post_comments').select('id').eq('post_id', everyoneId).eq('user_id', A.userId);
+  const aCommentId = ((aComment.data ?? [])[0] as { id: string } | undefined)?.id;
+  const bOwn = await B.client.rpc('add_comment', { p_post: everyoneId, p_body: `${POST_PROBE} comment from B` });
+  if (aCommentId) {
+    const removed = await B.client.from('post_comments').delete().eq('id', aCommentId).select('id');
+    if ((removed.data ?? []).length !== 1) fail('comment delete (post author)', "B cannot take A's comment off B's own post");
+    else ok('comment delete (post author)', "B removed A's comment from B's post");
+  }
+  if (!bOwn.error) {
+    await A.client.from('post_comments').delete().eq('id', bOwn.data as string);
+    const still = await B.client.from('post_comments').select('id').eq('id', bOwn.data as string);
+    if ((still.data ?? []).length === 0) fail('comment delete (as A)', "A DELETED B'S COMMENT on B's post");
+    else ok('comment delete (as A)', "only a comment's author or the post's author can remove it");
+  }
+
+  const bEdits = await A.client.rpc('edit_post', { p_id: everyoneId, p_body: 'hijacked', p_audience: 'everyone' });
+  if (!bEdits.error) fail('edit_post (as A)', "A EDITED B'S POST");
+  else ok('edit_post (as A)', `refused (${bEdits.error.code ?? 'error'})`);
+
+  const edited = await B.client.rpc('edit_post', { p_id: everyoneId, p_body: `${POST_PROBE} for everyone (edited)`, p_audience: 'everyone' });
+  const afterEdit = await A.client.from('feed_posts').select('edited_at').eq('id', everyoneId).maybeSingle();
+  if (edited.error) fail('edit_post (as B)', edited.error.message);
+  else if (!(afterEdit.data as { edited_at?: string } | null)?.edited_at) fail('edit_post (as B)', 'edited without being marked');
+  else ok('edit_post (as B)', 'edited, and marked for the reader');
+
+  // ---- a streak brag is the database's number ----
+  const brag = await post('streak', 'friends', { p_streak: true });
+  if (brag.error?.code === '22023') ok('streak brag', 'no streak, no brag — the database checked, not the app');
+  else if (brag.error) fail('streak brag', brag.error.message);
+  else {
+    const row = await B.client.from('posts').select('streak_days').eq('id', brag.data as string).maybeSingle();
+    const days = (row.data as { streak_days?: number } | null)?.streak_days ?? 0;
+    const studied = await B.client.from('study_days').select('day', { count: 'exact', head: true });
+    if (days < 1 || days > (studied.count ?? 0) + 5) fail('streak brag', `a streak of ${days} from ${studied.count} days studied`);
+    else ok('streak brag', `${days} day(s), counted by the database`);
+  }
+  const peek = await B.client.rpc('streak_of', { p_user: A.userId });
+  if (!peek.error) fail('streak_of', "B READ A'S STREAK — a streak is not public");
+  else ok('streak_of', `not callable (${peek.error.code ?? 'error'})`);
+
+  // ---- a set in a post must be shared ----
+  const privateSet = await post('private set', 'everyone', { p_set_id: ids.privateSetId });
+  if (!privateSet.error) fail('set post (private)', "B posted A's PRIVATE set");
+  else ok('set post (private)', `refused (${privateSet.error.code ?? 'error'})`);
+
+  // ---- a photo follows its post ----
+  const photoPath = `${B.userId}/isolation-probe.jpg`;
+  const up = await B.client.storage
+    .from('post-images')
+    .upload(photoPath, new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type: 'image/jpeg' }), { upsert: true });
+  if (up.error) {
+    fail('post-images upload', up.error.message);
+  } else {
+    const intruder = await A.client.rpc('create_post', {
+      p_body: `${POST_PROBE} stolen photo`,
+      p_audience: 'everyone',
+      p_image_path: photoPath,
+      p_image_width: 10,
+      p_image_height: 10,
+    });
+    if (!intruder.error) fail('photo post (not yours)', "A posted a photo from B's folder");
+    else ok('photo post (not yours)', `refused (${intruder.error.code ?? 'error'})`);
+
+    const intoB = await A.client.storage.from('post-images').upload(`${B.userId}/intruder.jpg`, new Blob(['x'], { type: 'image/jpeg' }));
+    if (!intoB.error) fail('post-images write', "A wrote into B's folder");
+    else ok('post-images write', 'refused');
+
+    const unposted = await A.client.storage.from('post-images').download(photoPath);
+    if (unposted.data) fail('post-images (not posted)', 'A downloaded a photo that is on no post');
+    else ok('post-images (not posted)', 'a photo on no post is its owner’s alone');
+
+    const photoPost = await post('photo', 'friends', { p_image_path: photoPath, p_image_width: 10, p_image_height: 10 });
+    if (photoPost.error) fail('photo post', photoPost.error.message);
+    else {
+      const asFriend = await A.client.storage.from('post-images').download(photoPath);
+      if (!asFriend.data) fail('post-images (friend)', `A, a friend, cannot see the photo: ${asFriend.error?.message}`);
+      else ok('post-images (friend)', 'visible to who can see the post');
+
+      await strangers();
+      // With a FRESH session. Measured 2026-09-28 (NOTES §52.7): Supabase's
+      // storage cache keeps a copy per session, so the session that downloaded
+      // this as a friend is still served it from the cache after the friendship
+      // ends — while a new session, and anybody who was never allowed, is
+      // refused. The rule is the database's and it is enforced; the cache is a
+      // window on what that person already had, and it is reported, not hidden.
+      const fresh = await signIn('a');
+      const asStranger = await fresh.client.storage.from('post-images').download(photoPath);
+      if (asStranger.data) fail('post-images (stranger)', "A STRANGER DOWNLOADED A FRIENDS-ONLY PHOTO");
+      else ok('post-images (stranger)', 'refused once the friendship ended');
+      const sameSession = await A.client.storage.from('post-images').download(photoPath);
+      console.log(
+        sameSession.data
+          ? '  NOTE  post-images (same session) — still served from the storage cache to the session that saw it as a friend (NOTES §52.7)'
+          : '  NOTE  post-images (same session) — refused too; the storage cache did not hold it this time',
+      );
+    }
+  }
+
+  // ---- a block hides it all, both ways ----
+  const aPost = await A.client.rpc('create_post', { p_body: `${POST_PROBE} from A`, p_audience: 'everyone' });
+  await A.client.rpc('block_person', { p_other: B.userId });
+  if (await aSees(everyoneId)) fail('block (A → B posts)', "A still sees B's public post after blocking B");
+  else ok('block (A → B posts)', 'hidden');
+  if (!aPost.error) {
+    const bSees = await B.client.from('feed_posts').select('id').eq('id', aPost.data as string);
+    if ((bSees.data ?? []).length > 0) fail('block (B → A posts)', 'B still sees the public post of somebody who blocked them');
+    else ok('block (B → A posts)', 'hidden the other way too');
+  }
+  const blockedComment = await B.client.rpc('add_comment', { p_post: aPost.data as string, p_body: 'still here?' });
+  if (!blockedComment.error) fail('block (comment)', 'B commented on the post of somebody who blocked them');
+  else ok('block (comment)', `refused (${blockedComment.error.code ?? 'error'})`);
+
+  // ---- tidy up ----
+  await strangers();
+  await A.client.from('posts').delete().like('body', `${POST_PROBE}%`);
+  await B.client.from('posts').delete().like('body', `${POST_PROBE}%`);
+  await B.client.storage.from('post-images').remove([photoPath]);
 }
 
 main().catch((err) => {

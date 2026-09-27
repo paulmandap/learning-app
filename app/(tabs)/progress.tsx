@@ -21,7 +21,8 @@ import {
 } from '../../src/core/progress';
 import { formatBytes, MAX_USER_BYTES } from '../../src/core/storage';
 import { PetStreak } from '../../src/ui/pet';
-import { toPetSpecies } from '../../src/core/pet';
+import { petStage, toPetSpecies } from '../../src/core/pet';
+import { petGrewToday } from '../../src/core/posts';
 import { fetchProfile } from '../../src/data/profile';
 import { claimStreakRestore } from '../../src/data/streak';
 
@@ -141,8 +142,9 @@ export default function Progress() {
  * a pet makes that kind of pressure land harder rather than softer.
  */
 function Streak({ data }: { data: DashboardData }) {
-  const { streak, dueToday, restorable, restoresLeft } = data;
+  const { streak, dueToday, restorable, restoresLeft, studiedToday } = data;
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   // Shared query key with Settings and the study screens, so this is a cache
   // read rather than another round trip — and the pet falls back to the
@@ -157,6 +159,23 @@ function Streak({ data }: { data: DashboardData }) {
   return (
     <Card>
       <PetStreak streak={streak} species={toPetSpecies(profile?.pet)} />
+
+      {/* The day the pet grows, and only that day (NOTES §52): the owner's
+          streak brag. `studiedToday` as well as the number, because a streak
+          survives a day not studied yet — yesterday's 5 is still 5 this
+          morning, and "your pet grew today" would then be a day late. */}
+      {studiedToday && petGrewToday(streak) ? (
+        <View style={{ gap: space.sm }}>
+          <Body>
+            Your {toPetSpecies(profile?.pet)} grew to {petStage(streak)?.name ?? 'a new'} size today.
+          </Body>
+          <Button
+            label="Share it with your friends"
+            variant="outline"
+            onPress={() => router.push('/post/new?streak=1')}
+          />
+        </View>
+      ) : null}
 
       {/* The one place this screen is allowed to mention losing a streak, and
           only because it has already happened (NOTES §47). The note above still

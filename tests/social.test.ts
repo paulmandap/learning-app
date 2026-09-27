@@ -212,6 +212,8 @@ describe('reporting', () => {
     expect(reportTitle('person', 'Maria')).toBe('Report Maria');
     expect(reportTitle('message')).toBe('Report this message');
     expect(reportTitle('set')).toBe('Report this set');
+    expect(reportTitle('post')).toBe('Report this post');
+    expect(reportTitle('comment')).toBe('Report this comment');
   });
 });
 
@@ -252,8 +254,12 @@ describe('the limits are the database’s, copied', () => {
   });
 
   it('what can be reported, why, and how much can be said about it', () => {
+    // The kinds as the LATEST migration to define them has them: 0027 widened
+    // 0026's three to five (NOTES §52), by the constraint's name.
     const kinds = REPORT_KINDS.map((k) => `'${k}'`).join(', ');
-    expect(SQL).toContain(`check (target_kind in (${kinds}))`);
+    const latest = older('0027_posts_and_feed.sql');
+    expect(latest).toContain(`check (target_kind in (${kinds}))`);
+    expect(SQL).toContain("check (target_kind in ('person', 'message', 'set'))");
     const reasons = REPORT_REASONS.map((r) => `'${r.key}'`).join(', ');
     expect(SQL.replace(/\s+/g, ' ')).toContain(`reason in (${reasons})`);
     expect(SQL).toContain(`length(details) <= ${REPORT_DETAILS_MAX}`);

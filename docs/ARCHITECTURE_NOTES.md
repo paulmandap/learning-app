@@ -7683,8 +7683,8 @@ Pasted by the owner the same day — *"success"*.
   appearing. The probe reads `document.body` for them, and says why.
 
 **Both runs leave reports behind**, because reports cannot be deleted from the
-app — marked `isolation probe — not a real report` and `friends probe — not a
-real report`, with the SQL to clear them printed at the end.
+app — marked `isolation probe - not a real report` and `friends probe - not a
+real report` (plain hyphens since 51.10), with the SQL to clear them printed at the end.
 
 ### 51.9 Seen, and changed
 
@@ -7707,7 +7707,186 @@ Photographed at 393 px in dark mode with 0026 live:
   ship without somebody deciding what this card says.
 
 typecheck clean with and without `.expo/` · **1322 tests**, 3 skipped ·
-`scroll-probe` **8/8** · built and booted. **Not deployed; not committed.**
+`scroll-probe` **8/8** · built and booted.
+
+### 51.10 Deployed, and a dash that did not survive a copy (2026-09-27)
+
+Committed and pushed by the owner as `576c8bd`, and **deployed 2026-09-27 15:48
+UTC**: `deploy-status.ts` says *production is exactly HEAD* and the live bundle
+matches the local build (`a5a7dbe70b05`); no migration is newer than the live
+code.
+
+He then ran the report cleanup SQL **in PowerShell**, which answered "The term
+'delete' is not recognized" — it belongs in the Supabase SQL editor, and the
+probes now say so. The paste had also turned the markers' "—" into "-", so even
+in the right place it would have matched nothing and looked like there was
+nothing to clear. The markers are plain hyphens now, and the printed SQL is
+`like '%probe%not a real report'`, which matches both the old reports and the
+new ones.
+
+
+## 52. Posts, a feed, comments and reactions (2026-09-28)
+
+Step two of §51's five. The owner, asked the four questions that decide it
+before anything was written: the feed goes first in Community as **Feed | Sets |
+Chat**, with Top sets folded into Sets as a **Newest / Top** switch; it shows
+**friends' posts and everyone's public ones, mixed, newest first**; a post can be
+**text, a photo, a shared set, or a streak brag**; and **comments and reactions**
+both. Posts are for friends unless their author says everyone (§51.1).
+
+### 52.1 Migration 0027
+
+Needs 0026 and refuses to run without it.
+
+- **`post_visible(author, audience)` is the whole rule for who sees a post**, and
+  everything uses it: `feed_posts`, `post_comment_people`,
+  `post_reaction_people`, `can_see_post` (reacting, commenting),
+  `can_see_post_image` (the photo in storage) and `report_content`. The author;
+  or, with no block either way, anybody for 'everyone' and an accepted friend for
+  'friends'. It answers about the CALLER only — no viewer argument — so it cannot
+  be asked whether two other people are friends. Granted to signed-in accounts
+  because a view checks a function's privileges against whoever reads the VIEW.
+- `posts` — words (≤ 2000), audience, and at most one of a photo (path and size),
+  a shared set (`on delete cascade`: set null would leave an empty post the check
+  refuses, so deleting the set would fail) or a streak. Never nothing. Select and
+  delete own; no insert or update policy.
+- `create_post` checks the photo is in the caller's folder and uploaded, the set
+  is public and ready, and takes the streak from **`streak_of`** — the
+  database's own count by `studyStreak`'s rule (UTC days studied or restored,
+  ending today or yesterday), so a 999-day brag cannot be posted with one
+  request. `streak_of` is granted to nobody: a streak is not public. 20 a day.
+- `edit_post` — words and audience; changed words are marked edited, a changed
+  audience is not. No time limit, unlike a chat message.
+- `post_comments` via `add_comment` (10 a minute, like the chat), deletable by
+  who wrote it or by the post's author. **The select policy had to match the
+  delete policy**: a DELETE whose WHERE reads a column is held to SELECT policies
+  too, so with select-own alone a post's author would "delete" a comment and
+  remove nothing, silently. Caught reading the draft back.
+- `post_reactions` — own rows, inserted only on a post you can see.
+- Bucket `post-images`: private, JPEG only, 2 MB; the app shrinks to 1280 px
+  (150–300 KB). Read by the owner, or by anybody who can see a post using it.
+- `reports_kind_check` dropped and added back BY NAME with `post` and `comment`;
+  `report_content` recreated with two more branches, both behind `post_visible`.
+
+### 52.2 On screen
+
+- **Feed** (`FeedPane` in Community): a "Share something" box that opens the
+  composer; twenty posts at a time, the next twenty as the end comes into view
+  and on a "Show older posts" button too; keyset pages by time AND id.
+- **`PostList`** (`src/ui/post.tsx`) is the only way posts reach a screen — the
+  feed, a person's page and a single post — so reacting, deleting, reporting and
+  blocking are one implementation. Every post says Friends or Everyone beside its
+  time. A photo keeps its shape (0.8–1.91). A set flips in place: tap the card
+  for the answer, Next for the next, twelve at most, the title to open it — the
+  owner's first idea, *"doomscrolling but it's for flashcards"*.
+- **Composer** (`app/post/new.tsx`): words; Photo / A shared set / My streak;
+  Friends or Everyone with what it means in a sentence. `?set=` from "Post about
+  this set" (a shared set's ⋯, yours or somebody's), `?streak=1` from Progress,
+  `?edit=` to change words and audience.
+- **A post's page** (`app/post/[id].tsx`): the post and its comments; the author
+  can take any comment off their post.
+- **Progress** offers "Share it with your friends" on the day the pet grows — at
+  2, 5, 10 and 30, and only if you studied TODAY, since a streak survives a day
+  not studied yet and yesterday's 5 is still 5 this morning.
+- **A person's page** lists their posts that you may see.
+- **Delete my data** removes posts and their photos, and every comment and
+  reaction left anywhere.
+
+### 52.3 The Privacy Policy, the Terms, and the notice
+
+Dated **September 28, 2026** — the day changed while this was built. Posts,
+comments, reactions and post photos are in what is collected, what other people
+see (and who can see a photo), what blocking hides, what can be reported, and
+Delete my data; "a profile does not show your streak" now adds "unless you share
+it in a post". The Terms cover photos of other people and posting rules. The Home
+card is now **"New: friends and posts"** with a new id, so everybody who
+dismissed §51's sees it once; its date is held to `EFFECTIVE_DATE` as before.
+
+### 52.4 The drop detector learned `add constraint`
+
+`destructiveDrops` flagged 0027's `drop constraint reports_kind_check` as
+dangerous, because it recognised a replacement only as `create …` and a
+constraint comes back as `alter table … add constraint`. The same cry-wolf §46.7
+warned about. It now forgives a constraint re-added by name; 0022 is still
+caught, and `tests/deploy-status.test.ts` pins 0026, 0027 and a different name
+not excusing the one that went.
+
+### 52.5 Measured
+
+- typecheck clean with and without `.expo/` · **1365 tests**, 3 skipped (1322
+  before; `tests/posts.test.ts` holds every limit to the SQL and the one rule to
+  each of the seven places that must use it) · built and booted.
+- Photographed at 393 px, dark, **before 0027**: Feed | Sets | Chat with Feed
+  first and "Posts aren't switched on yet"; Sets with Newest / Top; the composer.
+
+### 52.6 0027 applied, and verified (2026-09-28)
+
+Pasted by the owner the same day, with the probe-report cleanup.
+
+- **`isolation-test.ts`: 136/136** — 30 of them new, listed in the script's
+  header. The first run was **135/136**, and the one failure was real enough to
+  measure properly: 52.7.
+- **`scripts/posts-probe.ts` (new): 10/10** in the built app, the database
+  checked after every step: a friend's friends-only post in the feed with its
+  audience, a photo loading, a reaction and a comment landing, a post from the
+  composer for everyone carrying a shared set, that set's card flipping in the
+  feed, an edit marked, a delete gone, B's posts on B's page, no console errors.
+- **`friends-probe.ts`: 16/16, three runs in a row**, after 52.8.
+- `scroll-probe --height 420`: **8/8**, the Feed now the pane `/community` opens on.
+- **1363 tests**, 3 skipped · typecheck clean with and without `.expo/` · built
+  and booted.
+
+### 52.7 A photo stays reachable for a while to somebody who could see it
+
+The failure: A, B's friend, downloaded B's friends-only photo; they stopped being
+friends; A downloaded it AGAIN — and got it. Reproduced step by step:
+
+```
+                     rpc can_see   download (A's session)   fresh session
+strangers, never     false         refused                  —
+friends              true          200, then cf-cache HIT   —
+strangers again      false         200, cf-cache HIT        400
+```
+
+**The rule is right and enforced** — `can_see_post_image` says false, and a new
+session, or anybody who was never allowed, or nobody signed in, is refused (400
+BYPASS; checked on `note-images` too, so this was never a leak between people).
+What serves the photo is **Supabase's storage cache, which keeps a copy per
+session**: the session that loaded it while allowed goes on being served it.
+Measured over 16 minutes with a default upload, a `cacheControl: '0'` upload and
+a `cacheControl: '60'` upload: **still served at 977 s in every case** — the
+cache ignores the object's cache-control, and the window is set by the storage
+service, most likely until that session is renewed (an hour). Deleting the file
+did not purge it either.
+
+**The app never uses that path** — it shows photos through signed links. A
+signed link made for 60 s was **refused at 62 s** (REVALIDATED, then 400), so a
+link's lifetime is a real limit. So:
+
+- post photo links now last **10 minutes** (`POST_IMAGE_LINK_SECONDS`), not the
+  hour avatars get — the window, in the app, for somebody who loses access;
+- the isolation test checks the photo with a **fresh session** (the database's
+  guarantee) and prints the same-session result as a NOTE rather than hiding it;
+- the Privacy Policy says it: *"a photo they already had open can stay
+  reachable to them for a short while afterwards."*
+
+What is NOT fixed, and cannot be from here: somebody technical enough to fetch
+from Supabase's storage directly with the session they had while allowed.
+Avatars (§46.9) have the same shape and always did.
+
+### 52.8 Two probe traps
+
+- **`clickInCard` pressed the wrong post.** "The button whose ancestor holds these
+  words" is every button in the list, because the list holds every post's
+  words. It now takes the button whose NEAREST ancestor with the words is
+  closest.
+- **A menu item and the sheet it opens shared a label.** "Block Probe B" is both
+  the ⋯ item and the sheet's button; with the menu still fading out, pressing the
+  label pressed the item again and blocked nobody. `friends-probe` failed two runs
+  in three once a person's page grew a Posts section and the timing moved. It now
+  waits for the menu to be gone. The app is fine — a person sees one of them.
+
+**Not deployed; not committed.**
 
 
 ## Sources

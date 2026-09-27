@@ -54,8 +54,11 @@ const TABS = ['/', '/notes', '/community', '/progress', '/profile', '/settings']
  * all 618 tests passed. Its two set panes are ordinary scrolling columns; the
  * chat pane is checked on its own below, because the segment it lives behind is
  * a button this probe has to press rather than a route it can open.
+ *
+ * Since NOTES §52 the panes are Feed | Sets | Chat and Feed opens first, so
+ * `/community` itself checks the feed's own scroller; Sets and Chat are pressed.
  */
-const COMMUNITY_PANES = ['Top sets', 'Chat'] as const;
+const COMMUNITY_PANES = ['Sets', 'Chat'] as const;
 
 function arg(name: string, fallback: number): number {
   const i = process.argv.indexOf(name);

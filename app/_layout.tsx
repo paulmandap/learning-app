@@ -240,6 +240,10 @@ function RootNavigator() {
         {/* Somebody's page. Titled by its body — their name, which is long as
             often as not — and its ⋯ (Report, Block) set by the screen. */}
         <Stack.Screen name="person/[id]" options={{ title: '', ...backable }} />
+        {/* Writing a post, and one post with its comments (NOTES §52). Tasks,
+            not places: pushed with their own back control. */}
+        <Stack.Screen name="post/new" options={{ title: '', ...backable }} />
+        <Stack.Screen name="post/[id]" options={{ title: '', ...backable }} />
         {/* Each document names itself in its body. */}
         <Stack.Screen name="terms" options={{ title: '', ...backable }} />
         <Stack.Screen name="privacy" options={{ title: '', ...backable }} />

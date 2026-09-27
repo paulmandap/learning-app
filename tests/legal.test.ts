@@ -108,13 +108,13 @@ describe('the Terms of Use and the Privacy Policy', () => {
 
   it('say in the Terms what may not be shared or sent', () => {
     const terms = text(TERMS_OF_USE);
-    // The heading grew with friends (NOTES §51).
-    expect(terms).toMatch(/Sharing sets, the chat, and friends/);
+    // The heading grew with friends (NOTES §51), then posts (§52).
+    expect(terms).toMatch(/Sharing sets, posts, the chat, and friends/);
     expect(terms).toMatch(/harasses, bullies, threatens or impersonates/);
     expect(terms).toMatch(/share other people's personal information/);
     // A rule nobody can enforce is a wish. Both documents say we can remove it.
-    expect(terms).toMatch(/We can remove a shared set or a message/);
-    expect(text(PRIVACY_POLICY)).toMatch(/We can remove a shared set or a message/);
+    expect(terms).toMatch(/We can remove a shared set, a post, a comment or a message/);
+    expect(text(PRIVACY_POLICY)).toMatch(/We can remove a shared set, a post, a comment or a message/);
   });
 
   it('say who delivers reminders, and what a reminder tells them (NOTES §45)', () => {

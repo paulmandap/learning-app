@@ -6,6 +6,7 @@ import { removeAvatarPhotos } from './profile';
 import { removeAllNoteImages } from './notes';
 import { removeMyCommunityData } from './community';
 import { removeMySocialData } from './social';
+import { removeMyPosts } from './posts';
 
 /**
  * Study sets. RLS scopes every query to the signed-in user, so nothing here
@@ -200,6 +201,11 @@ export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
   // cascades from nothing of mine. Blocks and reports are KEPT, and the
   // Privacy Policy says why — see removeMySocialData.
   await removeMySocialData();
+
+  // Posts and their photos, and every comment and reaction left anywhere
+  // (0027, NOTES §52). Before the sets: a post about a set would cascade with
+  // it, but a post of words or a photo belongs to no set at all.
+  await removeMyPosts();
 
   const sets = await listSets();
   for (const set of sets) {

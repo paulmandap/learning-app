@@ -19,7 +19,10 @@
  *
  * Cleans up after itself, apart from one thing it cannot: the report it sends.
  * Reports have no delete policy on purpose (0026), so it is marked
- * `friends probe — not a real report` and the SQL to clear it is printed.
+ * `friends probe - not a real report` and the SQL to clear it is printed.
+ *
+ * A plain hyphen, not a dash: the owner retyped the first version's "—" as "-"
+ * copying the cleanup SQL, and it would have matched nothing (NOTES §51.10).
  */
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -40,7 +43,7 @@ if (!url || !publishable || !creds.a.email || !creds.b.email) {
 const A_USERNAME = 'isoprobe_a';
 const B_USERNAME = 'isoprobe_b';
 const B_NAME = 'Probe B';
-const PROBE_REPORT = 'friends probe — not a real report';
+const PROBE_REPORT = 'friends probe - not a real report';
 
 const outDir = (() => {
   const i = process.argv.indexOf('--out');
@@ -222,6 +225,16 @@ async function main() {
     await page.click(`More about ${B_NAME}`);
     await page.click(`Block ${B_NAME}`);
     await showing(page, "won't be able to find you");
+    // The ⋯ menu fades out as the sheet fades in, and its item is ALSO labelled
+    // "Block Probe B" — so pressing that label while the menu is still in the
+    // page pressed the menu item again, blocked nobody, and failed two runs in
+    // three once a person's page grew a Posts section and the timing moved
+    // (NOTES §52.8). Wait for the menu to be gone first; "Report Probe B" is
+    // only ever in the menu.
+    await page.waitFor(
+      `[...document.querySelectorAll('[role="button"]')].some((b) => b.innerText.trim() === ${JSON.stringify(`Report ${B_NAME}`)}) ? '' : 'y'`,
+      'the ⋯ menu to close',
+    );
     await shot(page, '06-block-sheet.png');
     await page.click(`Block ${B_NAME}`);
     await showing(page, `You blocked ${B_NAME}.`);
@@ -308,8 +321,8 @@ async function main() {
   }
 
   console.log(
-    `\n  (the report cannot be deleted from the app, by design. To clear it:\n` +
-      `   delete from public.reports where details = '${PROBE_REPORT}';)`,
+    `\n  (the report cannot be deleted from the app, by design. To clear it, in the Supabase SQL editor (not PowerShell):\n` +
+      `   delete from public.reports where details like '%probe%not a real report';)`,
   );
   console.log(`\n${checks - failures}/${checks} checks passed.`);
   if (failures > 0) process.exit(1);

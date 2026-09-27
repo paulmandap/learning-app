@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1319 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1363 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§51 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§52 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -58,14 +58,19 @@ pushed screen at /settings, reached from Profile's top right and Home's picture.
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 26, all applied
+### Migrations — 27, all applied
+
+**0027 (posts, feed, comments, reactions — NOTES §52) was applied by the owner on
+2026-09-28** and verified the same day: isolation **136/136**, `posts-probe`
+**10/10**, `friends-probe` **16/16** ×3.
 
 **0026 (friends, blocks, reports — NOTES §51) was applied by the owner on
 2026-09-27** and verified the same day: isolation **106/106**,
 `scripts/friends-probe.ts` **16/16** in the built app. **The owner reads reports
 in the dashboard** (`public.reports`) until step 5 builds a queue. Both probes
-leave reports behind on purpose (no delete policy); they are marked `… probe —
-not a real report` and print the SQL to clear them.
+leave reports behind on purpose (no delete policy); they are marked `… probe -
+not a real report` and print the SQL to clear them — **in the Supabase SQL
+editor, not PowerShell** (NOTES §51.10). Deployed 2026-09-27 as `576c8bd`.
 
 **0025 is applied** — confirmed live on 2026-09-27 as the test user
 (`global_chat.edited_at` and `message_reactions` both present). The paragraph
@@ -424,6 +429,12 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     promises to say so in the app when it changes significantly. The card's
     `changed` date is held to `EFFECTIVE_DATE`: change the policy's date and a
     test makes you decide what the card says.
+49. **One rule decides who sees a post: `post_visible`** (NOTES §52). The feed,
+    comments, reactions, the photo in storage, commenting, reacting and
+    reporting all call it; never write the rule out a second time.
+    `tests/posts.test.ts` holds each of the seven to it.
+50. **A streak brag is the database's number** (`streak_of`, NOTES §52). The app
+    asks for "my streak"; it never sends one. `streak_of` is granted to nobody.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -585,6 +596,18 @@ refuses, and every probe and test in this repo talks to Google. A reminder that
 works in `push-probe.ts` is not a reminder that works on the owner's iPhone —
 the only proof is `send-reminders.ts` against the real device (NOTES §47).
 
+**Supabase's storage cache keeps a copy PER SESSION, and ignores cache-control.**
+A session that downloaded a private file while allowed is served it from the
+cache after it stops being allowed — measured still served at 16 minutes, with
+`cacheControl` 0, 60 or the default (NOTES §52.7). A fresh session, or anybody
+never allowed, is refused: the rules hold. So a storage check about LOSING
+access must use a fresh session, and the app shows private photos through
+signed links, whose expiry IS honoured (60 s link refused at 62 s).
+
+**A ⋯ item and the sheet it opens can share a label** ("Block Probe B"). While
+the menu fades out, `page.click(label)` presses the item again. Wait for the
+menu to be gone (NOTES §52.8).
+
 **Anything that fails silently will cost you a wrong conclusion.** It has now
 happened five times. Log fallbacks and best-effort failures — and when a
 scheduled workflow fails, make the reason reach the EMAIL (`::error::`), not
@@ -651,6 +674,7 @@ npx tsx --env-file=.env scripts/reminders-e2e-probe.ts [--out <dir>]    # on fro
 npx tsx --env-file=.env scripts/finish-lines-probe.ts [--out <dir>]     # what Nomi says after 3/3, 1/3 twice and 0/3, photographed
 npx tsx --env-file=.env scripts/community-probe.ts [--out <dir>]        # a shared set seen by the OTHER person, in the built app: listed, read-only, dealt, chatted. NEEDS 0021. NEVER RUN YET
 npx tsx --env-file=.env scripts/scroll-probe.ts --height 420            # 7 screens now, including Community's Chat pane — the one layout that is not a `Screen`
+npx tsx --env-file=.env scripts/posts-probe.ts [--out <dir>]            # feed, photo, react, comment, compose with a set for everyone, flip it in the feed, edit, delete — in the built app as A, the database checked after each step (NEEDS 0027)
 npx tsx --env-file=.env scripts/friends-probe.ts [--out <dir>]          # username, a request, search, accept, block, unblock, report — in the built app as A, the database checked after each step (NEEDS 0026; leaves one marked report)
 npx tsx --env-file=.env scripts/drag-probe.ts [--shot <file.png>]       # hold a set and drag it into a folder, with a real mouse and a real finger; asks the database whether it moved
 ```

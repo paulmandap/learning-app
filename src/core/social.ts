@@ -262,8 +262,11 @@ export function blockFacts(name: string): string[] {
 
 // -------------------------------------------------------------- reporting --
 
-/** What can be reported. Mirrors `reports_kind_check` (0026). */
-export const REPORT_KINDS = ['person', 'message', 'set'] as const;
+/**
+ * What can be reported. Mirrors `reports_kind_check` — 0026's three, and the
+ * post and comment 0027 added (NOTES §52).
+ */
+export const REPORT_KINDS = ['person', 'message', 'set', 'post', 'comment'] as const;
 export type ReportKind = (typeof REPORT_KINDS)[number];
 
 /**
@@ -302,10 +305,10 @@ export const REPORT_DETAILS_MAX = 500;
 /** How many reports one person may send in a day. Mirrors `report_content` (0026). */
 export const REPORTS_PER_DAY = 20;
 
-/** "Report Paul", "Report this message", "Report this set". */
+/** "Report Paul", "Report this message", "Report this set", "Report this post". */
 export function reportTitle(kind: ReportKind, name?: string): string {
   if (kind === 'person') return name ? `Report ${name}` : 'Report this person';
-  return kind === 'message' ? 'Report this message' : 'Report this set';
+  return `Report this ${kind}`;
 }
 
 /**

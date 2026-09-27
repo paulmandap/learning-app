@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Body,
   Button,
@@ -17,6 +17,9 @@ import { Segment } from '../../src/ui/segment';
 import { Composer } from '../../src/ui/nomi';
 import { PersonAvatar } from '../../src/ui/avatar';
 import { BlockSheet, ReportSheet } from '../../src/ui/people';
+import { PostList } from '../../src/ui/post';
+import { PostsUnavailableError, listFeed } from '../../src/data/posts';
+import { joinPages, nextCursor, type FeedCursor } from '../../src/core/posts';
 import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
 import {
   authorName,
@@ -80,12 +83,22 @@ import { useSessionStore } from '../../src/data/session';
  * same decks, the same schedule, your own answers. This screen only finds it.
  */
 
-type Pane = 'sets' | 'top' | 'chat';
+/**
+ * Feed, Sets, Chat (NOTES §52, the owner's choice). The feed came first and
+ * Top sets folded into Sets as a Newest / Top switch, so the row stayed at three
+ * — four at 393px is where the labels start to crowd.
+ */
+type Pane = 'feed' | 'sets' | 'chat';
 
 const PANES = [
+  { key: 'feed' as const, label: 'Feed' },
   { key: 'sets' as const, label: 'Sets' },
-  { key: 'top' as const, label: 'Top sets' },
   { key: 'chat' as const, label: 'Chat' },
+];
+
+const SET_ORDERS = [
+  { key: 'new' as const, label: 'Newest' },
+  { key: 'top' as const, label: 'Top' },
 ];
 
 /**
@@ -107,7 +120,7 @@ const CHAT_POLL_MS = 4000;
 
 export default function Community() {
   const t = useTheme();
-  const [pane, setPane] = useState<Pane>('sets');
+  const [pane, setPane] = useState<Pane>('feed');
 
   return (
     // Not `Screen`: the chat needs a bounded scroll area with the box to type in
@@ -122,15 +135,134 @@ export default function Community() {
         </View>
       </View>
 
-      {pane === 'chat' ? <ChatPane /> : <SetsPane ranked={pane === 'top'} />}
+      {pane === 'chat' ? <ChatPane /> : pane === 'feed' ? <FeedPane /> : <SetsPane />}
     </View>
+  );
+}
+
+// ------------------------------------------------------------------- feed --
+
+/**
+ * Friends' posts and everyone's public ones, newest first (NOTES §52).
+ *
+ * Twenty at a time, the next twenty asked for as the end comes into view — with
+ * a button as well, because a scroll event is the kind of thing that silently
+ * stops firing, and "the feed just ends" is indistinguishable from "that was
+ * everything".
+ */
+function FeedPane() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const myId = useSessionStore((s) => s.session?.user.id ?? '');
+
+  const feed = useInfiniteQuery({
+    queryKey: ['feed'],
+    queryFn: ({ pageParam }) => listFeed(pageParam),
+    initialPageParam: null as FeedCursor | null,
+    getNextPageParam: (last) => nextCursor(last),
+    retry: (count, err) => !(err instanceof PostsUnavailableError) && count < 1,
+  });
+  const posts = useMemo(() => joinPages(feed.data?.pages ?? []), [feed.data]);
+
+  const more = () => {
+    if (feed.hasNextPage && !feed.isFetchingNextPage) void feed.fetchNextPage();
+  };
+
+  return (
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={{ alignItems: 'center', padding: space.lg }}
+      keyboardShouldPersistTaps="handled"
+      scrollEventThrottle={200}
+      onScroll={({ nativeEvent: e }) => {
+        if (e.layoutMeasurement.height + e.contentOffset.y >= e.contentSize.height - 600) more();
+      }}
+    >
+      <View style={{ width: '100%', maxWidth: CONTENT_MAX_WIDTH, gap: space.md }}>
+        {/* The way in to posting, where every feed puts it. Not a filled
+            Button: a feed is for reading first. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Write a post"
+          onPress={() => router.push('/post/new')}
+          style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+        >
+          <ComposePrompt />
+        </Pressable>
+
+        {feed.isLoading ? <LoadingState /> : null}
+        {feed.error instanceof PostsUnavailableError ? <PostsNotSwitchedOn /> : null}
+        {feed.error && !(feed.error instanceof PostsUnavailableError) ? (
+          <Notice tone="error">Couldn&apos;t load the feed. Try again in a moment.</Notice>
+        ) : null}
+        {feed.data && posts.length === 0 ? (
+          <StatePanel
+            kind="empty"
+            title="Nothing here yet"
+            detail="Write the first post, or add friends from your Profile to see theirs."
+          />
+        ) : null}
+
+        <PostList
+          posts={posts}
+          myId={myId}
+          onChanged={() => queryClient.invalidateQueries({ queryKey: ['feed'] })}
+        />
+
+        {feed.hasNextPage ? (
+          <Button
+            label="Show older posts"
+            variant="secondary"
+            onPress={more}
+            busy={feed.isFetchingNextPage}
+          />
+        ) : posts.length > 0 ? (
+          <Body muted>That&apos;s everything for now.</Body>
+        ) : null}
+      </View>
+    </ScrollView>
+  );
+}
+
+/** A box that looks like the place to type, and opens the composer. */
+function ComposePrompt() {
+  const t = useTheme();
+  return (
+    <View
+      style={{
+        minHeight: TOUCH_TARGET + space.sm,
+        justifyContent: 'center',
+        paddingHorizontal: space.lg,
+        borderRadius: radius.pill,
+        borderWidth: 1,
+        borderColor: t.border,
+        backgroundColor: t.card,
+      }}
+    >
+      <Text style={[type.body, { color: t.textMuted }]}>Share something — a win, a photo, a set…</Text>
+    </View>
+  );
+}
+
+/** Migration 0027 has not been applied. Same words as the other two. */
+function PostsNotSwitchedOn() {
+  return (
+    <Card>
+      <Body>Posts aren&apos;t switched on yet.</Body>
+      <Body muted>
+        Nothing is missing from your account — this part of the app just needs to be set up. Everything
+        else works as normal.
+      </Body>
+    </Card>
   );
 }
 
 // ------------------------------------------------------------ shared sets --
 
-function SetsPane({ ranked }: { ranked: boolean }) {
+function SetsPane() {
   const router = useRouter();
+  const [order, setOrder] = useState<'new' | 'top'>('new');
+  const ranked = order === 'top';
   const queryClient = useQueryClient();
   const myId = useSessionStore((s) => s.session?.user.id ?? '');
 
@@ -165,7 +297,11 @@ function SetsPane({ ranked }: { ranked: boolean }) {
     [sets, ranked],
   );
 
-  if (isLoading) return <Pane><LoadingState /></Pane>;
+  // Newest or Top, above whichever list is showing — including an empty one,
+  // or there would be no way back from "No stars yet".
+  const orderSwitch = <Segment value={order} options={SET_ORDERS} onChange={setOrder} role="radio" />;
+
+  if (isLoading) return <Pane>{orderSwitch}<LoadingState /></Pane>;
   if (error instanceof CommunityUnavailableError) return <Pane><NotSwitchedOn /></Pane>;
   if (error) {
     return (
@@ -178,6 +314,7 @@ function SetsPane({ ranked }: { ranked: boolean }) {
   if (shown.length === 0) {
     return (
       <Pane>
+        {orderSwitch}
         <StatePanel
           kind="empty"
           title={ranked ? 'No stars yet' : 'Nothing shared yet'}
@@ -193,6 +330,7 @@ function SetsPane({ ranked }: { ranked: boolean }) {
 
   return (
     <Pane>
+      {orderSwitch}
       {toggleStar.isError ? (
         <Notice tone="error">{(toggleStar.error as Error).message}</Notice>
       ) : null}
