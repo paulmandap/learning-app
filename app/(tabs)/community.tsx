@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -6,55 +6,41 @@ import {
   Body,
   Button,
   Card,
-  Field,
-  Label,
   LoadingState,
   Notice,
+  PillButton,
+  SectionRow,
   Title,
 } from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
 import { Segment } from '../../src/ui/segment';
-import { Composer } from '../../src/ui/nomi';
 import { PersonAvatar } from '../../src/ui/avatar';
-import { BlockSheet, ReportSheet } from '../../src/ui/people';
+import { PersonRow, Sheet, SheetTitle } from '../../src/ui/people';
 import { PostList } from '../../src/ui/post';
+import { GLYPH, TabIcon } from '../../src/ui/glyphs';
 import { PostsUnavailableError, listFeed } from '../../src/data/posts';
 import { joinPages, nextCursor, type FeedCursor } from '../../src/core/posts';
 import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
 import {
   authorName,
   browseOrder,
-  canEdit,
-  EDIT_WINDOW_MINUTES,
-  MESSAGE_MAX_LENGTH,
   rankSets,
   starLabel,
   canStar,
-  type ChatMessage,
   type PublicSet,
 } from '../../src/core/community';
-import { tallyReactions, type Reaction, type ReactionTally } from '../../src/core/emoji';
-import {
-  HoverActions,
-  MessageSheet,
-  ReactionChips,
-  useLongPress,
-} from '../../src/ui/message-actions';
 import { describeWhen } from '../../src/core/chat';
 import {
   CommunityUnavailableError,
-  deleteMessageForEveryone,
-  editMessage,
-  hideMessage,
-  listMessages,
   listPublicSets,
-  listReactions,
   myStars,
-  react,
-  sendMessage,
   star,
   unstar,
 } from '../../src/data/community';
+import { listConversations, MessagesUnavailableError, startConversation } from '../../src/data/messages';
+import { badgeLabel, INBOX_POLL_MS, inboxOrder, lastLine, type Conversation } from '../../src/core/messages';
+import { listFriendLinks } from '../../src/data/social';
+import { personName, splitFriends } from '../../src/core/social';
 import { useSessionStore } from '../../src/data/session';
 
 /**
@@ -101,22 +87,6 @@ const SET_ORDERS = [
   { key: 'top' as const, label: 'Top' },
 ];
 
-/**
- * How often the chat asks for new messages while you are looking at it.
- *
- * Polling, not Supabase's realtime channels. Realtime would be live rather than
- * four-seconds-late and costs no new dependency — it is already inside
- * supabase-js — but it is a second transport with its own connection states,
- * its own reconnection behaviour and its own failure that looks like silence,
- * for five people in one room. A query with an interval is the same TanStack
- * Query path as every other read in the app, and it stops when the screen is
- * not on top (`refetchIntervalInBackground` defaults to false), so a phone in a
- * pocket asks for nothing.
- *
- * Worth revisiting on evidence: if the room is ever busy enough that
- * four seconds reads as broken, that is the measurement that reopens it.
- */
-const CHAT_POLL_MS = 4000;
 
 export default function Community() {
   const t = useTheme();
@@ -135,7 +105,7 @@ export default function Community() {
         </View>
       </View>
 
-      {pane === 'chat' ? <ChatPane /> : pane === 'feed' ? <FeedPane /> : <SetsPane />}
+      {pane === 'chat' ? <InboxPane /> : pane === 'feed' ? <FeedPane /> : <SetsPane />}
     </View>
   );
 }
@@ -486,480 +456,206 @@ function StarButton({
   );
 }
 
-// ------------------------------------------------------------------- chat --
+// ------------------------------------------------------------------ inbox --
 
-function ChatPane() {
+/**
+ * Chat, as an inbox (NOTES §53, the owner's choice): the Everyone room at the
+ * top, then your conversations with friends, newest first, the unread ones in
+ * bold with a count — the way Messenger lists them.
+ *
+ * The Everyone room used to BE this pane. It is a screen of its own now
+ * (`app/messages/everyone.tsx`), and so is each conversation; both are the same
+ * `ChatRoom`.
+ */
+function InboxPane() {
   const t = useTheme();
   const router = useRouter();
-  const queryClient = useQueryClient();
   const myId = useSessionStore((s) => s.session?.user.id ?? '');
-  const scroll = useRef<ScrollView>(null);
+  const [picking, setPicking] = useState(false);
+
+  const inbox = useQuery({
+    queryKey: ['conversations'],
+    queryFn: () => listConversations(),
+    refetchInterval: INBOX_POLL_MS,
+    retry: (count, err) => !(err instanceof MessagesUnavailableError) && count < 1,
+  });
+  const off = inbox.error instanceof MessagesUnavailableError;
+  const ordered = useMemo(() => inboxOrder(inbox.data ?? []), [inbox.data]);
+
+  // Friends to start a conversation with — only asked for when the picker opens.
+  const friends = useQuery({
+    queryKey: ['friend-links'],
+    queryFn: () => listFriendLinks(),
+    enabled: picking,
+  });
+  const start = useMutation({
+    mutationFn: (personId: string) => startConversation(personId),
+    onSuccess: (conversationId) => {
+      setPicking(false);
+      router.push(`/messages/${conversationId}`);
+    },
+  });
+
   const now = Date.now();
 
-  const { data: messages = [], isLoading, error } = useQuery({
-    queryKey: ['global-chat'],
-    queryFn: () => listMessages(),
-    refetchInterval: CHAT_POLL_MS,
-    retry: (count, err) => !(err instanceof CommunityUnavailableError) && count < 1,
-  });
-
-  const send = useMutation({
-    mutationFn: (text: string) => sendMessage(text),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['global-chat'] }),
-  });
-
-  /**
-   * Which message is being unsent, if any.
-   *
-   * The owner: *"delete button is just one click, what if i accidentally
-   * clicked it? already happened and i got sad there's no like confirmation."*
-   * So Delete opens a choice instead of acting, and the choice IS the
-   * confirmation — an "are you sure?" on a one-tap action would be one more tap
-   * to learn to dismiss without reading.
-   */
-  const [acting, setActing] = useState<ChatMessage | null>(null);
-  /** The message being edited, as a draft (NOTES §48). */
-  const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
-  /** Somebody else's message being reported, or its sender being blocked (NOTES §51). */
-  const [reporting, setReporting] = useState<ChatMessage | null>(null);
-  const [blocking, setBlocking] = useState<{ id: string; name: string } | null>(null);
-
-  const { data: reactions = [] } = useQuery({
-    queryKey: ['chat-reactions'],
-    queryFn: () => listReactions(),
-    refetchInterval: CHAT_POLL_MS,
-  });
-  const reactionsByMessage = useMemo(() => {
-    const map = new Map<string, Reaction[]>();
-    for (const r of reactions) {
-      const list = map.get(r.message_id) ?? [];
-      list.push(r);
-      map.set(r.message_id, list);
-    }
-    return map;
-  }, [reactions]);
-
-  const refreshChat = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['global-chat'] });
-    await queryClient.invalidateQueries({ queryKey: ['chat-reactions'] });
-  };
-
-  const unsend = useMutation({
-    mutationFn: ({ id, everyone }: { id: string; everyone: boolean }) =>
-      everyone ? deleteMessageForEveryone(id) : hideMessage(id),
-    onSuccess: async () => {
-      setActing(null);
-      await refreshChat();
-    },
-  });
-
-  const toggleReaction = useMutation({
-    mutationFn: ({ id, emoji, on }: { id: string; emoji: string; on: boolean }) =>
-      react(id, emoji, on),
-    onSuccess: async () => {
-      setActing(null);
-      await refreshChat();
-    },
-  });
-
-  const saveEdit = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: string }) => editMessage(id, body),
-    onSuccess: async () => {
-      setEditing(null);
-      await refreshChat();
-    },
-  });
-
-  if (error instanceof CommunityUnavailableError) return <Pane><NotSwitchedOn /></Pane>;
-
   return (
-    <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: space.lg }}>
-      <View style={{ flex: 1, width: '100%', maxWidth: CONTENT_MAX_WIDTH }}>
-        <ScrollView
-          ref={scroll}
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingVertical: space.md, gap: space.md }}
-          keyboardShouldPersistTaps="handled"
-          // New messages arrive at the bottom, where a messenger keeps you —
-          // the same behaviour as Nomi's chat, so the app has one idea of what
-          // a conversation looks like.
-          onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+    <Pane>
+      <SectionRow
+        title="Messages"
+        action={off ? undefined : <PillButton label="+ New message" onPress={() => setPicking(true)} />}
+      />
+
+      {/* The room everyone shares, always first. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Everyone. The room everyone signed in shares."
+        onPress={() => router.push('/messages/everyone')}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.md,
+          padding: space.md,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: t.border,
+          backgroundColor: t.card,
+          opacity: pressed ? 0.7 : 1,
+        })}
+      >
+        <View
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: t.bg,
+          }}
         >
-          {isLoading ? (
-            <LoadingState what="Loading messages…" />
-          ) : messages.length === 0 ? (
-            <StatePanel
-              kind="empty"
-              title="Nobody has said anything yet"
-              detail="This is one room, and everyone signed in to Nomi is in it."
-            />
-          ) : (
-            messages.map((m, i) => (
-              <Message
-                key={m.id}
-                name={authorName(m.author_name)}
-                avatar={m.author_avatar}
-                userId={m.author_id}
-                body={m.body}
-                when={describeWhen(Date.parse(m.created_at), now)}
-                mine={m.author_id === myId}
-                // Only the first of a run shows a face and a name. Five
-                // messages in a row from one person with their picture beside
-                // every one reads as five conversations, which is why every
-                // messenger groups them.
-                startsRun={messages[i - 1]?.author_id !== m.author_id}
-                endsRun={messages[i + 1]?.author_id !== m.author_id}
-                edited={!!m.edited_at}
-                canEdit={canEdit(m, myId, now)}
-                tallies={tallyReactions(reactionsByMessage.get(m.id) ?? [], myId)}
-                onAct={() => setActing(m)}
-                onOpenPerson={() => router.push(`/person/${m.author_id}`)}
-                onToggleReaction={(emoji, on) => toggleReaction.mutate({ id: m.id, emoji, on })}
-              />
-            ))
-          )}
-        </ScrollView>
-
-        {/* Everything you can do to a message, from a long press on a phone or
-            the ⋯ on a laptop (NOTES §48). */}
-        {acting ? (
-          <MessageSheet
-            mine={acting.author_id === myId}
-            canEdit={canEdit(acting, myId, Date.now())}
-            editWindowMinutes={EDIT_WINDOW_MINUTES}
-            busy={unsend.isPending || toggleReaction.isPending}
-            error={
-              unsend.isError
-                ? (unsend.error as Error).message
-                : toggleReaction.isError
-                  ? (toggleReaction.error as Error).message
-                  : null
-            }
-            onReact={(emoji) => {
-              const mineAlready = (reactionsByMessage.get(acting.id) ?? []).some(
-                (r) => r.user_id === myId && r.emoji === emoji,
-              );
-              toggleReaction.mutate({ id: acting.id, emoji, on: !mineAlready });
-            }}
-            onEdit={() => {
-              setEditing({ id: acting.id, body: acting.body });
-              setActing(null);
-            }}
-            onUnsendEveryone={() => unsend.mutate({ id: acting.id, everyone: true })}
-            onUnsendMe={() => unsend.mutate({ id: acting.id, everyone: false })}
-            name={authorName(acting.author_name)}
-            onViewProfile={() => {
-              setActing(null);
-              router.push(`/person/${acting.author_id}`);
-            }}
-            onReport={() => {
-              setReporting(acting);
-              setActing(null);
-            }}
-            onBlock={() => {
-              setBlocking({ id: acting.author_id, name: authorName(acting.author_name) });
-              setActing(null);
-            }}
-            onClose={() => setActing(null)}
-          />
-        ) : null}
-
-        {reporting ? (
-          <ReportSheet
-            kind="message"
-            targetId={reporting.id}
-            name={authorName(reporting.author_name)}
-            onBlock={() => {
-              setBlocking({ id: reporting.author_id, name: authorName(reporting.author_name) });
-              setReporting(null);
-            }}
-            onClose={() => setReporting(null)}
-          />
-        ) : null}
-        {blocking ? (
-          <BlockSheet personId={blocking.id} name={blocking.name} onClose={() => setBlocking(null)} />
-        ) : null}
-
-        {/* Editing happens in the message list rather than in the sheet: you
-            need to see the conversation around what you are rewording. */}
-        {editing ? (
-          <View style={{ paddingBottom: space.sm }}>
-            <Card>
-              <Label>Edit your message</Label>
-              <Field
-                label="Message"
-                value={editing.body}
-                onChangeText={(body) => setEditing((e) => (e ? { ...e, body } : e))}
-                autoCapitalize="sentences"
-                maxLength={MESSAGE_MAX_LENGTH}
-              />
-              {saveEdit.isError ? (
-                <Notice tone="error">{(saveEdit.error as Error).message}</Notice>
-              ) : null}
-              <Button
-                label="Save"
-                onPress={() => saveEdit.mutate(editing)}
-                busy={saveEdit.isPending}
-              />
-              <Button
-                label="Cancel"
-                variant="secondary"
-                onPress={() => setEditing(null)}
-                disabled={saveEdit.isPending}
-              />
-              <Body muted>Everyone will see it marked as edited.</Body>
-            </Card>
-          </View>
-        ) : null}
-
-        {send.isError ? (
-          <View style={{ paddingBottom: space.sm }}>
-            <Notice tone="error">{(send.error as Error).message}</Notice>
-          </View>
-        ) : null}
-
-        <View style={{ paddingBottom: space.lg, backgroundColor: t.bg }}>
-          <Composer
-            onSend={(text) => send.mutate(text)}
-            busy={send.isPending}
-            placeholder="Say something"
-            // The database refuses anything longer, so the box stops there
-            // rather than letting someone type a page and then be told no.
-            maxLength={MESSAGE_MAX_LENGTH}
-            emoji
-          />
+          <TabIcon name="community" color={t.accent} ground={t.bg} />
         </View>
-      </View>
-    </View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={[type.bodyStrong, { color: t.text }]}>Everyone</Text>
+          <Text style={[type.caption, { color: t.textMuted }]}>The room everyone signed in shares</Text>
+        </View>
+        <Text style={{ color: t.textMuted, fontSize: 22 }}>{GLYPH.forward}</Text>
+      </Pressable>
+
+      {off ? (
+        <Card>
+          <Body>Messages to friends aren&apos;t switched on yet.</Body>
+          <Body muted>The Everyone room works as normal.</Body>
+        </Card>
+      ) : null}
+      {inbox.isLoading ? <LoadingState /> : null}
+      {inbox.data && ordered.length === 0 ? (
+        <Body muted>No conversations yet. Start one with a friend here, or from their profile.</Body>
+      ) : null}
+
+      {ordered.map((c) => (
+        <ConversationRow
+          key={c.id}
+          conversation={c}
+          line={lastLine(c, myId)}
+          when={c.last_at ? describeWhen(Date.parse(c.last_at), now) : ''}
+          onPress={() => router.push(`/messages/${c.id}`)}
+        />
+      ))}
+
+      {picking ? (
+        <Sheet onClose={() => setPicking(false)}>
+          <SheetTitle>New message</SheetTitle>
+          {start.isError ? <Notice tone="error">{(start.error as Error).message}</Notice> : null}
+          {friends.isLoading ? <LoadingState /> : null}
+          {friends.data && splitFriends(friends.data).friends.length === 0 ? (
+            <Body muted>You can message friends. Add some from your Profile first.</Body>
+          ) : null}
+          {splitFriends(friends.data ?? []).friends.map((f) => (
+            <PersonRow
+              key={f.id}
+              id={f.person_id}
+              name={f.name}
+              username={f.username}
+              avatar={f.avatar}
+              onPress={() => start.mutate(f.person_id)}
+            />
+          ))}
+          <Button label="Cancel" variant="secondary" onPress={() => setPicking(false)} />
+        </Sheet>
+      ) : null}
+    </Pane>
   );
 }
 
-/**
- * Unsending, as a choice rather than a confirmation.
- *
- * Two different things, named as two different things:
- *
- *  - **for you** takes it off your own screen and nobody else's, and works on
- *    anybody's message — you can clear something somebody else said without
- *    asking them to take it back;
- *  - **for everyone** removes it from the room, and is only ever offered on
- *    your own, because that is all the database will allow (0021).
- *
- * On somebody else's message there is only one thing to do, so it says so
- * plainly instead of showing a disabled second button nobody can use.
- */
-function UnsendChoice({
-  mine,
-  busy,
-  error,
-  onPick,
-  onCancel,
-}: {
-  mine: boolean;
-  busy: boolean;
-  error: string | null;
-  onPick: (everyone: boolean) => void;
-  onCancel: () => void;
-}) {
-  return (
-    <View style={{ paddingBottom: space.sm }}>
-      <Card>
-        <Label>Unsend this message</Label>
-        {error ? <Notice tone="error">{error}</Notice> : null}
-        {mine ? (
-          <>
-            <Button label="Unsend for everyone" onPress={() => onPick(true)} busy={busy} />
-            <Body muted>It disappears from the room. People who already read it will have read it.</Body>
-            <Button label="Unsend for me only" variant="secondary" onPress={() => onPick(false)} disabled={busy} />
-            <Body muted>It stays for everyone else, and goes from your screen.</Body>
-          </>
-        ) : (
-          <>
-            <Button label="Hide this from my screen" onPress={() => onPick(false)} busy={busy} />
-            <Body muted>
-              It stays in the room for everyone else — only the person who sent it can take it back.
-            </Body>
-          </>
-        )}
-        <Button label="Keep it" variant="secondary" onPress={onCancel} disabled={busy} />
-      </Card>
-    </View>
-  );
-}
-
-/**
- * One message, the way a messenger draws one (NOTES §47).
- *
- * The owner: *"make the ui very similar to 'Messenger' app for cleaner look
- * (like my chats is placed on the right side, other is on left.) add bubbles to
- * the chat so it doesn't look plain (it just blends in the background)."*
- *
- * So: yours right and tinted, theirs left on the card surface, both in bubbles
- * that separate the words from the page. It was plain text on the background,
- * which is exactly the "blends in" he describes — there was nothing to say
- * where one message ended and the next began except a gap.
- *
- * ## The corner that is not round
- *
- * Each bubble has three round corners and one squarer one, on the side it came
- * from. It is what makes a stack of bubbles read as a direction rather than as
- * a column of lozenges, and it costs one line.
- *
- * ## Tap the bubble, not a Delete link
- *
- * A visible "Delete" beside every message is a one-tap mistake waiting to
- * happen — which is the report this was written from. The bubble itself opens
- * the unsend choice, so nothing destructive is ever one tap away, and the
- * choice does the confirming.
- */
-function Message({
-  name,
-  avatar,
-  userId,
-  body,
+/** One conversation in the inbox: who, the last line, when, and how many are new. */
+function ConversationRow({
+  conversation,
+  line,
   when,
-  mine,
-  startsRun,
-  endsRun,
-  edited,
-  canEdit: editable,
-  tallies,
-  onAct,
-  onOpenPerson,
-  onToggleReaction,
+  onPress,
 }: {
-  name: string;
-  avatar: string | null;
-  userId: string;
-  body: string;
+  conversation: Conversation;
+  line: string;
   when: string;
-  mine: boolean;
-  startsRun: boolean;
-  endsRun: boolean;
-  edited: boolean;
-  canEdit: boolean;
-  tallies: ReactionTally[];
-  onAct: () => void;
-  /** Their page, from their name or their face (NOTES §51). */
-  onOpenPerson: () => void;
-  onToggleReaction: (emoji: string, on: boolean) => void;
+  onPress: () => void;
 }) {
   const t = useTheme();
-  const AVATAR = 28;
+  const name = personName({ name: conversation.name, username: conversation.username });
+  const unread = conversation.unread > 0;
+  const badge = badgeLabel(conversation.unread);
 
-  /**
-   * Hover, on a pointer device only.
-   *
-   * `onPointerEnter` exists on react-native-web and is inert on a touch screen,
-   * which is exactly right: a phone has no hover, and the long press below is
-   * its way in. Kept on the whole row rather than on the buttons, or the
-   * controls would vanish as the mouse travelled towards them.
-   */
-  const [hovered, setHovered] = useState(false);
-  const longPress = useLongPress(onAct);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${name}. ${line}${unread ? `. ${conversation.unread} new` : ''}`}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.md,
+        padding: space.md,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: t.border,
+        backgroundColor: t.card,
+        opacity: pressed ? 0.7 : 1,
+      })}
+    >
+      <PersonAvatar avatar={conversation.avatar} userId={conversation.person_id} name={name} size={40} />
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={[unread ? type.bodyStrong : type.body, { color: t.text }]} numberOfLines={1}>
+          {name}
+        </Text>
+        {/* Bold AND counted when new — never colour alone. */}
+        <Text
+          style={[type.caption, { color: unread ? t.text : t.textMuted, fontWeight: unread ? '700' : '400' }]}
+          numberOfLines={1}
+        >
+          {line}
+          {when ? ` · ${when}` : ''}
+        </Text>
+      </View>
+      {badge ? <CountBadge label={badge} /> : null}
+    </Pressable>
+  );
+}
 
+/** A small count — on a conversation here, and on the Community tab. */
+export function CountBadge({ label }: { label: string }) {
+  const t = useTheme();
   return (
     <View
       style={{
-        alignItems: mine ? 'flex-end' : 'flex-start',
-        // A run from one person sits close together; a change of speaker opens
-        // a gap. That spacing is most of what makes a stack of bubbles legible.
-        marginTop: startsRun ? space.sm : 2,
-        gap: 2,
+        minWidth: 20,
+        height: 20,
+        paddingHorizontal: 6,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: t.accent,
       }}
     >
-      {/* Their name, once, above the first bubble of a run. Never on yours —
-          "You" over every message you send is a label nobody needs. */}
-      {startsRun && !mine ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${name}'s profile`}
-          onPress={onOpenPerson}
-          hitSlop={6}
-          style={{ marginLeft: AVATAR + space.sm }}
-        >
-          <Text style={[type.caption, { color: t.textMuted, fontWeight: '700' }]}>{name}</Text>
-        </Pressable>
-      ) : null}
-
-      {/* The bubble, the face and the hover controls on one row, bottom-aligned
-          so the face sits beside the message rather than beside the time under
-          it. The time is outside this row for exactly that reason. */}
-      <View
-        style={{
-          flexDirection: mine ? 'row-reverse' : 'row',
-          gap: space.sm,
-          alignItems: 'flex-end',
-          maxWidth: '92%',
-        }}
-        onPointerEnter={() => setHovered(true)}
-        onPointerLeave={() => setHovered(false)}
-      >
-        {/* The face goes on the LAST bubble of a run, where a messenger puts
-            it, with a spacer holding the line on the others. */}
-        {!mine ? (
-          endsRun ? (
-            <Pressable accessibilityRole="button" accessibilityLabel={`${name}'s profile`} onPress={onOpenPerson}>
-              <PersonAvatar avatar={avatar} userId={userId} name={name} size={AVATAR} />
-            </Pressable>
-          ) : (
-            <View style={{ width: AVATAR }} />
-          )
-        ) : null}
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${mine ? 'You' : name} said ${body}. ${when}${
-            edited ? ', edited' : ''
-          }. Hold for reactions and more.`}
-          // A long press on a touch screen; the ⋯ beside it on a pointer. The
-          // bubble is no longer a one-tap unsend — the owner unsent something by
-          // accident that way (NOTES §47), and this is the fix he asked for.
-          onLongPress={onAct}
-          delayLongPress={450}
-          {...longPress}
-          style={({ pressed }) => ({
-            flexShrink: 1,
-            paddingHorizontal: space.md,
-            paddingVertical: space.sm,
-            borderRadius: radius.lg,
-            // The squarer corner points at whoever said it, on the last bubble
-            // of their run — which is what makes a stack read as a direction
-            // rather than as a column of lozenges.
-            borderBottomRightRadius: mine && endsRun ? radius.sm : radius.lg,
-            borderBottomLeftRadius: !mine && endsRun ? radius.sm : radius.lg,
-            backgroundColor: mine ? t.accent : t.card,
-            borderWidth: mine ? 0 : 1,
-            borderColor: t.border,
-            opacity: pressed ? 0.75 : 1,
-          })}
-        >
-          <Text style={[type.body, { color: mine ? t.accentText : t.text }]} selectable>
-            {body}
-          </Text>
-        </Pressable>
-
-        <HoverActions
-          visible={hovered}
-          mine={mine}
-          canEdit={editable}
-          onPick={onAct}
-        />
-      </View>
-
-      <ReactionChips tallies={tallies} alignEnd={mine} onToggle={onToggleReaction} />
-
-      {/* Once per run, not once per message. Six timestamps down a page of one
-          person talking is six times as much furniture as the information in
-          it deserves. "edited" rides along with it, which is what keeps editing
-          honest — 0021 refused silent edits, and this is the mark that makes
-          them not silent (NOTES §48). */}
-      {endsRun ? (
-        <Text style={[type.caption, { color: t.textMuted, marginLeft: mine ? 0 : AVATAR + space.sm }]}>
-          {when}
-          {edited ? ' · edited' : ''}
-        </Text>
-      ) : null}
+      <Text style={[type.caption, { color: t.accentText, fontWeight: '700' }]}>{label}</Text>
     </View>
   );
 }

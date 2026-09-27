@@ -7889,6 +7889,105 @@ Avatars (§46.9) have the same shape and always did.
 **Not deployed; not committed.**
 
 
+## 53. Messages between friends (2026-09-28)
+
+Step three of §51's five. The owner deployed §52 (*"sure start it. done
+deploy"*) and chose, before anything was written: **Chat becomes an inbox** —
+the Everyone room at the top, then conversations; **unfriending leaves a
+conversation readable and closed**; **"Seen"**; and **an unread badge**.
+
+### 53.1 Migration 0028
+
+Needs 0025–0027 and refuses to run without them.
+
+- `conversations` — one per pair, ids in order (`user_low < user_high`, a plain
+  unique). Readable by its two people; never deleted from the app, because it
+  holds the other person's messages too.
+- **`dm_readable(conversation)`**: the caller is one of the two, and no block
+  stands between them either way. Messages, read markers, reactions, hiding, the
+  views and reporting all ask it. **`dm_can_send`** adds an accepted friendship —
+  a weaker check (reading) and a stronger one (sending), on purpose.
+- `direct_messages` via `send_direct_message` (friends only, 20 a minute, bumps
+  the conversation and marks it read for the sender) and `edit_direct_message`
+  (0025's `message_edit_window`, marked edited). Unsend is a delete of your own.
+- `conversation_reads` via `mark_conversation_read`, the time the database's —
+  both rows readable by both people, which is what "Seen" is.
+- Reactions and "hide for me", the Everyone room's shapes.
+- Views `my_conversations` (other person, last message not hidden, unread count,
+  their read time, can_send; nothing across a block) and `conversation_messages`.
+- `reports_kind_check` + `direct_message`, by name; `report_content` recreated
+  with the branch behind `dm_readable`.
+- **Not end-to-end encrypted.** The migration's header says so and the Privacy
+  Policy says so in the sentence that calls messages private — who can reach
+  them and why. Encryption would need keys on each device and a way to move them
+  to a new phone: a different project, not a line of SQL.
+
+### 53.2 On screen
+
+- **One `ChatRoom`** (`src/ui/chat-room.tsx`) for the Everyone room and every
+  conversation: the bubbles, the menu, editing, reactions, report and block were
+  moved out of Community rather than written twice. `UnsendChoice`, dead since
+  §48's sheet replaced it, did not move.
+- **The Everyone room** is `app/messages/everyone.tsx`; a conversation is
+  `app/messages/[id].tsx` — its name in the header opens their page, report and
+  block in the ⋯, no names over bubbles between two people, "Seen" under your
+  last message, and when you are not friends the reason in place of the box.
+  Opening it marks it read, and so does anything new arriving while it is open.
+- **The inbox** (Community → Chat): Everyone first, then conversations newest
+  first, unread in bold with a count; "+ New message" picks a friend. **A
+  friend's page** has "Message <name>".
+- **The badge** on the Community tab: every unread message, every twenty seconds
+  while the app is open, "9+" past nine.
+- The ✦ is kept off both rooms (`path[0] !== 'messages'`), for the chat pane's
+  old reason: a pinned Send where it floats.
+- Delete my data removes the messages you sent, your reactions, what you hid and
+  your read markers; conversations stay, holding the other person's messages.
+- Privacy Policy and Terms (still September 28): messages private between the
+  two of you **and not end-to-end encrypted**, "Seen", unfriending and blocking,
+  Delete my data, and the operator's reach "messages to friends included". The
+  Home card is "New: friends, posts and messages" with a new id.
+
+### 53.3 A bug the probe caught, and one from §52 it found too
+
+- **Sending in the moved Everyone room did nothing.** `ChatRoom` handed
+  `actions.send` to `useMutation` by reference; TanStack Query calls a mutation
+  function with a second argument of its own, and `sendMessage(raw, db?)` took it
+  as its database client. Exactly the trap Home's `listSets` comment records.
+  `community-probe` caught it — "Timed out waiting for the message B sent" — and
+  `tests/messages.test.ts` now fails any `mutationFn: actions.…`. The one other
+  by-reference `mutationFn` in the app, Notes' `createNote`, takes no arguments.
+- **`community-probe` had not been run since §52** and expected shared sets on
+  the screen Community opens to (Feed, now), and no ⋯ on somebody else's set
+  (§51 added one). It presses Sets, and checks the ⋯ holds none of the owner's
+  actions instead of that there is none.
+
+### 53.4 Measured, before 0028
+
+- typecheck clean with and without `.expo/` · **1387 tests**, 3 skipped · built
+  and booted.
+- `scroll-probe --height 420`: **9/9**, the Everyone room now a route of its own.
+- `community-probe`: **11/11** — the Everyone room sends and receives.
+- Photographed at 393 px, dark: the inbox ("Messages to friends aren't switched
+  on yet", Everyone first) and the Everyone room with its header.
+
+### 53.5 0028 applied, and verified (2026-09-28)
+
+Pasted by the owner the same day — *"success"*.
+
+- **`isolation-test.ts`: 156/156**, 20 of them new (the first run, so "strangers
+  cannot start a conversation" was checked too — later runs find the one that
+  now exists and check sending instead).
+- **`scripts/messages-probe.ts` (new): 8/8** in the built app: "Community, 1 new"
+  on the tab; the inbox with Everyone first and B counted; opening it marks it
+  read in the database; a reply from the box reaches B; "Seen" once B reads it;
+  "Message Probe B" on B's page opens the same conversation; unfriended, still
+  readable and the reason where the box was; no console errors.
+- Regression, the same day: `posts-probe` **10/10**, `friends-probe` **16/16**,
+  `community-probe` **11/11**, `scroll-probe` **9/9**.
+
+**Not deployed; not committed.**
+
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)

@@ -171,6 +171,9 @@ function RootNavigator() {
     path[0] !== 'sign-in' &&
     path[0] !== 'nomi' &&
     path[1] !== 'community' &&
+    // The rooms (NOTES §53): the same reason as the chat pane had — a pinned
+    // Send where the ✦ floats.
+    path[0] !== 'messages' &&
     !isPublicRoute(segments[0]);
 
   return (
@@ -244,6 +247,10 @@ function RootNavigator() {
             not places: pushed with their own back control. */}
         <Stack.Screen name="post/new" options={{ title: '', ...backable }} />
         <Stack.Screen name="post/[id]" options={{ title: '', ...backable }} />
+        {/* The Everyone room and a conversation with a friend (NOTES §53):
+            pushed rooms, each titled by the screen. */}
+        <Stack.Screen name="messages/everyone" options={{ title: 'Everyone', ...backable }} />
+        <Stack.Screen name="messages/[id]" options={{ title: '', ...backable }} />
         {/* Each document names itself in its body. */}
         <Stack.Screen name="terms" options={{ title: '', ...backable }} />
         <Stack.Screen name="privacy" options={{ title: '', ...backable }} />

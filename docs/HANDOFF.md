@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1363 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1387 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§52 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§53 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -58,7 +58,11 @@ pushed screen at /settings, reached from Profile's top right and Home's picture.
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 27, all applied
+### Migrations — 28, all applied
+
+**0028 (messages between friends — NOTES §53) was applied by the owner on
+2026-09-28** and verified the same day: isolation **156/156**, `messages-probe`
+**8/8**, and every other probe re-run clean.
 
 **0027 (posts, feed, comments, reactions — NOTES §52) was applied by the owner on
 2026-09-28** and verified the same day: isolation **136/136**, `posts-probe`
@@ -435,6 +439,12 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     `tests/posts.test.ts` holds each of the seven to it.
 50. **A streak brag is the database's number** (`streak_of`, NOTES §52). The app
     asks for "my streak"; it never sends one. `streak_of` is granted to nobody.
+51. **Messages are NOT end-to-end encrypted, and the Privacy Policy says so**
+    (NOTES §53) in the same sentence that calls them private. Never let the
+    words drift towards "sealed" or "encrypted" without the thing itself.
+52. **Never pass a data function to `useMutation` or `useQuery` by reference**
+    when it takes an optional client — TanStack hands it its own second argument
+    (NOTES §53.3; Home's `listSets` note is the first time). Wrap it.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -674,6 +684,7 @@ npx tsx --env-file=.env scripts/reminders-e2e-probe.ts [--out <dir>]    # on fro
 npx tsx --env-file=.env scripts/finish-lines-probe.ts [--out <dir>]     # what Nomi says after 3/3, 1/3 twice and 0/3, photographed
 npx tsx --env-file=.env scripts/community-probe.ts [--out <dir>]        # a shared set seen by the OTHER person, in the built app: listed, read-only, dealt, chatted. NEEDS 0021. NEVER RUN YET
 npx tsx --env-file=.env scripts/scroll-probe.ts --height 420            # 7 screens now, including Community's Chat pane — the one layout that is not a `Screen`
+npx tsx --env-file=.env scripts/messages-probe.ts [--out <dir>]         # the badge, the inbox, open and read, reply, Seen, "Message <name>", a closed conversation — in the built app as A (NEEDS 0028)
 npx tsx --env-file=.env scripts/posts-probe.ts [--out <dir>]            # feed, photo, react, comment, compose with a set for everyone, flip it in the feed, edit, delete — in the built app as A, the database checked after each step (NEEDS 0027)
 npx tsx --env-file=.env scripts/friends-probe.ts [--out <dir>]          # username, a request, search, accept, block, unblock, report — in the built app as A, the database checked after each step (NEEDS 0026; leaves one marked report)
 npx tsx --env-file=.env scripts/drag-probe.ts [--shot <file.png>]       # hold a set and drag it into a folder, with a real mouse and a real finger; asks the database whether it moved

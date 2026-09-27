@@ -66,6 +66,11 @@
  *     removing theirs; a streak brag counted by the database and nobody's streak
  *     readable; a photo readable only while its post is, and never postable from
  *     somebody else's folder; a block hiding posts both ways
+ *   - messages between friends (0028, NOTES §53), both directions: nothing
+ *     written around the functions; one conversation per pair; read, counted,
+ *     marked read and "Seen"; only the sender edits or unsends; reactions in
+ *     your own name only; a message reportable and the report invisible to its
+ *     sender; unfriended, readable and closed; blocked, gone for both
  *
  * The views matter most. A Postgres view runs as its OWNER by default, which
  * bypasses RLS on the tables underneath. Testing only base tables would pass
@@ -982,6 +987,9 @@ async function main() {
     // ---- posts, comments, reactions and photos (0027, NOTES §52) ----
     await checkPosts(A, B, { privateSetId: set.id });
 
+    // ---- messages between friends (0028, NOTES §53) ----
+    await checkMessages(A, B);
+
     // ---- unsharing is live ----
     // The filter is one line in each view. Turning it back off must actually
     // take the set away, or "stop sharing" is a button that does nothing.
@@ -1692,6 +1700,169 @@ async function checkPosts(
   await A.client.from('posts').delete().like('body', `${POST_PROBE}%`);
   await B.client.from('posts').delete().like('body', `${POST_PROBE}%`);
   await B.client.storage.from('post-images').remove([photoPath]);
+}
+
+/**
+ * Messages between friends (0028, NOTES §53), both directions.
+ *
+ * A conversation is never deleted from the app — it outlives unfriending on
+ * purpose — so after the first run there is always one between the two test
+ * accounts. "Strangers cannot start one" can therefore only be checked while
+ * there is none; what is checked every run is the stronger claim: strangers
+ * cannot SEND in one.
+ */
+const DM_PROBE = 'dm probe';
+
+async function checkMessages(
+  A: { client: SupabaseClient; userId: string },
+  B: { client: SupabaseClient; userId: string },
+) {
+  const gate = await A.client.from('my_conversations').select('id').limit(1);
+  if (gate.error && (isMissingRelation(gate.error) || gate.error.code === '42703')) {
+    console.log('\n  ----  messages — not present (migration 0028), not checked');
+    return;
+  }
+  console.log('\nMessages between friends (0028):');
+
+  const strangers = async () => {
+    await A.client.from('blocks').delete().eq('blocker_id', A.userId);
+    await B.client.from('blocks').delete().eq('blocker_id', B.userId);
+    await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
+  };
+  const befriend = async () => {
+    await B.client.rpc('send_friend_request', { p_to: A.userId });
+    await A.client.rpc('accept_friend_request', { p_from: B.userId });
+  };
+  await strangers();
+  await A.client.from('direct_messages').delete().like('body', `${DM_PROBE}%`);
+  await B.client.from('direct_messages').delete().like('body', `${DM_PROBE}%`);
+
+  // ---- starting ----
+  const existing = await A.client.from('my_conversations').select('id').eq('person_id', B.userId);
+  if ((existing.data ?? []).length === 0) {
+    const early = await A.client.rpc('start_conversation', { p_other: B.userId });
+    if (!early.error) fail('start_conversation (strangers)', 'A opened a conversation with somebody who is not a friend');
+    else ok('start_conversation (strangers)', `refused (${early.error.code ?? 'error'})`);
+  } else {
+    console.log('  ----  start_conversation (strangers) — a conversation from an earlier run exists; sending is checked instead');
+  }
+
+  const forgedConversation = await A.client
+    .from('conversations')
+    .insert({ user_low: A.userId < B.userId ? A.userId : B.userId, user_high: A.userId < B.userId ? B.userId : A.userId });
+  if (!forgedConversation.error) fail('conversations insert', 'a conversation went straight into the table');
+  else ok('conversations insert', `refused (${forgedConversation.error.code ?? 'error'}) — only through start_conversation`);
+
+  await befriend();
+  const opened = await A.client.rpc('start_conversation', { p_other: B.userId });
+  if (opened.error) {
+    fail('start_conversation (friends)', opened.error.message);
+    await strangers();
+    return;
+  }
+  const conversationId = opened.data as string;
+  const again = await B.client.rpc('start_conversation', { p_other: A.userId });
+  if (again.data !== conversationId) fail('start_conversation (once per pair)', 'B and A got two different conversations');
+  else ok('start_conversation', 'friends, one conversation per pair whoever opens it');
+
+  // ---- sending, reading, "Seen" ----
+  const forgedMessage = await A.client
+    .from('direct_messages')
+    .insert({ conversation_id: conversationId, user_id: A.userId, body: 'around the limit' });
+  if (!forgedMessage.error) fail('direct_messages insert', 'a message went straight in, around send_direct_message');
+  else ok('direct_messages insert', `refused (${forgedMessage.error.code ?? 'error'})`);
+
+  const sent = await A.client.rpc('send_direct_message', { p_conversation: conversationId, p_body: `${DM_PROBE} from A` });
+  if (sent.error) {
+    fail('send_direct_message', sent.error.message);
+  } else {
+    const aMessageId = sent.data as string;
+    const bReads = await B.client.from('conversation_messages').select('id, body').eq('conversation_id', conversationId);
+    if (!(bReads.data ?? []).some((m: { id: string }) => m.id === aMessageId)) fail('conversation_messages (as B)', "B cannot read A's message");
+    else ok('conversation_messages (as B)', "B reads A's message");
+
+    const unread = await B.client.from('my_conversations').select('unread').eq('id', conversationId).maybeSingle();
+    if (((unread.data as { unread?: number } | null)?.unread ?? 0) < 1) fail('unread', 'B has an unread message the inbox does not count');
+    else ok('unread', 'counted for B');
+
+    await B.client.rpc('mark_conversation_read', { p_conversation: conversationId });
+    const seen = await A.client.from('my_conversations').select('their_read_at, unread').eq('id', conversationId).maybeSingle();
+    if (!(seen.data as { their_read_at?: string } | null)?.their_read_at) fail('seen', 'B read it and A cannot tell');
+    else ok('seen', 'B read it, and A can see that');
+    const bAfter = await B.client.from('my_conversations').select('unread').eq('id', conversationId).maybeSingle();
+    if (((bAfter.data as { unread?: number } | null)?.unread ?? 1) !== 0) fail('mark read', 'still unread after B read it');
+    else ok('mark read', 'nothing unread once read');
+
+    const bEdits = await B.client.rpc('edit_direct_message', { p_id: aMessageId, p_body: 'hijacked' });
+    if (!bEdits.error) fail('edit_direct_message (as B)', "B EDITED A'S MESSAGE");
+    else ok('edit_direct_message (as B)', `refused (${bEdits.error.code ?? 'error'})`);
+    const aEdits = await A.client.rpc('edit_direct_message', { p_id: aMessageId, p_body: `${DM_PROBE} from A (edited)` });
+    const edited = await B.client.from('conversation_messages').select('edited_at').eq('id', aMessageId).maybeSingle();
+    if (aEdits.error || !(edited.data as { edited_at?: string } | null)?.edited_at) {
+      fail('edit_direct_message (as A)', aEdits.error?.message ?? 'edited without being marked');
+    } else ok('edit_direct_message (as A)', 'edited, and marked for B');
+
+    await B.client.from('direct_messages').delete().eq('id', aMessageId);
+    const survived = await A.client.from('direct_messages').select('id').eq('id', aMessageId);
+    if ((survived.data ?? []).length === 0) fail('unsend (as B)', "B UNSENT A'S MESSAGE");
+    else ok('unsend (as B)', 'only the sender can take it back');
+
+    const bReacts = await B.client.from('direct_message_reactions').insert({ message_id: aMessageId, user_id: B.userId, emoji: '❤️' });
+    const asA = await B.client.from('direct_message_reactions').insert({ message_id: aMessageId, user_id: A.userId, emoji: '😠' });
+    const aSeesReaction = await A.client.from('direct_message_reactions').select('user_id').eq('message_id', aMessageId);
+    if (bReacts.error || !(aSeesReaction.data ?? []).some((r: { user_id: string }) => r.user_id === B.userId)) {
+      fail('react', bReacts.error?.message ?? "A cannot see B's reaction");
+    } else ok('react', "B reacted; A sees it");
+    if (!asA.error) fail('react (as A)', "B reacted in A's name");
+    else ok('react (as A)', `refused (${asA.error.code ?? 'error'})`);
+
+    // ---- reporting a message only the two of them can see ----
+    const report = await B.client.rpc('report_content', {
+      p_kind: 'direct_message',
+      p_target: aMessageId,
+      p_reason: 'harassment',
+      p_details: PROBE_REPORT,
+    });
+    if (report.error) fail('report_content (direct message)', report.error.message);
+    else {
+      const aSeesReport = await A.client.from('reports').select('id').eq('id', report.data as string);
+      if ((aSeesReport.data ?? []).length > 0) fail('report (as A)', 'A CAN SEE THAT B REPORTED THEM');
+      else ok('report_content (direct message)', 'reported with a copy, invisible to the sender');
+    }
+
+    // ---- unfriended: readable, closed ----
+    await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
+    const stillReads = await B.client.from('conversation_messages').select('id').eq('conversation_id', conversationId);
+    const closed = await B.client.rpc('send_direct_message', { p_conversation: conversationId, p_body: `${DM_PROBE} after` });
+    const canSend = await B.client.from('my_conversations').select('can_send').eq('id', conversationId).maybeSingle();
+    if ((stillReads.data ?? []).length === 0) fail('unfriended (read)', 'the conversation vanished — it should stay readable');
+    else ok('unfriended (read)', 'still readable');
+    if (!closed.error) fail('unfriended (send)', 'B sent to somebody who is not a friend any more');
+    else ok('unfriended (send)', `refused (${closed.error.code ?? 'error'})`);
+    if ((canSend.data as { can_send?: boolean } | null)?.can_send !== false) fail('unfriended (inbox)', 'the inbox says B can still send');
+    else ok('unfriended (inbox)', 'closed in the inbox too');
+
+    // ---- blocked: gone, both ways ----
+    await befriend();
+    await A.client.rpc('block_person', { p_other: B.userId });
+    const bInbox = await B.client.from('my_conversations').select('id').eq('id', conversationId);
+    const bMessages = await B.client.from('conversation_messages').select('id').eq('conversation_id', conversationId);
+    const bTable = await B.client.from('direct_messages').select('id').eq('conversation_id', conversationId);
+    const aInbox = await A.client.from('my_conversations').select('id').eq('id', conversationId);
+    if ((bInbox.data ?? []).length + (bMessages.data ?? []).length + (bTable.data ?? []).length > 0) {
+      fail('block (B side)', 'B still sees the conversation of somebody who blocked them');
+    } else ok('block (B side)', 'the conversation is gone for the blocked person');
+    if ((aInbox.data ?? []).length > 0) fail('block (A side)', 'A still sees the conversation with somebody A blocked');
+    else ok('block (A side)', 'and for the one who blocked');
+    const bSends = await B.client.rpc('send_direct_message', { p_conversation: conversationId, p_body: `${DM_PROBE} blocked` });
+    if (!bSends.error) fail('block (send)', 'B sent a message to somebody who blocked them');
+    else ok('block (send)', `refused (${bSends.error.code ?? 'error'})`);
+  }
+
+  // ---- tidy up ----
+  await strangers();
+  await A.client.from('direct_messages').delete().like('body', `${DM_PROBE}%`);
+  await B.client.from('direct_messages').delete().like('body', `${DM_PROBE}%`);
 }
 
 main().catch((err) => {

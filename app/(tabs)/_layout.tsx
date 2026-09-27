@@ -2,6 +2,10 @@ import { forwardRef } from 'react';
 import { Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { TabList, TabSlot, TabTrigger, Tabs, type TabTriggerSlotProps } from 'expo-router/ui';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery } from '@tanstack/react-query';
+import { unreadMessages } from '../../src/data/messages';
+import { badgeLabel, INBOX_POLL_MS } from '../../src/core/messages';
+import { useSessionStore } from '../../src/data/session';
 import { radius, space, useTheme } from '../../src/ui/theme';
 import { TabIcon, type TabIconName } from '../../src/ui/glyphs';
 
@@ -69,8 +73,8 @@ const TABS = [
  * guessing game. The words are what makes it navigable. The icons are drawn
  * in `src/ui/glyphs.tsx`; they used to be four unrelated Unicode characters.
  */
-const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; icon: TabIconName }>(
-  ({ label, icon, isFocused, children, ...props }, ref) => {
+const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; icon: TabIconName; badge?: string | null }>(
+  ({ label, icon, badge, isFocused, children, ...props }, ref) => {
     const t = useTheme();
     const { width } = useWindowDimensions();
     const sidebar = width >= SIDEBAR_MIN_WIDTH;
@@ -82,6 +86,7 @@ const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; icon: 
         {...props}
         accessibilityRole="tab"
         accessibilityState={{ selected: !!isFocused }}
+        accessibilityLabel={badge ? `${label}, ${badge} new` : label}
         style={{
           flex: sidebar ? undefined : 1,
           flexDirection: sidebar ? 'row' : 'column',
@@ -98,7 +103,32 @@ const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; icon: 
           minHeight: 44,
         }}
       >
-        <TabIcon name={icon} color={tint} ground={sidebar && isFocused ? t.bg : t.card} />
+        <View>
+          <TabIcon name={icon} color={tint} ground={sidebar && isFocused ? t.bg : t.card} />
+          {/* Unread messages, on Community (NOTES §53, the owner's choice). On
+              the icon's corner, where every phone puts one, so the label below
+              stays whole. */}
+          {badge ? (
+            <View
+              style={{
+                position: 'absolute',
+                top: -5,
+                right: -11,
+                minWidth: 18,
+                height: 18,
+                paddingHorizontal: 4,
+                borderRadius: 9,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: t.accent,
+                borderWidth: 2,
+                borderColor: t.card,
+              }}
+            >
+              <Text style={{ color: t.accentText, fontSize: 10, fontWeight: '700' }}>{badge}</Text>
+            </View>
+          ) : null}
+        </View>
         <Text
           style={{
             fontSize: sidebar ? 15 : 11,
@@ -118,6 +148,15 @@ TabButton.displayName = 'TabButton';
 
 export default function TabsLayout() {
   const t = useTheme();
+  const signedIn = useSessionStore((s) => !!s.session);
+  // Every twenty seconds while the app is open; a phone in a pocket asks for
+  // nothing, as with every other poll here.
+  const { data: unread = 0 } = useQuery({
+    queryKey: ['dm-unread'],
+    queryFn: () => unreadMessages(),
+    refetchInterval: INBOX_POLL_MS,
+    enabled: signedIn,
+  });
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const sidebar = width >= SIDEBAR_MIN_WIDTH;
@@ -172,7 +211,7 @@ export default function TabsLayout() {
       >
         {TABS.map((tab) => (
           <TabTrigger key={tab.name} name={tab.name} href={tab.href} asChild>
-            <TabButton label={tab.label} icon={tab.icon} />
+            <TabButton label={tab.label} icon={tab.icon} badge={tab.name === 'community' ? badgeLabel(unread) : null} />
           </TabTrigger>
         ))}
       </TabList>

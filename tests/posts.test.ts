@@ -344,7 +344,7 @@ describe('what the Privacy Policy says about posts is what the app does', () => 
   });
 
   it('Delete my data removes posts, their photos, and every comment and reaction left', () => {
-    expect(privacy).toMatch(/Delete my data removes[^.]*your posts and their photos, and the comments and reactions you left/);
+    expect(privacy).toMatch(/Delete my data removes[^.]*your posts and their photos, the comments and reactions you left/);
     const data = readFileSync('src/data/posts.ts', 'utf8');
     const body = data.slice(data.indexOf('export async function removeMyPosts'));
     expect(body).toContain("['post_comments', 'post_reactions', 'posts']");

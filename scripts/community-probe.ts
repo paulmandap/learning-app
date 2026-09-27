@@ -171,7 +171,9 @@ async function main() {
   try {
     // --- Community lists it ------------------------------------------------
     console.log('B, in the built app:');
+    // Community opens on the Feed since NOTES §52; shared sets are under Sets.
     await page.goto('/community');
+    await page.click('Sets');
     await page.waitFor(
       `document.body.innerText.includes(${JSON.stringify(SET_TITLE)}) ? 'y' : ''`,
       'the shared set in Community',
@@ -218,12 +220,25 @@ async function main() {
     if (setScreen.includes('Study this set')) ok('study rows', 'offered on a shared set');
     else fail('study rows', 'no way to study a set that has a card in it');
 
-    // Nothing that writes to somebody else's set may be offered.
-    const menu = await page.evaluate<string>(
-      `document.querySelector('[aria-label="More"], [aria-label="More actions"]') ? 'present' : 'absent'`,
+    // Nothing that writes to somebody else's set may be offered. Since NOTES
+    // §51 a shared set HAS a ••• — whose it is, posting about it, reporting it —
+    // so what is checked is what is in it: none of the owner's actions.
+    const opened = await page.evaluate<string>(`(() => {
+      const more = document.querySelector('[aria-label="More actions"]');
+      if (!more) return 'absent';
+      more.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      more.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      more.click();
+      return 'opened';
+    })()`);
+    if (opened === 'opened') await page.waitFor(`document.body.innerText.includes('Report this set') ? 'y' : ''`, 'the ••• menu');
+    const menuText = await page.evaluate<string>('document.body.innerText');
+    const ownerOnly = ['Rename set', 'Delete set', 'Add notes', 'Move to folder', 'Stop sharing', 'Free up space'].filter((w) =>
+      menuText.includes(w),
     );
-    if (menu === 'absent') ok('the ••• menu', 'not offered on a set that is not yours');
-    else fail('the ••• menu', 'a set you do not own offers actions that would do nothing');
+    if (ownerOnly.length > 0) fail('the ••• menu', `offers the owner's actions on a set you do not own: ${ownerOnly.join(', ')}`);
+    else ok('the ••• menu', "only whose it is, posting about it and reporting it — none of the owner's actions");
+    await page.goto(`/set/${setId}`);
 
     if (outDir) await page.screenshot(join(outDir, '02-shared-set.png'));
 
@@ -259,8 +274,11 @@ async function main() {
     if (outDir) await page.screenshot(join(outDir, '03-deck.png'));
 
     // --- the chat round-trips ---------------------------------------------
+    // Chat is an inbox since NOTES §53; the room is the first thing in it.
     await page.goto('/community');
     await page.click('Chat');
+    await page.click('Everyone. The room everyone signed in shares.');
+    await page.waitFor(`location.pathname === '/messages/everyone' ? 'y' : ''`, 'the Everyone room');
     await page.waitFor(
       `document.querySelector('textarea') ? 'y' : ''`,
       'the chat box',

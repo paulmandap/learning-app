@@ -134,7 +134,9 @@ describe('the actions on a message', () => {
   it('appear on hover on a pointer, and on a long press on a touch screen', () => {
     // The hover lives on the message ROW, not on the buttons — controls that
     // appeared only while the mouse was on the controls could never be reached.
-    expect(readFileSync('app/(tabs)/community.tsx', 'utf8')).toContain('onPointerEnter');
+    // In the shared room since NOTES §53 — the Everyone room and every
+    // conversation with a friend draw their messages there.
+    expect(readFileSync('src/ui/chat-room.tsx', 'utf8')).toContain('onPointerEnter');
     expect(source).toContain('export function useLongPress');
   });
 
@@ -149,8 +151,14 @@ describe('the actions on a message', () => {
     // The owner unsent something by accident when the bubble itself deleted on
     // one tap (NOTES §47). Nothing destructive may be reachable without the
     // sheet, which is where the choice lives.
-    const chat = readFileSync('app/(tabs)/community.tsx', 'utf8');
-    expect(chat).not.toMatch(/onPress=\{[^}]*deleteMessageForEveryone/);
+    const chat = readFileSync('src/ui/chat-room.tsx', 'utf8');
+    expect(chat).not.toMatch(/onPress=\{[^}]*(deleteMessageForEveryone|unsendEveryone|unsendDirectMessage)/);
     expect(chat).toContain('onLongPress={onAct}');
+    // And neither room reaches around it (NOTES §53).
+    for (const room of ['app/messages/everyone.tsx', 'app/messages/[id].tsx']) {
+      const src = readFileSync(room, 'utf8');
+      expect(src, room).toContain('<ChatRoom');
+      expect(src, room).not.toMatch(/onPress=\{[^}]*(deleteMessageForEveryone|unsendDirectMessage)/);
+    }
   });
 });

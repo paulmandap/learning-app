@@ -7,6 +7,7 @@ import { removeAllNoteImages } from './notes';
 import { removeMyCommunityData } from './community';
 import { removeMySocialData } from './social';
 import { removeMyPosts } from './posts';
+import { removeMyMessages } from './messages';
 
 /**
  * Study sets. RLS scopes every query to the signed-in user, so nothing here
@@ -206,6 +207,11 @@ export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
   // (0027, NOTES §52). Before the sets: a post about a set would cascade with
   // it, but a post of words or a photo belongs to no set at all.
   await removeMyPosts();
+
+  // Messages to friends (0028, NOTES §53): the ones I sent, my reactions, what
+  // I hid and when I last read. The conversations stay — each holds the other
+  // person's messages too, and those are theirs.
+  await removeMyMessages();
 
   const sets = await listSets();
   for (const set of sets) {

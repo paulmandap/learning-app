@@ -128,6 +128,7 @@ export function MessageSheet({
   onEdit,
   onUnsendEveryone,
   onUnsendMe,
+  hideDetail = 'It stays in the room for everyone else — only the person who sent it can take it back.',
   name,
   onViewProfile,
   onReport,
@@ -143,6 +144,8 @@ export function MessageSheet({
   onEdit: () => void;
   onUnsendEveryone: () => void;
   onUnsendMe: () => void;
+  /** What hiding does, in the words of the room it is in (NOTES §53). */
+  hideDetail?: string;
   /** Who sent it, for "Block Paul". Somebody else's message only (NOTES §51). */
   name?: string;
   onViewProfile?: () => void;
@@ -268,9 +271,7 @@ export function MessageSheet({
           ) : (
             <>
               <Button label="Hide this from my screen" onPress={onUnsendMe} busy={busy} />
-              <Body muted>
-                It stays in the room for everyone else — only the person who sent it can take it back.
-              </Body>
+              <Body muted>{hideDetail}</Body>
               {/* Somebody else's message: who they are, and the two ways to
                   stop them (NOTES §51). Below "Hide", which is the gentle
                   option and the one most people want. */}

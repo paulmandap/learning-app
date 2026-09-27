@@ -42,7 +42,7 @@ import { openPage } from './screenshot';
  * The five tabs, and Settings, which left the bar for Profile (NOTES §51) and is
  * still a screen long enough to need scrolling.
  */
-const TABS = ['/', '/notes', '/community', '/progress', '/profile', '/settings'] as const;
+const TABS = ['/', '/notes', '/community', '/progress', '/profile', '/settings', '/messages/everyone'] as const;
 
 /**
  * Community is the one tab that is NOT a `Screen`.
@@ -57,6 +57,8 @@ const TABS = ['/', '/notes', '/community', '/progress', '/profile', '/settings']
  *
  * Since NOTES §52 the panes are Feed | Sets | Chat and Feed opens first, so
  * `/community` itself checks the feed's own scroller; Sets and Chat are pressed.
+ * Since §53 Chat is an inbox — an ordinary scrolling column — and the bounded
+ * room with its pinned box is `/messages/everyone`, checked as a route above.
  */
 const COMMUNITY_PANES = ['Sets', 'Chat'] as const;
 

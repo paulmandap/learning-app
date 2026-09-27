@@ -15,16 +15,17 @@ import { EFFECTIVE_DATE } from './legal';
 export const WHATS_NEW = {
   /**
    * Never reused: a new notice gets a new id, or nobody who saw the last one
-   * sees it. Was 'friends-2026-09-27' (§51); posts are a second significant
-   * change the next day (§52), so everybody who dismissed that one sees this.
+   * sees it. Was 'friends-2026-09-27' (§51), then 'posts-2026-09-28' (§52);
+   * messages between friends are a third significant change (§53), so
+   * everybody who dismissed an earlier one sees this.
    */
-  id: 'posts-2026-09-28',
+  id: 'messages-2026-09-28',
   /** The Privacy Policy and Terms date this card announces. */
   changed: 'September 28, 2026',
-  title: 'New: friends and posts',
-  body: 'Find friends on your Profile, and share a win, a photo, a set or your streak in Community. Friends see your posts unless you choose everyone. You can block or report anyone.',
+  title: 'New: friends, posts and messages',
+  body: 'Find friends on your Profile, share a win, a photo, a set or your streak in Community, and message your friends from Chat. You can block or report anyone.',
   policy:
-    'Our Privacy Policy and Terms of Use changed on September 28, 2026 to cover friends, posts, comments, blocking and reporting.',
+    'Our Privacy Policy and Terms of Use changed on September 28, 2026 to cover friends, posts, messages, blocking and reporting.',
 } as const;
 
 /** Where "seen" is remembered on this device, per person — a shared phone shows it to each. */

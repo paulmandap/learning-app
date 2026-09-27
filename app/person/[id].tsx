@@ -19,6 +19,7 @@ import { PersonAvatar } from '../../src/ui/avatar';
 import { BlockSheet, ReportSheet } from '../../src/ui/people';
 import { PostList } from '../../src/ui/post';
 import { listFeed, PostsUnavailableError } from '../../src/data/posts';
+import { startConversation } from '../../src/data/messages';
 import { joinPages, nextCursor, type FeedCursor } from '../../src/core/posts';
 import { space, type, useTheme } from '../../src/ui/theme';
 import {
@@ -104,7 +105,13 @@ export default function PersonPage() {
     mutationFn: () => unblockPerson(personId),
     onSettled: () => queryClient.invalidateQueries(),
   });
-  const failed = [add, accept, remove, unblock].find((m) => m.isError)?.error as Error | undefined;
+  // Friends can message each other (NOTES §53). Finds the conversation there
+  // already is, or opens one.
+  const message = useMutation({
+    mutationFn: () => startConversation(personId),
+    onSuccess: (conversationId) => router.push(`/messages/${conversationId}`),
+  });
+  const failed = [add, accept, remove, unblock, message].find((m) => m.isError)?.error as Error | undefined;
 
   if (person.isLoading) {
     return (
@@ -186,6 +193,7 @@ export default function PersonPage() {
       ) : state === 'friends' ? (
         <Card>
           <Body>You&apos;re friends.</Body>
+          <Button label={`Message ${name}`} variant="outline" onPress={() => message.mutate()} busy={message.isPending} />
           {confirmUnfriend ? (
             <>
               <Body muted>Unfriend {name}? They won&apos;t be told, and you can ask again later.</Body>
