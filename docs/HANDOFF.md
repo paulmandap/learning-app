@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1277 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1319 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§50 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§51 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -49,15 +49,27 @@ roadmap item.
 
 Study (home) · Add notes · Set (Preparing / Ready) · Flashcards · Quiz · Fill in
 the blanks · **Notes list** · **Note editor** · **Community** · Progress ·
-Settings · **Nomi** · Sign in.
+**Profile** · **A person's page** · Settings · **Nomi** · Sign in.
 
 Navigation is five tabs — Nomi (Home, called Study until NOTES §40) · Notes ·
-Community (NOTES §46) · Progress · Settings — as a bottom bar
-under 800px and a rail beside the content above it. Everything that is a *place*
+Community (NOTES §46) · Progress · Profile (NOTES §51, in Settings' place) — as a
+bottom bar under 800px and a rail beside the content above it. Settings is a
+pushed screen at /settings, reached from Profile's top right and Home's picture. Everything that is a *place*
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 25; **0025 waiting**, the rest applied and verified
+### Migrations — 26, all applied
+
+**0026 (friends, blocks, reports — NOTES §51) was applied by the owner on
+2026-09-27** and verified the same day: isolation **106/106**,
+`scripts/friends-probe.ts` **16/16** in the built app. **The owner reads reports
+in the dashboard** (`public.reports`) until step 5 builds a queue. Both probes
+leave reports behind on purpose (no delete policy); they are marked `… probe —
+not a real report` and print the SQL to clear them.
+
+**0025 is applied** — confirmed live on 2026-09-27 as the test user
+(`global_chat.edited_at` and `message_reactions` both present). The paragraph
+below is kept for its history.
 
 **0024 was applied on 2026-09-19** (after one failed paste — NOTES §47.8).
 
@@ -142,7 +154,9 @@ one-time privacy notice (NOTES §37). Both additive; applied 2026-09-13 ·
 `0020` reminders: devices, chosen times, and the sender's secret (NOTES §45) ·
 `0021` community: `study_sets.visibility`, `set_stars`, `global_messages`, the
 five cross-user views, and the wider `review_state` unique (NOTES §46) · `0022`
-drops the old `review_state` unique — **after** 0021's code is live.
+drops the old `review_state` unique — **after** 0021's code is live · `0026`
+usernames, `friendships`, `blocks`, `reports`, `my_friends`, `my_blocks`,
+`search_people`, and a block filter on six views (NOTES §51).
 
 ## Rules — these are not negotiable
 
@@ -310,7 +324,10 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     `from('study_items')` with no user filter, so an "or the set is public"
     policy on that table would start counting other people's cards into someone's
     own Progress, silently, and `listSets` would list strangers' sets as theirs.
-    If you ever need a sixth thing shared, add a sixth view.
+    If you ever need a sixth thing shared, add a sixth view. (0026 added two
+    more, `my_friends` and `my_blocks`, and a block filter in six. The three
+    tables it created — `friendships`, `blocks`, `reports` — have NO insert or
+    update policy at all: every write that needs a rule is a function, NOTES §51.)
 31. **Other people see the picture you are USING, and only that one** (NOTES
     §46.9, the owner's decision on 2026-09-16, reversing §46's face-only rule he
     had chosen before using it). Migration 0023's `is_chosen_avatar` serves a
@@ -389,6 +406,24 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     owl's box) in `src/core/nomi-props.ts`. Held props are the screen's choice
     (`prop` on `NomiCharacter`); floating ones belong to a moment (`propsFor`).
     Re-photograph any place you change — every number there was tuned by eye.
+
+44. **Profile took Settings' place in the tab bar** (NOTES §51, the owner's
+    decision: *"having 6 buttons is too much"*). Settings is `app/settings.tsx`,
+    pushed, at the same URL.
+45. **The pet grows at 1, 2, 5, 10 and 30 days** (NOTES §51, the owner's
+    decision), not 1, 10, 20, 50, 100. Five pictures, so it tops out at 30.
+46. **Delete my data KEEPS blocks and reports** (NOTES §51). Blocks, so whoever
+    comes back to the account is still protected; reports, so deleting data
+    cannot remove evidence. `reports` has no delete policy. The Privacy Policy
+    says both — change them together or not at all.
+47. **Built for people who do not know each other** (NOTES §51). The owner:
+    *"it must be able to scale just in case a friend shares this to another
+    friend."* Anything one person can see of another ships with block and report
+    working on it, and is hidden across a block in its view.
+48. **Home says "New: friends" once** (NOTES §51.9), because the Privacy Policy
+    promises to say so in the app when it changes significantly. The card's
+    `changed` date is held to `EFFECTIVE_DATE`: change the policy's date and a
+    test makes you decide what the card says.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -586,7 +621,7 @@ npm test                    447 tests, no network
 npm run typecheck
 npm run export:web
 npm run screenshot -- /progress out.png --width 393 --dark
-npx tsx --env-file=.env scripts/isolation-test.ts   27/27 cross-user RLS assertions (needs TEST_USER_A/B_* env vars; `npm run test:isolation` does not load .env)
+npx tsx --env-file=.env scripts/isolation-test.ts   cross-user RLS assertions, both directions (0026 adds friends, blocks, reports; it leaves its reports behind, marked, with the SQL to clear them) (needs TEST_USER_A/B_* env vars; `npm run test:isolation` does not load .env)
 npm run backup
 npx tsx --env-file=.env scripts/deploy-status.ts   what is live, and is it behind a migration
 npx tsx --env-file=.env scripts/notes-probe.ts [--generate]
@@ -616,6 +651,7 @@ npx tsx --env-file=.env scripts/reminders-e2e-probe.ts [--out <dir>]    # on fro
 npx tsx --env-file=.env scripts/finish-lines-probe.ts [--out <dir>]     # what Nomi says after 3/3, 1/3 twice and 0/3, photographed
 npx tsx --env-file=.env scripts/community-probe.ts [--out <dir>]        # a shared set seen by the OTHER person, in the built app: listed, read-only, dealt, chatted. NEEDS 0021. NEVER RUN YET
 npx tsx --env-file=.env scripts/scroll-probe.ts --height 420            # 7 screens now, including Community's Chat pane — the one layout that is not a `Screen`
+npx tsx --env-file=.env scripts/friends-probe.ts [--out <dir>]          # username, a request, search, accept, block, unblock, report — in the built app as A, the database checked after each step (NEEDS 0026; leaves one marked report)
 npx tsx --env-file=.env scripts/drag-probe.ts [--shot <file.png>]       # hold a set and drag it into a folder, with a real mouse and a real finger; asks the database whether it moved
 ```
 

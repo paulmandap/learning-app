@@ -54,35 +54,42 @@ describe('petStage', () => {
   });
 
   it('grows at exactly the thresholds the owner asked for', () => {
-    expect(petStage(9)?.name).toBe('baby');
-    expect(petStage(10)?.name).toBe('small');
-    expect(petStage(19)?.name).toBe('small');
-    expect(petStage(20)?.name).toBe('medium');
-    expect(petStage(49)?.name).toBe('medium');
-    expect(petStage(50)?.name).toBe('large');
-    expect(petStage(99)?.name).toBe('large');
-    expect(petStage(100)?.name).toBe('giant');
+    // 1, 2, 5, 10, 30 (NOTES §51) — "easier to build", replacing 1, 10, 20,
+    // 50, 100. The baby still hatches on day one.
+    expect(PET_THRESHOLDS.map((s) => s.at)).toEqual([1, 2, 5, 10, 30]);
+    expect(petStage(1)?.name).toBe('baby');
+    expect(petStage(2)?.name).toBe('small');
+    expect(petStage(4)?.name).toBe('small');
+    expect(petStage(5)?.name).toBe('medium');
+    expect(petStage(9)?.name).toBe('medium');
+    expect(petStage(10)?.name).toBe('large');
+    expect(petStage(29)?.name).toBe('large');
+    expect(petStage(30)?.name).toBe('giant');
   });
 
   it('stays at the top rather than running out of stages', () => {
-    // A streak of a year must not index past the artwork.
-    const s = petStage(365);
-    expect(s?.name).toBe('giant');
-    expect(s?.index).toBe(PET_THRESHOLDS.length - 1);
-    expect(s?.nextAt).toBeNull();
-    expect(s?.progress).toBe(1);
+    // A streak of a year must not index past the artwork — and 100 and 200,
+    // which the owner listed, are past the last stage there is art for.
+    for (const streak of [30, 100, 200, 365]) {
+      const s = petStage(streak);
+      expect(s?.name).toBe('giant');
+      expect(s?.index).toBe(PET_THRESHOLDS.length - 1);
+      expect(s?.nextAt).toBeNull();
+      expect(s?.progress).toBe(1);
+    }
   });
 
   it('measures progress across the current band, not the whole scale', () => {
-    // Day 55 is 5 of the 50 days between 50 and 100 — one tenth. Measured
-    // against the whole scale it would read as more than half, and would then
-    // barely move for weeks.
-    expect(petStage(55)?.progress).toBeCloseTo(0.1);
-    expect(petStage(15)?.progress).toBeCloseTo(0.5);
+    // Day 12 is 2 of the 20 days between 10 and 30 — one tenth. Measured
+    // against the whole scale it would read as more than a third, and would
+    // then barely move for weeks.
+    expect(petStage(12)?.progress).toBeCloseTo(0.1);
+    expect(petStage(20)?.progress).toBeCloseTo(0.5);
+    expect(petStage(3)?.progress).toBeCloseTo(1 / 3);
   });
 
   it('never returns a stage the artwork does not have', () => {
-    for (const streak of [1, 5, 10, 33, 99, 100, 1000]) {
+    for (const streak of [1, 2, 5, 10, 33, 99, 100, 1000]) {
       const s = petStage(streak);
       expect(s).not.toBeNull();
       expect(s!.index).toBeGreaterThanOrEqual(0);
@@ -93,13 +100,16 @@ describe('petStage', () => {
 
 describe('daysToNextStage', () => {
   it('counts down to the next size', () => {
-    expect(daysToNextStage(1)).toBe(9);
-    expect(daysToNextStage(9)).toBe(1);
-    expect(daysToNextStage(19)).toBe(1);
-    expect(daysToNextStage(20)).toBe(30);
+    expect(daysToNextStage(1)).toBe(1);
+    expect(daysToNextStage(2)).toBe(3);
+    expect(daysToNextStage(4)).toBe(1);
+    expect(daysToNextStage(5)).toBe(5);
+    expect(daysToNextStage(10)).toBe(20);
+    expect(daysToNextStage(29)).toBe(1);
   });
 
   it('says nothing once the pet is fully grown', () => {
+    expect(daysToNextStage(30)).toBeNull();
     expect(daysToNextStage(100)).toBeNull();
     expect(daysToNextStage(500)).toBeNull();
   });

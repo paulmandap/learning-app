@@ -29,6 +29,7 @@ import { DraggableSet, DragToFolderProvider, DropFolder } from '../../src/ui/dra
 import { StatePanel } from '../../src/ui/states';
 import { NomiCard } from '../../src/ui/nomi';
 import { ContinueCard, GreetingHeader } from '../../src/ui/home';
+import { WhatsNewCard } from '../../src/ui/whats-new';
 import { fetchProfile } from '../../src/data/profile';
 import { listSets, type StudySet } from '../../src/data/sets';
 import { continueTarget } from '../../src/data/attempts';
@@ -169,6 +170,10 @@ export default function Home() {
           onPress={() => router.push('/nomi')}
         />
       ) : null}
+
+      {/* Once: friends are new, and the Privacy Policy promised to say so in
+          the app when it changed significantly (NOTES §51). */}
+      <WhatsNewCard userId={userId} />
 
       {!profileLoading && !hasKey ? (
         <Notice tone="warn">Add your Gemini key in Settings before making study sets.</Notice>

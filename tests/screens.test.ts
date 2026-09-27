@@ -269,11 +269,18 @@ describe('Nomi has a way in and a place to go', () => {
     expect(tabs).toContain("{ name: 'index', href: '/', label: 'Nomi'");
   });
 
-  it('leaves the four existing tabs exactly as they were', () => {
+  it('leaves the learning tabs exactly as they were', () => {
+    // Settings WAS one of them. Profile took its place in the bar at the
+    // owner's request (NOTES §51) — "one has to go if ever. because having 6
+    // buttons is too much" — and Settings became a pushed screen at the same
+    // URL, so every link to /settings still lands.
     const tabs = read('app', '(tabs)', '_layout.tsx');
-    for (const href of ["href: '/'", "href: '/notes'", "href: '/progress'", "href: '/settings'"]) {
+    for (const href of ["href: '/'", "href: '/notes'", "href: '/community'", "href: '/progress'", "href: '/profile'"]) {
       expect(tabs).toContain(href);
     }
+    expect(tabs).not.toContain("href: '/settings'");
+    expect(existsSync(join('app', 'settings.tsx')), 'Settings is still a screen').toBe(true);
+    expect(read('app', '_layout.tsx')).toContain('<Stack.Screen name="settings"');
   });
 
   it('is the conversation itself, with no description cards', () => {
@@ -467,7 +474,8 @@ describe('symbols and waiting are each said one way', () => {
 
 describe("the owner's third round (NOTES §37)", () => {
   it('Settings reads: you, pet, key, how to get a key, account, delete — with no privacy card', () => {
-    const settings = code(read('app', '(tabs)', 'settings.tsx'));
+    // Moved out of the tabs, unchanged inside (NOTES §51).
+    const settings = code(read('app', 'settings.tsx'));
     const order = [
       '<Body>You</Body>',
       '<Body>Your study pet</Body>',

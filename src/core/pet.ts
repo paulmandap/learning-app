@@ -5,12 +5,18 @@
  * to tiktok streak. instead of '1 day in a row' plain text, let's make it fun.
  * the pet should grow larger every 1 (baby), 10, 20, 50, 100."*
  *
+ * And then, on 2026-09-27 (NOTES §51): *"revise the streak. it should be easier
+ * to build. start with 2, 5, 10, 30, 100, 200... (until our animal is at max
+ * level)."* Asked which way round, he chose to keep the baby on day one and
+ * grow at 2, 5, 10 and 30 — so the list runs out at the giant, and 100 and 200
+ * are past the last stage there is art for.
+ *
  * ## Why the thresholds are exactly his
  *
- * 1, 10, 20, 50, 100 — not a curve fitted to something. They are far apart
- * enough that a stage means something, and the first one arrives on day one so
- * nobody meets an empty pen. The gaps widen (9, 10, 30, 50), so the later
- * stages are genuinely rare, which is the whole appeal of a streak badge.
+ * 1, 2, 5, 10, 30 — not a curve fitted to something. The first arrives on day
+ * one so nobody meets an empty pen, and the second on day two, so the pet grows
+ * the first time anybody comes back. The gaps still widen (1, 3, 5, 20), so the
+ * giant is the one that takes a month.
  *
  * ## Pure, so it can be tested and so the screen cannot get it wrong
  *
@@ -84,10 +90,10 @@ export interface PetStage {
  */
 export const PET_THRESHOLDS: { at: number; name: PetStageName }[] = [
   { at: 1, name: 'baby' },
-  { at: 10, name: 'small' },
-  { at: 20, name: 'medium' },
-  { at: 50, name: 'large' },
-  { at: 100, name: 'giant' },
+  { at: 2, name: 'small' },
+  { at: 5, name: 'medium' },
+  { at: 10, name: 'large' },
+  { at: 30, name: 'giant' },
 ];
 
 /**
@@ -110,8 +116,8 @@ export function petStage(streak: number): PetStage | null {
   const nextAt = next ? next.at : null;
 
   // Progress across THIS band, not across the whole scale — otherwise a bar at
-  // day 60 would sit near the end of the road to 100 and barely move for a
-  // month. Within a band it advances visibly every day.
+  // day 12 would sit near the end of the road to 30 and barely move for weeks.
+  // Within a band it advances visibly every day.
   const span = nextAt === null ? 0 : nextAt - current.at;
   const progress = span === 0 ? 1 : Math.min(1, (streak - current.at) / span);
 

@@ -128,6 +128,10 @@ export function MessageSheet({
   onEdit,
   onUnsendEveryone,
   onUnsendMe,
+  name,
+  onViewProfile,
+  onReport,
+  onBlock,
   onClose,
 }: {
   mine: boolean;
@@ -139,6 +143,11 @@ export function MessageSheet({
   onEdit: () => void;
   onUnsendEveryone: () => void;
   onUnsendMe: () => void;
+  /** Who sent it, for "Block Paul". Somebody else's message only (NOTES §51). */
+  name?: string;
+  onViewProfile?: () => void;
+  onReport?: () => void;
+  onBlock?: () => void;
   onClose: () => void;
 }) {
   const t = useTheme();
@@ -262,6 +271,18 @@ export function MessageSheet({
               <Body muted>
                 It stays in the room for everyone else — only the person who sent it can take it back.
               </Body>
+              {/* Somebody else's message: who they are, and the two ways to
+                  stop them (NOTES §51). Below "Hide", which is the gentle
+                  option and the one most people want. */}
+              {onViewProfile && name ? (
+                <Button label={`See ${name}'s profile`} variant="secondary" onPress={onViewProfile} disabled={busy} />
+              ) : null}
+              {onReport ? (
+                <Button label="Report this message" variant="secondary" onPress={onReport} disabled={busy} />
+              ) : null}
+              {onBlock && name ? (
+                <Button label={`Block ${name}`} variant="secondary" onPress={onBlock} disabled={busy} />
+              ) : null}
             </>
           )}
 

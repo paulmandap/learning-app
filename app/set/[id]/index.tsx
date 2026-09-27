@@ -17,6 +17,8 @@ import {
 import { StatePanel } from '../../../src/ui/states';
 import { NomiCharacter } from '../../../src/ui/nomi-character';
 import { OverflowMenu } from '../../../src/ui/menu';
+import { BlockSheet, ReportSheet } from '../../../src/ui/people';
+import { TextLink } from '../../../src/ui/legal';
 import { space } from '../../../src/ui/theme';
 import { formatSetTitle } from '../../../src/core/title';
 import { fetchProfile } from '../../../src/data/profile';
@@ -83,6 +85,9 @@ export default function SetScreen() {
   const [confirmShare, setConfirmShare] = useState<'public' | 'private' | null>(null);
   const [sharing, setSharing] = useState(false);
   const [starring, setStarring] = useState(false);
+  /** Reporting a set somebody shared, or blocking who shared it (NOTES §51). */
+  const [reportingSet, setReportingSet] = useState(false);
+  const [blockingOwner, setBlockingOwner] = useState(false);
   /** Choosing a folder for this set (NOTES §47). */
   const [moving, setMoving] = useState(false);
   const [movingTo, setMovingTo] = useState(false);
@@ -398,11 +403,26 @@ export default function SetScreen() {
           // as a large heading, iOS-style, where it can wrap freely.
           title: '',
           // Every item here writes to the set, so on a set somebody shared
-          // there is nothing to put in the menu and it is left off entirely. An
-          // empty ••• that opens onto nothing is worse than no •••; and RLS
-          // would refuse each of these silently — `reportItem` in particular
-          // updates no rows and returns no error.
-          headerRight: owned
+          // none of them are offered. An empty ••• that opens onto nothing is
+          // worse than no •••; and RLS would refuse each of these silently —
+          // `reportItem` in particular updates no rows and returns no error.
+          //
+          // A shared set gets a ••• of its own since NOTES §51: whose it is,
+          // and a way to report it — which is also, at last, the way to flag a
+          // shared set with wrong cards that §46.5 said was missing.
+          headerRight: !owned && readable?.owner
+            ? () => (
+                <OverflowMenu
+                  items={[
+                    {
+                      label: `See ${authorName(readable.owner?.owner_name)}'s profile`,
+                      onPress: () => router.push(`/person/${readable.owner?.owner_id}`),
+                    },
+                    { label: 'Report this set', onPress: () => setReportingSet(true) },
+                  ]}
+                />
+              )
+            : owned
             ? () => (
                 <OverflowMenu
                   items={[
@@ -446,6 +466,10 @@ export default function SetScreen() {
           <Body>
             Shared by {authorName(readable.owner.owner_name)} · {starLabel(readable.owner.stars)}
           </Body>
+          <TextLink
+            label={`See ${authorName(readable.owner.owner_name)}'s profile`}
+            onPress={() => router.push(`/person/${readable.owner?.owner_id}`)}
+          />
           <Body muted>
             These are their cards, made from their notes. You study them here and your answers,
             streak and review dates are your own.
@@ -688,6 +712,29 @@ export default function SetScreen() {
       {/* The Home button is gone, and Delete no longer sits underneath where it
           was — the header back chevron handles navigation, and Delete lives in
           the ••• menu. That pairing was the accidental-deletion risk. */}
+
+      {reportingSet && readable?.owner ? (
+        <ReportSheet
+          kind="set"
+          targetId={setId}
+          name={authorName(readable.owner.owner_name)}
+          onBlock={() => {
+            setReportingSet(false);
+            setBlockingOwner(true);
+          }}
+          onClose={() => setReportingSet(false)}
+        />
+      ) : null}
+      {blockingOwner && readable?.owner ? (
+        <BlockSheet
+          personId={readable.owner.owner_id}
+          name={authorName(readable.owner.owner_name)}
+          // Their set goes with them — `public_sets` stops showing it — so
+          // there is nothing left on this screen to look at.
+          onBlocked={() => router.replace('/community')}
+          onClose={() => setBlockingOwner(false)}
+        />
+      ) : null}
     </Screen>
   );
 }

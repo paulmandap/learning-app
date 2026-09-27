@@ -44,13 +44,18 @@ const SIDEBAR_MIN_WIDTH = 800;
  * roughly 60 — so the word still fits and the bar does not become the icon-only
  * guessing game the comment below rejects. Photographed at that width before it
  * shipped, because nothing else would have caught it.
+ *
+ * Profile took Settings' place (NOTES §51). The owner, planning friends: *"i
+ * already have 5 buttons … one has to go if ever. because having 6 buttons is
+ * too much."* Settings is reached from the top right of Profile instead, and
+ * from your picture on Home, as a pushed screen (app/settings.tsx).
  */
 const TABS = [
   { name: 'index', href: '/', label: 'Nomi', icon: 'study' },
   { name: 'notes', href: '/notes', label: 'Notes', icon: 'notes' },
   { name: 'community', href: '/community', label: 'Community', icon: 'community' },
   { name: 'progress', href: '/progress', label: 'Progress', icon: 'progress' },
-  { name: 'settings', href: '/settings', label: 'Settings', icon: 'settings' },
+  { name: 'profile', href: '/profile', label: 'Profile', icon: 'profile' },
 ] as const;
 
 /**

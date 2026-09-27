@@ -52,6 +52,13 @@
  *     one room means B reads what A said, B cannot delete A's message, two
  *     people can each schedule the same shared card (0022), and unsharing
  *     actually takes the set and its cards away again
+ *   - friends, blocks and reports (0026, NOTES §51), both directions: B finds A
+ *     by username, asks, and only A can say yes; nobody can make themselves a
+ *     friend, block, or report by writing to a table directly; a block ends the
+ *     friendship and hides the two people from each other in every view and in
+ *     search, and only the blocker can see or undo it; a report keeps the
+ *     database's copy of what was said, is invisible to the person reported,
+ *     cannot be deleted, and cannot be used to find a private set
  *
  * The views matter most. A Postgres view runs as its OWNER by default, which
  * bypasses RLS on the tables underneath. Testing only base tables would pass
@@ -957,6 +964,14 @@ async function main() {
       }
     }
 
+    // ---- friends, blocks and reports (0026, NOTES §51) ----
+    await checkFriendsBlocksAndReports(A, B, {
+      sharedSetId: (sharedSet as { id: string }).id,
+      privateSetId: set.id,
+      sharedItemId,
+      aMessageId,
+    });
+
     // ---- unsharing is live ----
     // The filter is one line in each view. Turning it back off must actually
     // take the set away, or "stop sharing" is a button that does nothing.
@@ -1165,6 +1180,276 @@ async function main() {
     process.exit(1);
   }
   console.log('No cross-user access. Isolation holds.');
+}
+
+/**
+ * Friends, blocks and reports (0026, NOTES §51), both directions.
+ *
+ * The positives matter here as much as anywhere: every write in 0026 goes
+ * through a function that runs as its owner, precisely because none of the three
+ * tables has an insert or update policy. If that ever stopped bypassing RLS, the
+ * negatives below would all pass while nobody could make a friend.
+ *
+ * Runs while A's shared set, A's chat message and B's schedule for A's shared
+ * card all still exist, so a block can be seen to take every one of them away —
+ * and an unblock to bring them back before the unsharing checks run.
+ *
+ * ## Reports cannot be cleaned up, on purpose
+ *
+ * `reports` has no delete policy: a report is kept until it has been dealt with,
+ * and Delete my data does not remove it (the Privacy Policy says so). So every
+ * run leaves its reports behind, marked `isolation probe` in their details so
+ * the operator can tell them from real ones. The SQL to clear them is printed.
+ */
+const PROBE_USERNAME_A = 'isoprobe_a';
+const PROBE_REPORT = 'isolation probe — not a real report';
+
+async function checkFriendsBlocksAndReports(
+  A: { client: SupabaseClient; userId: string },
+  B: { client: SupabaseClient; userId: string },
+  ids: { sharedSetId: string; privateSetId: string; sharedItemId: string | null; aMessageId: string | null },
+) {
+  const gate = await B.client.from('my_friends').select('id').limit(1);
+  if (gate.error && (isMissingRelation(gate.error) || gate.error.code === '42703')) {
+    console.log('\n  ----  friends, blocks and reports — not present (migration 0026), not checked');
+    return;
+  }
+  console.log('\nFriends, blocks and reports (0026):');
+
+  // A clean start, whatever an earlier run left.
+  await A.client.from('blocks').delete().eq('blocker_id', A.userId).eq('blocked_id', B.userId);
+  await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
+
+  // ---- usernames ----
+  const named = await A.client.from('profiles').update({ username: PROBE_USERNAME_A }).eq('id', A.userId);
+  if (named.error) fail('username (as A)', `A cannot choose a username: ${named.error.message}`);
+  else ok('username (as A)', 'chosen');
+
+  const seen = await B.client.from('public_profiles').select('username').eq('id', A.userId).maybeSingle();
+  if ((seen.data as { username?: string } | null)?.username !== PROBE_USERNAME_A) {
+    fail('public_profiles.username (as B)', "B cannot see A's username — nobody could find A");
+  } else ok('public_profiles.username (as B)', "A's username visible");
+
+  const taken = await B.client.from('profiles').update({ username: PROBE_USERNAME_A }).eq('id', B.userId);
+  if (taken.error?.code === '23505') ok('username (taken)', 'one person per username');
+  else fail('username (taken)', `B took A's username: ${taken.error?.message ?? 'no error'}`);
+
+  const bad = await B.client.from('profiles').update({ username: 'Not Allowed' }).eq('id', B.userId);
+  if (bad.error?.code === '23514') ok('username (shape)', 'refused by profiles_username_check');
+  else fail('username (shape)', `a username with capitals and a space was accepted: ${bad.error?.message ?? 'no error'}`);
+
+  const reserved = await B.client.from('profiles').update({ username: 'nomi' }).eq('id', B.userId);
+  if (reserved.error?.code === '23514') ok('username (reserved)', '"nomi" refused');
+  else fail('username (reserved)', 'somebody can call themselves nomi');
+
+  await B.client.from('profiles').update({ username: PROBE_USERNAME_A.replace('_a', '_x') }).eq('id', A.userId);
+  const stillA = await A.client.from('profiles').select('username').eq('id', A.userId).maybeSingle();
+  if ((stillA.data as { username?: string } | null)?.username !== PROBE_USERNAME_A) {
+    fail('username (as B)', "B CHANGED A'S USERNAME");
+  } else ok('username (as B)', "A's username survived B's update");
+
+  const found = await B.client.rpc('search_people', { p_query: 'isoprobe' });
+  if (found.error) fail('search_people (as B)', found.error.message);
+  else if (!((found.data ?? []) as { id: string }[]).some((p) => p.id === A.userId)) {
+    fail('search_people (as B)', 'B cannot find A by username');
+  } else ok('search_people (as B)', 'A found by username');
+
+  // ---- friends ----
+  const forged = await B.client
+    .from('friendships')
+    .insert({ requester_id: B.userId, addressee_id: A.userId, status: 'accepted' });
+  if (!forged.error) {
+    fail('friendships insert', 'B made themselves A’s friend with a direct insert');
+    await B.client.from('friendships').delete().eq('requester_id', B.userId);
+  } else ok('friendships insert', `refused (${forged.error.code ?? 'error'}) — only through the function`);
+
+  const asked = await B.client.rpc('send_friend_request', { p_to: A.userId });
+  if (asked.error || asked.data !== 'requested') {
+    fail('send_friend_request', `B cannot ask A: ${asked.error?.message ?? String(asked.data)}`);
+  } else ok('send_friend_request', 'B asked A');
+
+  const selfAccept = await B.client.rpc('accept_friend_request', { p_from: A.userId });
+  if (!selfAccept.error) fail('accept_friend_request (as B)', 'B ACCEPTED THEIR OWN REQUEST on A’s behalf');
+  else ok('accept_friend_request (as B)', `refused (${selfAccept.error.code ?? 'error'})`);
+
+  const bumped = await B.client
+    .from('friendships')
+    .update({ status: 'accepted' })
+    .eq('requester_id', B.userId)
+    .select('id');
+  if (!bumped.error && (bumped.data ?? []).length > 0) fail('friendships update', 'B accepted by updating the row directly');
+  else ok('friendships update', 'no direct update');
+
+  const inbox = await A.client.from('my_friends').select('person_id, status, sent_by_me, name');
+  const fromB = ((inbox.data ?? []) as { person_id: string; status: string; sent_by_me: boolean }[]).find(
+    (l) => l.person_id === B.userId,
+  );
+  if (!fromB || fromB.status !== 'pending' || fromB.sent_by_me) {
+    fail('my_friends (as A)', `A does not see B's request the right way round: ${JSON.stringify(fromB)}`);
+  } else ok('my_friends (as A)', "B's request waiting for A");
+
+  const yes = await A.client.rpc('accept_friend_request', { p_from: B.userId });
+  if (yes.error) fail('accept_friend_request (as A)', yes.error.message);
+  else {
+    const both = await B.client.from('my_friends').select('person_id, status').eq('person_id', A.userId).maybeSingle();
+    if ((both.data as { status?: string } | null)?.status !== 'accepted') fail('friends', 'accepted, but B does not see it');
+    else ok('friends', 'A accepted; both see it');
+  }
+
+  // ---- blocking ----
+  const forgedBlock = await B.client.from('blocks').insert({ blocker_id: B.userId, blocked_id: A.userId });
+  if (!forgedBlock.error) {
+    fail('blocks insert', 'a direct insert went around block_person, leaving the friendship standing');
+    await B.client.from('blocks').delete().eq('blocker_id', B.userId);
+  } else ok('blocks insert', `refused (${forgedBlock.error.code ?? 'error'}) — only through the function`);
+
+  const blocked = await A.client.rpc('block_person', { p_other: B.userId });
+  if (blocked.error) {
+    fail('block_person (as A)', blocked.error.message);
+    return;
+  }
+  ok('block_person (as A)', 'A blocked B');
+
+  const friendsAfter = await B.client.from('my_friends').select('person_id').eq('person_id', A.userId);
+  if ((friendsAfter.data ?? []).length > 0) fail('block (friendship)', 'still friends after a block');
+  else ok('block (friendship)', 'the friendship ended with the block');
+
+  const bSeesBlock = await B.client.from('blocks').select('blocker_id').eq('blocker_id', A.userId);
+  if ((bSeesBlock.data ?? []).length > 0) fail('blocks (as B)', 'B can see that A blocked them');
+  else ok('blocks (as B)', 'the block is A’s alone to see');
+
+  await B.client.from('blocks').delete().eq('blocker_id', A.userId);
+  const stillBlocked = await A.client.from('blocks').select('blocked_id').eq('blocked_id', B.userId);
+  if ((stillBlocked.data ?? []).length === 0) fail('blocks delete (as B)', "B UNDID A'S BLOCK");
+  else ok('blocks delete (as B)', 'only the blocker can unblock');
+
+  const listed = await A.client.from('my_blocks').select('person_id').eq('person_id', B.userId);
+  if ((listed.data ?? []).length === 0) fail('my_blocks (as A)', 'A cannot see who they blocked, so cannot unblock');
+  else ok('my_blocks (as A)', 'B listed, so A can unblock');
+
+  // Hidden, both ways, everywhere.
+  const hides: [string, () => PromiseLike<{ data: unknown[] | null }>][] = [
+    ['public_profiles (B → A)', () => B.client.from('public_profiles').select('id').eq('id', A.userId)],
+    ['public_profiles (A → B)', () => A.client.from('public_profiles').select('id').eq('id', B.userId)],
+    ['public_sets (B → A)', () => B.client.from('public_sets').select('id').eq('id', ids.sharedSetId)],
+    ['public_set_items (B → A)', () => B.client.from('public_set_items').select('id').eq('study_set_id', ids.sharedSetId)],
+    ['global_chat (B → A)', () => B.client.from('global_chat').select('id').eq('author_id', A.userId)],
+    ['global_chat (A → B)', () => A.client.from('global_chat').select('id').eq('author_id', B.userId)],
+    ['message_reaction_people (A → B)', () => A.client.from('message_reaction_people').select('user_id').eq('user_id', B.userId)],
+  ];
+  if (ids.sharedItemId) {
+    const itemId = ids.sharedItemId;
+    hides.push(['my_schedule (B → A)', () => B.client.from('my_schedule').select('study_item_id').eq('study_item_id', itemId)]);
+  }
+  for (const [name, read] of hides) {
+    const { data } = await read();
+    if ((data ?? []).length > 0) fail(`block hides ${name}`, 'still visible across a block');
+    else ok(`block hides ${name}`, 'hidden');
+  }
+
+  const searched = await B.client.rpc('search_people', { p_query: 'isoprobe' });
+  if (((searched.data ?? []) as { id: string }[]).some((p) => p.id === A.userId)) {
+    fail('block hides search', 'B can still find A');
+  } else ok('block hides search', 'A not found');
+
+  const askAgain = await B.client.rpc('send_friend_request', { p_to: A.userId });
+  if (!askAgain.error) fail('block refuses requests', 'B asked a person who blocked them');
+  else ok('block refuses requests', `refused (${askAgain.error.code ?? 'error'})`);
+
+  // And undone: A unblocks, and B is back.
+  await A.client.from('blocks').delete().eq('blocker_id', A.userId).eq('blocked_id', B.userId);
+  const back = await B.client.from('public_sets').select('id').eq('id', ids.sharedSetId);
+  if ((back.data ?? []).length === 0) fail('unblock', 'A unblocked B and B still cannot see A’s shared set');
+  else ok('unblock', 'everything came back');
+
+  // ---- reports ----
+  const reportsGate = await B.client.from('reports').select('id').limit(1);
+  if (reportsGate.error) {
+    fail('reports (as B)', reportsGate.error.message);
+    return;
+  }
+
+  const forgedReport = await B.client.from('reports').insert({
+    reporter_id: B.userId,
+    target_kind: 'person',
+    target_id: A.userId,
+    reason: 'other',
+    snapshot: 'words A never said',
+  });
+  if (!forgedReport.error) fail('reports insert', 'a report with a made-up copy went straight in');
+  else ok('reports insert', `refused (${forgedReport.error.code ?? 'error'}) — the copy is the database's to take`);
+
+  if (ids.aMessageId) {
+    const r = await B.client.rpc('report_content', {
+      p_kind: 'message',
+      p_target: ids.aMessageId,
+      p_reason: 'other',
+      p_details: PROBE_REPORT,
+    });
+    if (r.error) fail('report_content (message)', r.error.message);
+    else {
+      const mine = await B.client.from('reports').select('snapshot, reported_user_id').eq('id', r.data as string).maybeSingle();
+      const row = mine.data as { snapshot?: string; reported_user_id?: string } | null;
+      if (!row?.snapshot?.startsWith('isolation probe message from A')) {
+        fail('report_content (message)', `the copy is not the message: ${String(row?.snapshot)}`);
+      } else if (row.reported_user_id !== A.userId) {
+        fail('report_content (message)', 'reported, but not against the person who said it');
+      } else ok('report_content (message)', 'reported, with a copy of what was said');
+
+      const again = await B.client.rpc('report_content', {
+        p_kind: 'message',
+        p_target: ids.aMessageId,
+        p_reason: 'spam',
+        p_details: PROBE_REPORT,
+      });
+      if (again.data !== r.data) fail('report_content (twice)', 'the same thing reported twice made two reports');
+      else ok('report_content (twice)', 'one open report per thing');
+
+      const aSees = await A.client.from('reports').select('id').eq('id', r.data as string);
+      if ((aSees.data ?? []).length > 0) fail('reports (as A)', 'A CAN SEE WHO REPORTED THEM');
+      else ok('reports (as A)', 'the reported person cannot see the report');
+
+      await B.client.from('reports').delete().eq('id', r.data as string);
+      const kept = await B.client.from('reports').select('id').eq('id', r.data as string);
+      if ((kept.data ?? []).length === 0) fail('reports delete', 'a report was deleted; the evidence is gone');
+      else ok('reports delete', 'kept until it is dealt with');
+    }
+  }
+
+  const privateReport = await B.client.rpc('report_content', {
+    p_kind: 'set',
+    p_target: ids.privateSetId,
+    p_reason: 'wrong',
+    p_details: PROBE_REPORT,
+  });
+  if (!privateReport.error) fail('report_content (private set)', 'B reported a set they cannot see — set ids can be probed');
+  else ok('report_content (private set)', `refused (${privateReport.error.code ?? 'error'}), same as one that does not exist`);
+
+  const setReport = await B.client.rpc('report_content', {
+    p_kind: 'set',
+    p_target: ids.sharedSetId,
+    p_reason: 'wrong',
+    p_details: PROBE_REPORT,
+  });
+  if (setReport.error) fail('report_content (shared set)', setReport.error.message);
+  else ok('report_content (shared set)', 'a wrong shared set can be flagged at last (NOTES §46.5)');
+
+  const selfReport = await A.client.rpc('report_content', {
+    p_kind: 'person',
+    p_target: A.userId,
+    p_reason: 'other',
+    p_details: PROBE_REPORT,
+  });
+  if (!selfReport.error) fail('report_content (yourself)', 'A reported A');
+  else ok('report_content (yourself)', 'refused');
+
+  // ---- tidy up ----
+  await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
+  await A.client.from('profiles').update({ username: null }).eq('id', A.userId);
+  console.log(
+    `  (reports cannot be deleted from the app, by design. To clear this run's, in the dashboard:\n` +
+      `   delete from public.reports where details = '${PROBE_REPORT}';)`,
+  );
 }
 
 main().catch((err) => {

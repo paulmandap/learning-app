@@ -194,7 +194,8 @@ function RootNavigator() {
         }}
       >
         {/* Global navigation lives in app/(tabs)/_layout.tsx now — Nomi (the
-            tab that was Study, NOTES §40), Notes, Progress and Settings, as a
+            tab that was Study, NOTES §40), Notes, Community, Progress and
+            Profile (which took Settings' place, NOTES §51), as a
             bottom bar on a phone and a rail on a desktop (spec §2). It draws its
             own chrome, so the stack header is hidden for the whole group.
 
@@ -233,6 +234,12 @@ function RootNavigator() {
           name="set/[id]/blanks"
           options={{ title: '', ...backable }}
         />
+        {/* Settings left the tab bar for Profile (NOTES §51). Pushed like any
+            other screen that is not a place, with its own heading in the body. */}
+        <Stack.Screen name="settings" options={{ title: '', ...backable }} />
+        {/* Somebody's page. Titled by its body — their name, which is long as
+            often as not — and its ⋯ (Report, Block) set by the screen. */}
+        <Stack.Screen name="person/[id]" options={{ title: '', ...backable }} />
         {/* Each document names itself in its body. */}
         <Stack.Screen name="terms" options={{ title: '', ...backable }} />
         <Stack.Screen name="privacy" options={{ title: '', ...backable }} />

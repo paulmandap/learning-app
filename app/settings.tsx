@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Linking, Pressable, Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, Field, Label, Notice, Screen, Title } from '../../src/ui/components';
+import { Body, Button, Card, Field, Label, Notice, Screen, Title } from '../src/ui/components';
 import {
   avatarPhotoUrls,
   AvatarsUnavailableError,
@@ -12,23 +12,23 @@ import {
   saveGeminiKey,
   savePetChoice,
   uploadAvatarPhoto,
-} from '../../src/data/profile';
-import { Avatar, FacePicker, PhotoPicker, pickProfilePhoto } from '../../src/ui/avatar';
-import { PrivacyNotice } from '../../src/ui/privacy';
-import { TextLink } from '../../src/ui/legal';
-import { forgetAvatar } from '../../src/data/avatar-cache';
+} from '../src/data/profile';
+import { Avatar, FacePicker, PhotoPicker, pickProfilePhoto } from '../src/ui/avatar';
+import { PrivacyNotice } from '../src/ui/privacy';
+import { TextLink } from '../src/ui/legal';
+import { forgetAvatar } from '../src/data/avatar-cache';
 import { router } from 'expo-router';
-import { parseAvatar } from '../../src/core/avatar';
-import { useSessionStore } from '../../src/data/session';
-import { space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
-import { PetChooser } from '../../src/ui/pet';
-import { RemindersCard } from '../../src/ui/reminders';
-import { forgetThisDevice } from '../../src/data/reminders';
-import { toPetSpecies, type PetSpecies } from '../../src/core/pet';
-import { deleteAllMyData } from '../../src/data/sets';
-import { supabase } from '../../src/data/supabase';
-import { GeminiBrowserProvider } from '../../src/ai/gemini';
-import { reasonToMessage } from '../../src/core/ai-errors';
+import { parseAvatar } from '../src/core/avatar';
+import { useSessionStore } from '../src/data/session';
+import { space, TOUCH_TARGET, type, useTheme } from '../src/ui/theme';
+import { PetChooser } from '../src/ui/pet';
+import { RemindersCard } from '../src/ui/reminders';
+import { forgetThisDevice } from '../src/data/reminders';
+import { toPetSpecies, type PetSpecies } from '../src/core/pet';
+import { deleteAllMyData } from '../src/data/sets';
+import { supabase } from '../src/data/supabase';
+import { GeminiBrowserProvider } from '../src/ai/gemini';
+import { reasonToMessage } from '../src/core/ai-errors';
 
 type TestState =
   | { kind: 'idle' }
@@ -43,6 +43,11 @@ type TestState =
  * "Where your notes go" is no longer a card here. It became a notice shown once
  * after signing in (`src/ui/privacy.tsx`), and "Privacy" under Your account
  * opens the same words again.
+ *
+ * No longer a tab (NOTES §51). Its place in the bar went to Profile, and it is
+ * reached from the control at the top right of Profile and from your picture on
+ * Home — pushed above the tabs with a back control, like every other screen that
+ * is not a place. The URL is still /settings, so every link to it still works.
  */
 export default function Settings() {
   const t = useTheme();
@@ -372,8 +377,8 @@ export default function Settings() {
       <Card>
         <Body>Delete my data</Body>
         <Body muted>
-          Removes every set, all your notes and files, and everything you've answered. Your
-          key is cleared too. This cannot be undone.
+          Removes every set, all your notes and files, everything you've answered, and your
+          friends. Your key and username are cleared too. This cannot be undone.
         </Body>
         {confirmDelete ? (
           <>

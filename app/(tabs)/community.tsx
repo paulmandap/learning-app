@@ -16,6 +16,7 @@ import { StatePanel } from '../../src/ui/states';
 import { Segment } from '../../src/ui/segment';
 import { Composer } from '../../src/ui/nomi';
 import { PersonAvatar } from '../../src/ui/avatar';
+import { BlockSheet, ReportSheet } from '../../src/ui/people';
 import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
 import {
   authorName,
@@ -64,10 +65,13 @@ import { useSessionStore } from '../../src/data/session';
  * icon-only guessing game `app/(tabs)/_layout.tsx` rejects on purpose. These
  * three belong together anyway — they are all "other people".
  *
- * There are no profiles to visit, no following, no replies and no direct
- * messages. Five people who already know each other do not need a social
- * network; they need to see what the others made, say which of it was good,
- * and talk. Every one of those absences is a thing that would need moderating.
+ * There were no profiles to visit when this was written: five people who
+ * already knew each other did not need a social network. That changed with
+ * NOTES §51, when the owner asked for friends and for the app to be ready for
+ * people who do NOT know each other — so a name or a face here now opens that
+ * person's page, and somebody else's message can be reported or its sender
+ * blocked. Both were the precondition; "every one of those absences is a thing
+ * that would need moderating" is exactly why they arrived first.
  *
  * ## Nothing here is the study path
  *
@@ -203,6 +207,7 @@ function SetsPane({ ranked }: { ranked: boolean }) {
           canStar={canStar(set, myId)}
           busy={toggleStar.isPending && toggleStar.variables?.id === set.id}
           onOpen={() => router.push(`/set/${set.id}`)}
+          onOpenOwner={() => router.push(`/person/${set.owner_id}`)}
           onToggleStar={(on) => toggleStar.mutate({ id: set.id, on })}
         />
       ))}
@@ -227,6 +232,7 @@ function SharedSetRow({
   canStar: starrable,
   busy,
   onOpen,
+  onOpenOwner,
   onToggleStar,
 }: {
   set: PublicSet;
@@ -236,6 +242,7 @@ function SharedSetRow({
   canStar: boolean;
   busy: boolean;
   onOpen: () => void;
+  onOpenOwner: () => void;
   onToggleStar: (on: boolean) => void;
 }) {
   const t = useTheme();
@@ -259,12 +266,20 @@ function SharedSetRow({
         <Text style={[type.bodyStrong, { color: t.textMuted, minWidth: 24 }]}>{rank}</Text>
       ) : null}
 
-      <PersonAvatar
-        avatar={set.owner_avatar}
-        userId={set.owner_id}
-        name={authorName(set.owner_name)}
-        size={32}
-      />
+      {/* Their face opens their page (NOTES §51); the title opens the set. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${authorName(set.owner_name)}'s profile`}
+        onPress={onOpenOwner}
+        hitSlop={6}
+      >
+        <PersonAvatar
+          avatar={set.owner_avatar}
+          userId={set.owner_id}
+          name={authorName(set.owner_name)}
+          size={32}
+        />
+      </Pressable>
 
       <Pressable
         accessibilityRole="button"
@@ -337,6 +352,7 @@ function StarButton({
 
 function ChatPane() {
   const t = useTheme();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const myId = useSessionStore((s) => s.session?.user.id ?? '');
   const scroll = useRef<ScrollView>(null);
@@ -366,6 +382,9 @@ function ChatPane() {
   const [acting, setActing] = useState<ChatMessage | null>(null);
   /** The message being edited, as a draft (NOTES §48). */
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
+  /** Somebody else's message being reported, or its sender being blocked (NOTES §51). */
+  const [reporting, setReporting] = useState<ChatMessage | null>(null);
+  const [blocking, setBlocking] = useState<{ id: string; name: string } | null>(null);
 
   const { data: reactions = [] } = useQuery({
     queryKey: ['chat-reactions'],
@@ -456,6 +475,7 @@ function ChatPane() {
                 canEdit={canEdit(m, myId, now)}
                 tallies={tallyReactions(reactionsByMessage.get(m.id) ?? [], myId)}
                 onAct={() => setActing(m)}
+                onOpenPerson={() => router.push(`/person/${m.author_id}`)}
                 onToggleReaction={(emoji, on) => toggleReaction.mutate({ id: m.id, emoji, on })}
               />
             ))
@@ -489,8 +509,37 @@ function ChatPane() {
             }}
             onUnsendEveryone={() => unsend.mutate({ id: acting.id, everyone: true })}
             onUnsendMe={() => unsend.mutate({ id: acting.id, everyone: false })}
+            name={authorName(acting.author_name)}
+            onViewProfile={() => {
+              setActing(null);
+              router.push(`/person/${acting.author_id}`);
+            }}
+            onReport={() => {
+              setReporting(acting);
+              setActing(null);
+            }}
+            onBlock={() => {
+              setBlocking({ id: acting.author_id, name: authorName(acting.author_name) });
+              setActing(null);
+            }}
             onClose={() => setActing(null)}
           />
+        ) : null}
+
+        {reporting ? (
+          <ReportSheet
+            kind="message"
+            targetId={reporting.id}
+            name={authorName(reporting.author_name)}
+            onBlock={() => {
+              setBlocking({ id: reporting.author_id, name: authorName(reporting.author_name) });
+              setReporting(null);
+            }}
+            onClose={() => setReporting(null)}
+          />
+        ) : null}
+        {blocking ? (
+          <BlockSheet personId={blocking.id} name={blocking.name} onClose={() => setBlocking(null)} />
         ) : null}
 
         {/* Editing happens in the message list rather than in the sheet: you
@@ -638,6 +687,7 @@ function Message({
   canEdit: editable,
   tallies,
   onAct,
+  onOpenPerson,
   onToggleReaction,
 }: {
   name: string;
@@ -652,6 +702,8 @@ function Message({
   canEdit: boolean;
   tallies: ReactionTally[];
   onAct: () => void;
+  /** Their page, from their name or their face (NOTES §51). */
+  onOpenPerson: () => void;
   onToggleReaction: (emoji: string, on: boolean) => void;
 }) {
   const t = useTheme();
@@ -681,9 +733,15 @@ function Message({
       {/* Their name, once, above the first bubble of a run. Never on yours —
           "You" over every message you send is a label nobody needs. */}
       {startsRun && !mine ? (
-        <Text style={[type.caption, { color: t.textMuted, fontWeight: '700', marginLeft: AVATAR + space.sm }]}>
-          {name}
-        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${name}'s profile`}
+          onPress={onOpenPerson}
+          hitSlop={6}
+          style={{ marginLeft: AVATAR + space.sm }}
+        >
+          <Text style={[type.caption, { color: t.textMuted, fontWeight: '700' }]}>{name}</Text>
+        </Pressable>
       ) : null}
 
       {/* The bubble, the face and the hover controls on one row, bottom-aligned
@@ -703,7 +761,9 @@ function Message({
             it, with a spacer holding the line on the others. */}
         {!mine ? (
           endsRun ? (
-            <PersonAvatar avatar={avatar} userId={userId} name={name} size={AVATAR} />
+            <Pressable accessibilityRole="button" accessibilityLabel={`${name}'s profile`} onPress={onOpenPerson}>
+              <PersonAvatar avatar={avatar} userId={userId} name={name} size={AVATAR} />
+            </Pressable>
           ) : (
             <View style={{ width: AVATAR }} />
           )

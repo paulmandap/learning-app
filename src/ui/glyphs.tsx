@@ -43,7 +43,12 @@ export const GLYPH = {
   react: '☺',
 } as const;
 
-export type TabIconName = 'study' | 'notes' | 'community' | 'progress' | 'settings';
+/**
+ * `settings` is no longer a tab (NOTES §51) and is still drawn: it is the
+ * control at the top right of Profile that opens Settings, so the sliders
+ * somebody knew from the bar are the thing they look for.
+ */
+export type TabIconName = 'study' | 'notes' | 'community' | 'progress' | 'profile' | 'settings';
 
 const BOX = 22;
 const STROKE = 1.75;
@@ -133,6 +138,25 @@ export function TabIcon({
           <View style={[solid, { left: 3, bottom: 3, width: 4, height: 7 }]} />
           <View style={[solid, { left: 9, bottom: 3, width: 4, height: 11 }]} />
           <View style={[solid, { left: 15, bottom: 3, width: 4, height: 16 }]} />
+        </>
+      ) : name === 'profile' ? (
+        // One person — Community's two, alone. Same construction: the
+        // shoulders as a solid shape, the head an outline filled with the
+        // ground and overlapping them by a point, which §46.4 photographed as
+        // the difference between a person and a circle floating over a line.
+        <>
+          <View
+            style={[
+              solid,
+              { left: 3.5, top: 12, width: 15, height: 8, borderTopLeftRadius: 7.5, borderTopRightRadius: 7.5 },
+            ]}
+          />
+          <View
+            style={[
+              outline,
+              { left: 6, top: 2.5, width: 10, height: 10, borderRadius: 5, backgroundColor: ground },
+            ]}
+          />
         </>
       ) : (
         // Two sliders — settings you adjust, which a gear only implies.

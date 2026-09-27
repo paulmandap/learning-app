@@ -38,7 +38,11 @@
  */
 import { openPage } from './screenshot';
 
-const TABS = ['/', '/notes', '/community', '/progress', '/settings'] as const;
+/**
+ * The five tabs, and Settings, which left the bar for Profile (NOTES §51) and is
+ * still a screen long enough to need scrolling.
+ */
+const TABS = ['/', '/notes', '/community', '/progress', '/profile', '/settings'] as const;
 
 /**
  * Community is the one tab that is NOT a `Screen`.

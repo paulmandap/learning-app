@@ -5,6 +5,7 @@ import { isMissingColumn, isMissingTable } from '../core/db-errors';
 import { removeAvatarPhotos } from './profile';
 import { removeAllNoteImages } from './notes';
 import { removeMyCommunityData } from './community';
+import { removeMySocialData } from './social';
 
 /**
  * Study sets. RLS scopes every query to the signed-in user, so nothing here
@@ -193,6 +194,12 @@ export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
   // set of mine would leave all of both behind, which is the same omission
   // NOTES §40 found for notes, study days and Nomi's daily count.
   await removeMyCommunityData();
+
+  // Friends and requests, and the username people find you by (0026, NOTES
+  // §51). Like stars, a friendship is a row about somebody else too and
+  // cascades from nothing of mine. Blocks and reports are KEPT, and the
+  // Privacy Policy says why — see removeMySocialData.
+  await removeMySocialData();
 
   const sets = await listSets();
   for (const set of sets) {

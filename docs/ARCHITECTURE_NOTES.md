@@ -7519,6 +7519,197 @@ the state §48 built them to be in, and `deploy-status.ts` rates 0025 safe to
 apply at any time.
 
 
+## 51. Friends, blocking and reporting — and a streak that is easier to grow (2026-09-27)
+
+The owner: *"i think this app can have it's own social. sort of add friends,
+there is a leaderboard among friends or ranking. being able to DM to a friend.
+... sort of like equivalent of doomscrolling but it's for flashcards ... the
+problem is that i don't know where to put social media. i already have 5
+buttons ... one has to go if ever."* Then: *"it must be able to scale just in
+case a friend shares this to another friend. ... this is built to socialize.
+just like how you can post/brag about your job in facebook and linkedin."*
+
+This reopens social a second time (§46 was the first), and it changes the
+premise that shaped §46: *five people who already know each other*. Built for
+strangers means the order matters — nothing another person can see ships before
+a way to stop them. So it was planned as five steps, and this is the first:
+
+1. **Profile + friends, blocking, reporting** — this section
+2. Posts and a feed (text, a photo, a shared set, a streak worth bragging about)
+3. Messages between friends
+4. A friends' leaderboard, on Progress
+5. A report queue in the app, and community rules
+
+### 51.1 Decisions, put to the owner before anything was written
+
+- **Mutual friends**, not following: a request and a yes. Messages will be
+  between friends only, which is most of the anti-spam.
+- **Posts default to friends only** (step 2), switchable to everyone.
+- **The global chat stays** — *"it seems fun"* — and gets report and block.
+- **The leaderboard ranks streaks** (step 4). Declined the recommended "cards
+  this week" in favour of it; it will show the current streak, with the best
+  ever beside it, so the list can still change.
+- **No tab was dropped.** Profile took Settings' place in the bar; Settings is a
+  pushed screen at the same URL, reached from Profile's top right and from the
+  picture on Home. The feed will live in Community.
+
+Chosen here as defaults and named to the owner, to change if he wants: your
+friends list is visible to you alone; usernames are 3–20 lowercase letters,
+numbers and `_`, starting with a letter, with sixteen reserved names; Delete my
+data keeps blocks and reports (51.4).
+
+### 51.2 Migration 0026
+
+Needs 0024 and 0025, and refuses to run without them before changing anything.
+**Checked live 2026-09-27 as the test user: 0024 and 0025 are both applied** —
+§50's "0025 is still waiting" is out of date.
+
+- `profiles.username` — nullable, never backfilled (nobody should be findable by
+  a name they did not pick), `profiles_username_check`, a partial unique index,
+  and a `text_pattern_ops` index for "starts with".
+- `friendships` — one row per pair in either order (a unique index on
+  `least/greatest`), 'pending' or 'accepted'. Both people can read and delete it;
+  nobody can insert or update it. `send_friend_request` (refuses across a block,
+  50 a day, and asking back is accepting) and `accept_friend_request`.
+- `blocks` — the blocker's row, readable and deletable by the blocker alone.
+  `block_person` ends any friendship in the same statement as the block.
+- `reports` — `report_content` takes the copy of what was reported itself, so a
+  reporter cannot put words in anybody's mouth; reports cannot be deleted by
+  anyone in the app; a private set answers "gone", like one that does not exist;
+  20 a day; the same open thing twice returns the first report. Both people are
+  `on delete set null`, so an account going does not take its reports with it.
+- **Six views recreated, one change each: a block hides the two people from
+  each other** — `public_profiles` (which also gains `username`), `public_sets`,
+  `public_set_items`, `global_chat`, `message_reaction_people`, `my_schedule`.
+  The last one matters: without it, somebody blocked by a set's owner would keep
+  a due badge for a set they can no longer open (§21 and §36 again).
+- Two new views, `my_friends` and `my_blocks`, each filtered to the caller.
+- `search_people` — a function, SECURITY INVOKER over `public_profiles`, so the
+  block filter applies to search too. Not a PostgREST `or=` filter built in the
+  app: a name can hold the commas and brackets that syntax is made of.
+
+The writes rely on `postgres` holding BYPASSRLS — the same thing every view here
+has relied on since §46.7, and how 0025's `edit_global_message` updates a table
+with no update policy. `tests/social.test.ts` holds all of it to the SQL:
+every mirrored number, the six views column for column against the migrations
+they replace (`public_profiles` + `username` only), the block clause in each,
+no insert or update policy on the three new tables, and the Privacy Policy's new
+claims. `destructiveDrops` finds nothing to warn about: every view dropped is
+recreated in the same file.
+
+### 51.3 On screen
+
+- **Profile** (`app/(tabs)/profile.tsx`): you, your username, requests waiting
+  for you, find people (by name or @username, after two characters, 250 ms after
+  the last key), your friends, requests you sent, people you blocked.
+- **A person's page** (`app/person/[id].tsx`): picture, name, @username, the one
+  thing to do next (Add friend / Cancel / Accept or Decline / Unfriend, with a
+  confirm / Unblock), their shared sets, and Report and Block in the ⋯. It is
+  what anybody signed in can see of a person — not their friends, streak or
+  progress. Somebody who blocked you gets "We couldn't find this person", the
+  same as nobody at all.
+- **Every name and face in Community opens that person's page.** Somebody
+  else's message gets "See their profile", "Report this message" and "Block"
+  under "Hide this from my screen". A shared set gets a ⋯ with the owner's
+  profile and **Report this set** — which is the "wrong cards" flag §46.5 said
+  a shared set had no way to have.
+- Report and Block are written once (`src/ui/people.tsx`). Block says what it
+  does first (`blockFacts`, held to the migration); a sent report says who reads
+  it and that the person is not told who sent it, and offers the block.
+
+### 51.4 Delete my data
+
+Removes friendships and requests (they cascade from nothing of yours, like
+stars) and clears the username. **Keeps** the people you blocked — whoever comes
+back to the account must not find everybody they blocked can reach them again —
+and the reports you made, until they are dealt with. The Privacy Policy says both.
+
+### 51.5 The Privacy Policy and the Terms
+
+Dated September 27, 2026. What other people can see now lists your profile and
+friends, and says what blocking and reporting do, including that a copy of what
+was reported is kept. The Terms cover usernames that pretend to be someone,
+pestering with friend requests, making another account to reach someone who
+blocked you, and dishonest reports. The Policy promises "if a change is
+significant, we'll let you know in the app", and nothing in the app did — named
+to the owner, who answered *"change everything necessary"*, so 51.9 built it.
+
+### 51.6 The pet grows sooner
+
+*"revise the streak. it should be easier to build. start with 2, 5, 10, 30, 100,
+200... (until our animal is at max level)."* The pet has five pictures, so the
+list runs out; asked which way round, he kept the baby on day one: **1, 2, 5,
+10, 30** (was 1, 10, 20, 50, 100). Nothing else about the streak changed.
+
+### 51.7 Measured
+
+- Profile, Settings (now pushed, with a back control), a person's page and
+  Community photographed at 393 px in dark mode against the live database
+  **before 0026**: Profile says "Friends aren't switched on yet", a person's page
+  shows name, picture and shared sets with no buttons, Community is unchanged.
+  The new tab icon — one person, built like Community's two — reads as a person.
+- The first Community photograph showed an empty circle where the owner's photo
+  goes. Not this change: the shot was taken before the list arrived, so the
+  "every image loaded" wait passed with nothing on screen. `--wait-for` the set's
+  title, and the photo is there, 32×32, inside the new button.
+- `scroll-probe --height 420`: **8/8**, Profile and Settings included.
+- typecheck clean with and without `.expo/` · **1319 tests**, 3 skipped (1277
+  before) · built and booted.
+
+### 51.8 0026 applied, and verified (2026-09-27)
+
+Pasted by the owner the same day — *"success"*.
+
+- **`isolation-test.ts`: 106/106**, 44 of them new: usernames (taken, badly
+  shaped, reserved, and not changeable by anybody else), search, a forged
+  friendship / block / report each refused, B unable to accept their own
+  request, a block ending the friendship and hiding the two people from each
+  other in `public_profiles` both ways, `public_sets`, `public_set_items`,
+  `global_chat` both ways, `message_reaction_people`, `my_schedule` and search,
+  a request across a block refused, an unblock bringing everything back, and a
+  report carrying the database's copy, invisible to the person reported,
+  undeletable, and refused for a private set and for yourself.
+- **`scripts/friends-probe.ts` (new): 16/16**, driving the built app as A while
+  B asks from the data layer, and checking the DATABASE after every step: the
+  Home notice shown once and gone across a reload; a taken username refused in
+  words and a free one saved; the request waiting on Profile; search finding B
+  by the start of their username and saying where A stands; Accept; B's page;
+  Block from the ⋯ (friendship gone, B unable to see A); Unblock from Profile; a
+  report refused without a reason, then sent with the copy and offering the
+  block; Settings from Profile's top right; no uncaught errors.
+- **A harness trap, found on the probe's first run:** react-native-web draws a
+  `Modal` OUTSIDE `#root`, so `page.text()` and a `#root` wait cannot see the
+  report or block sheet — a sheet that had opened was reported as never
+  appearing. The probe reads `document.body` for them, and says why.
+
+**Both runs leave reports behind**, because reports cannot be deleted from the
+app — marked `isolation probe — not a real report` and `friends probe — not a
+real report`, with the SQL to clear them printed at the end.
+
+### 51.9 Seen, and changed
+
+Photographed at 393 px in dark mode with 0026 live:
+
+- **The username editor folded away.** A field, a paragraph and a button for a
+  name chosen once pushed the requests waiting for you below the fold on every
+  visit. It is open only while there is no username ("Pick a username") and
+  behind "Change username" after.
+- **"Wants to be friends" came off the request rows.** The heading already says
+  it, and beside Accept and Decline it cut the @username to "Wants t…". Search
+  results keep it, where it is the news.
+- **The sheets got real headings.** "Report Probe B" in small grey `Label` type
+  read as a caption over the reasons, not as what the sheet was for.
+- **The "New: friends" card on Home** (`src/ui/whats-new.tsx`), keeping the
+  Policy's promise: once per person per device, dismissed by "Got it", "Find
+  friends" or reading the Policy; outline and secondary buttons only, so
+  Continue keeps the one filled button. `WHATS_NEW.changed` is held to
+  `EFFECTIVE_DATE` by `tests/social.test.ts`, so the next policy change cannot
+  ship without somebody deciding what this card says.
+
+typecheck clean with and without `.expo/` · **1322 tests**, 3 skipped ·
+`scroll-probe` **8/8** · built and booted. **Not deployed; not committed.**
+
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)

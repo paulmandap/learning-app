@@ -91,8 +91,8 @@ const SIZES = [76, 92, 108, 120, 132];
  * Shows each one rather than naming it — the choice is about which you'd
  * rather look at every day, and a radio button labelled "Cat" does not answer
  * that. The third stage is the frame on offer: the baby is too small to read
- * at tile size, and the giant carries a crown that belongs to a hundred-day
- * streak nobody has yet.
+ * at tile size, and the giant carries a crown that belongs to a thirty-day
+ * streak.
  *
  * A tap saves. There is no confirm step because there is nothing to lose —
  * changing your mind costs another tap, and the streak, which is the part that
@@ -192,7 +192,7 @@ export function PetStreak({ streak, species }: { streak: number; species: PetSpe
             <Text style={{ fontSize: 14, color: t.textMuted }}>
               {toGo} more day{toGo === 1 ? '' : 's'} and it grows again.
             </Text>
-            {/* Progress across THIS stage, not the whole road to 100 — see the
+            {/* Progress across THIS stage, not the whole road to 30 — see the
                 note in core/pet.ts. A bar that barely moves for a month is
                 worse than no bar. */}
             <View
