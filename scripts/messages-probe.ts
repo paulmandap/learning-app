@@ -86,6 +86,12 @@ async function main() {
   const A = await signIn('a');
   const B = await signIn('b');
 
+  // Both test accounts agree to the community rules (0030, NOTES §55): every
+  // social act below is refused with 'RULES' until they have. A database
+  // without 0030 has no such function, which is fine.
+  await A.client.rpc('accept_community_rules');
+  await B.client.rpc('accept_community_rules');
+
   const gate = await A.client.from('my_conversations').select('id').limit(1);
   if (gate.error) {
     console.error(`my_conversations is not readable (${gate.error.code}): is migration 0028 applied?`);

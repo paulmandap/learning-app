@@ -87,6 +87,7 @@ export const PRIVACY_POLICY: LegalDocument = {
           'Your username, the friend requests you send and answer, who your friends are, the people you block, and anything you report — including what you say about it.',
           'Your posts — their words, and any photo, set or streak you put in one — and the comments and reactions you leave on posts.',
           'Messages you send to friends, your reactions to them, and when you last read each conversation.',
+          'When you agreed to the community rules, and any warning or restriction on your account.',
         ],
         'Information collected automatically:',
         [
@@ -105,6 +106,7 @@ export const PRIVACY_POLICY: LegalDocument = {
           'To send your study material and questions to Google\'s Gemini AI service when you make cards, answer written questions or chat — see "Google Gemini: where your notes go" below.',
           "To send the study reminders you turn on: up to three a day, saying how many cards are due and how long your streak is, and none on a day you've already studied.",
           'To keep Nomi working and secure: preventing misuse, applying daily limits, fixing problems, and keeping backups.',
+          'To keep people safe: reading reports, removing what breaks the community rules, and warning or restricting accounts that break them.',
           'To reply when you contact us.',
         ],
         "We don't sell or rent your information, use it for advertising, or use it to make decisions about you that have legal or similarly significant effects.",
@@ -168,7 +170,7 @@ export const PRIVACY_POLICY: LegalDocument = {
         "Blocking. If you block someone, they can't find you, see your profile, your posts or your shared sets, see what you say in the chat or under a post, send you a friend request, or message you — and you stop seeing theirs, and your conversation is hidden for both of you. If you were friends, you aren't any more. They aren't told, but they may notice. You can unblock them from your Profile.",
         "Reporting. You can report a person, a message (in the chat or to you), a shared set, a post or a comment. Reports go to the person who runs Nomi, who reads them. A copy of what was reported — the words of a message, post or comment, the set's name, or the person's name and username — is kept with the report, so it can still be checked if it is deleted afterwards. The person you report is not told who reported them.",
         'Stars are counted but not named: people can see how many stars a set has, and nobody can see who gave one.',
-        'We can remove a shared set, a post, a comment or a message that breaks our Terms of Use, and we can stop an account from sharing or posting.',
+        'We can remove a shared set, a post, a comment or a message that breaks our Terms of Use or the community rules, warn the account, and stop it from sharing, posting, messaging or adding friends.',
       ],
     },
     {
@@ -183,7 +185,7 @@ export const PRIVACY_POLICY: LegalDocument = {
         [
           'Your profile, study material, answers, notes and conversations are kept until you delete them or use Delete my data.',
           "Delete my data removes your sets, uploaded files, cards, answers, review schedule, the days you studied, the daily count of Nomi's replies, your notes, your conversations with Nomi, your reminders, your profile pictures, the stars you gave, the messages you sent in the chat, your friends and friend requests, your posts and their photos, the comments and reactions you left, and the messages you sent to friends and your reactions to theirs, and it stops sharing every set you shared. It clears your name, your username and your Gemini key. It does not remove your account itself — your email address and sign-in record. To remove those too, email us.",
-          'Two things are kept on purpose. The people you blocked stay blocked, so they still cannot reach you if you come back; you can unblock them from your Profile. And reports you made are kept until we have dealt with them, so deleting your data cannot remove the evidence of what happened to you — or, if you were reported, of what you did.',
+          'Some things are kept on purpose. The people you blocked stay blocked, so they still cannot reach you if you come back; you can unblock them from your Profile. Reports you made are kept until we have dealt with them, so deleting your data cannot remove the evidence of what happened to you — or, if you were reported, of what you did. And any warning or restriction on your account stays, so deleting your data is not a way around one.',
           `Backups are encrypted, and each one is kept for ${BACKUP_DAYS} days, so something you delete can remain in a backup for up to ${BACKUP_DAYS} days before it is gone.`,
           "What Google receives through your key is kept according to Google's terms, and server logs according to our providers' own policies.",
         ],
@@ -300,13 +302,13 @@ export const TERMS_OF_USE: LegalDocument = {
           "Only post photos you have the right to share, and never a photo of someone who hasn't agreed to it. You keep ownership of what you post, and give the people who can see it permission to see it, and us permission to show it to them.",
           'You can block anyone, for any reason, and report a person, a message or a shared set that breaks these terms. Please only report things honestly — reporting someone to get back at them is itself misuse.',
         ],
-        'We can remove a shared set, a post, a comment or a message, take away a username, or stop an account from sharing, posting or making friends, if it breaks these terms — and we can do it without notice where something is harmful or unlawful.',
+        'We can remove a shared set, a post, a comment or a message, take away a username, warn an account, or stop it from sharing, posting, messaging or making friends — for a while or for good — if it breaks these terms or the community rules — and we can do it without notice where something is harmful or unlawful.',
       ],
     },
     {
       heading: 'Using Nomi responsibly',
       body: [
-        'When you use Nomi, you agree not to:',
+        'When you use Nomi, you agree to follow the community rules — you agree to them in the app before your first post, message or friend request — and not to:',
         [
           'break any law, or use Nomi for anything harmful, fraudulent or abusive;',
           "upload material that infringes someone else's copyright or other rights, or that is illegal, hateful, sexually explicit or violent;",

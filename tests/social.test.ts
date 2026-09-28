@@ -431,7 +431,7 @@ describe('what blocking, friends and reporting are said to do is what they do', 
     expect(readFileSync('src/data/sets.ts', 'utf8')).toContain('await removeMySocialData()');
     expect(privacy).toMatch(/Delete my data removes[^.]*your friends and friend requests/);
     expect(privacy).toMatch(/The people you blocked stay blocked/);
-    expect(privacy).toMatch(/reports you made are kept until we have dealt with them/);
+    expect(privacy).toMatch(/reports you made are kept until we have dealt with them/i);
   });
 });
 

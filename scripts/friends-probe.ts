@@ -120,6 +120,12 @@ async function main() {
   const A = await signIn('a');
   const B = await signIn('b');
 
+  // Both test accounts agree to the community rules (0030, NOTES §55): every
+  // social act below is refused with 'RULES' until they have. A database
+  // without 0030 has no such function, which is fine.
+  await A.client.rpc('accept_community_rules');
+  await B.client.rpc('accept_community_rules');
+
   const gate = await A.client.from('my_friends').select('id').limit(1);
   if (gate.error) {
     console.error(`my_friends is not readable (${gate.error.code}): is migration 0026 applied?`);
@@ -331,6 +337,35 @@ async function main() {
     else fail('report offers the block', 'no block offered after reporting');
     await shot(page, '10-report-sent.png');
     await page.click('Done');
+
+    // --- the community rules, met at the first social act (NOTES §55) -----
+    const rulesGate = await A.client.rpc('is_admin');
+    if (rulesGate.error) {
+      console.log('  ----  community rules — not present (migration 0030), not checked');
+    } else {
+      const RULES_LINE = `rules probe ${Date.now()}`;
+      await A.client.from('profiles').update({ rules_accepted_at: null }).eq('id', A.userId);
+      await page.goto('/messages/everyone');
+      await page.waitFor(`document.querySelector('textarea') ? 'y' : ''`, 'the chat box');
+      await page.evaluate(`document.querySelector('textarea').focus()`);
+      await page.type(RULES_LINE);
+      await page.click('Send');
+      await showing(page, 'Before you post, message or add friends');
+      ok('rules gate', 'the rules sheet opened when the first message was refused');
+      await shot(page, '11-rules-sheet.png');
+      await page.click('I agree');
+      await showing(page, 'Now try that again.');
+      await page.click('Done');
+      const agreed = await A.client.from('profiles').select('rules_accepted_at').eq('id', A.userId).maybeSingle();
+      if ((agreed.data as { rules_accepted_at?: string | null } | null)?.rules_accepted_at) ok('rules agreed', 'recorded in the database');
+      else fail('rules agreed', 'the sheet said thanks and nothing was recorded');
+      await page.evaluate(`document.querySelector('textarea').focus()`);
+      await page.type(RULES_LINE);
+      await page.click('Send');
+      await showing(page, RULES_LINE);
+      ok('rules (after)', 'the same message goes once the rules are agreed to');
+      await A.client.from('global_messages').delete().like('body', 'rules probe%');
+    }
 
     // --- Settings, from the top right of Profile ---------------------------
     await page.goto('/profile');

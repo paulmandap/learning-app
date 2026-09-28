@@ -12,6 +12,7 @@ import {
   type PostComment,
 } from '../core/posts';
 import type { Reaction } from '../core/emoji';
+import { throwIfGated } from './moderation';
 
 /**
  * Posts, the feed, comments and reactions (NOTES §52, migration 0027).
@@ -143,6 +144,7 @@ export async function createPost(
       const undo = await db.storage.from('post-images').remove([imagePath]);
       if (undo.error) console.warn(`[posts] could not remove an unposted photo: ${undo.error.message}`);
     }
+    await throwIfGated(error, db);
     if (unavailable(error)) throw new PostsUnavailableError();
     if (error.code === 'P0001') throw new Error("That's a lot of posts for one day. Try again tomorrow.");
     if (error.code === 'P0002') throw new Error("That set isn't shared, so it can't go in a post.");
@@ -155,6 +157,7 @@ export async function createPost(
 /** Change what a post says, or who sees it. Words changed are marked edited. */
 export async function editPost(id: string, body: string, audience: Audience, db: Db = supabase): Promise<void> {
   const { error } = await db.rpc('edit_post', { p_id: id, p_body: body.trim(), p_audience: audience });
+  await throwIfGated(error, db);
   if (unavailable(error)) throw new PostsUnavailableError();
   if (error?.code === '23514') throw new Error('A post needs some words, or a photo, set or streak.');
   if (error?.code === 'P0002') throw new Error('That post is gone.');
@@ -196,6 +199,7 @@ export async function addComment(postId: string, raw: string, db: Db = supabase)
   const check = validateComment(raw);
   if (!check.ok) throw new Error(check.reason);
   const { error } = await db.rpc('add_comment', { p_post: postId, p_body: check.body });
+  await throwIfGated(error, db);
   if (unavailable(error)) throw new PostsUnavailableError();
   if (error?.code === 'P0001') throw new Error('That is a lot of comments at once — give it a moment.');
   if (error?.code === 'P0002') throw new Error("That post isn't there any more.");

@@ -4,6 +4,7 @@ import type { ChatMessage, PublicSet, Visibility } from '../core/community';
 import { EDIT_WINDOW_MINUTES, validateMessage } from '../core/community';
 import type { Reaction } from '../core/emoji';
 import type { StudySet } from './sets';
+import { throwIfGated } from './moderation';
 
 /**
  * Sets shared with everyone, stars, the ranking, and the global chat.
@@ -193,6 +194,8 @@ export async function setVisibility(
   }
 
   const { error } = await db.from('study_sets').update(patch).eq('id', setId);
+  // Sharing asks the rules and restriction question (0030's trigger).
+  await throwIfGated(error, db);
   if (isMissingColumn(error)) throw new CommunityUnavailableError();
   if (error) throw new Error(error.message);
 }
@@ -309,6 +312,7 @@ export async function editMessage(id: string, raw: string, db: Db = supabase): P
   if (!check.ok) throw new Error(check.reason);
 
   const { error } = await db.rpc('edit_global_message', { p_id: id, p_body: check.body });
+  await throwIfGated(error, db);
 
   if (isMissingTable(error) || error?.code === 'PGRST202') {
     throw new Error('Editing messages is not switched on yet.');
@@ -391,6 +395,7 @@ export async function sendMessage(raw: string, db: Db = supabase): Promise<void>
   if (!check.ok) throw new Error(check.reason);
 
   const { error } = await db.rpc('send_global_message', { message: check.body });
+  await throwIfGated(error, db);
 
   if (isMissingTable(error) || error?.code === 'PGRST202') {
     throw new CommunityUnavailableError();

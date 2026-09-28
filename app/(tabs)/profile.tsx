@@ -42,6 +42,7 @@ import {
   type FriendState,
 } from '../../src/core/social';
 import { useSessionStore } from '../../src/data/session';
+import { isModerator, listReportQueue } from '../../src/data/moderation';
 
 /**
  * Profile — who you are to everybody else, and who your friends are (NOTES §51).
@@ -81,6 +82,14 @@ export default function Profile() {
 
   const off =
     username.error instanceof SocialUnavailableError || links.error instanceof SocialUnavailableError;
+
+  // The moderator's way in to the reports (NOTES §55) — nobody else sees it.
+  const moderator = useQuery({ queryKey: ['is-moderator'], queryFn: () => isModerator() });
+  const reports = useQuery({
+    queryKey: ['report-queue'],
+    queryFn: () => listReportQueue(),
+    enabled: moderator.data === true,
+  });
 
   // --- your username ---
   const [draft, setDraft] = useState<string | null>(null);
@@ -145,6 +154,14 @@ export default function Profile() {
   return (
     <Screen>
       <TitleRow title="Profile" action={<SettingsButton onPress={() => router.push('/settings')} />} />
+
+      {moderator.data ? (
+        <Button
+          label={reports.data && reports.data.length > 0 ? `Reports to review (${reports.data.length})` : 'Reports to review'}
+          variant="outline"
+          onPress={() => router.push('/moderation')}
+        />
+      ) : null}
 
       {/* ------------------------------------------------------------ you -- */}
       <Card>
@@ -336,6 +353,8 @@ export default function Profile() {
               ))}
             </View>
           ) : null}
+
+          <TextLink label="Community rules" onPress={() => router.push('/rules')} />
 
           {/* -------------------------------------------------- blocked -- */}
           {(blocked.data ?? []).length > 0 ? (

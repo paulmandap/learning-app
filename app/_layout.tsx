@@ -7,6 +7,7 @@ import { startSessionListener, useSessionStore } from '../src/data/session';
 import { HeaderBackButton } from '../src/ui/menu';
 import { StudyAssistant } from '../src/ui/assistant';
 import { PrivacyGate } from '../src/ui/privacy';
+import { RulesSheet, StandingNotice } from '../src/ui/rules';
 import { useTheme } from '../src/ui/theme';
 import { shouldHideSplash, SPLASH_MIN_MS } from '../src/core/splash';
 
@@ -22,7 +23,9 @@ const queryClient = new QueryClient({
  * can read what they are agreeing to would be backwards.
  */
 function isPublicRoute(segment: string | undefined): boolean {
-  return segment === 'terms' || segment === 'privacy';
+  // And the community rules (NOTES §55): how people are expected to treat
+  // each other is worth reading before deciding to join.
+  return segment === 'terms' || segment === 'privacy' || segment === 'rules';
 }
 
 /** Sends signed-out users to sign-in, and signed-in users away from it. */
@@ -252,6 +255,9 @@ function RootNavigator() {
         <Stack.Screen name="messages/everyone" options={{ title: 'Everyone', ...backable }} />
         <Stack.Screen name="messages/[id]" options={{ title: '', ...backable }} />
         {/* Each document names itself in its body. */}
+        {/* The community rules, and the moderator's reports (NOTES §55). */}
+        <Stack.Screen name="rules" options={{ title: '', ...backable }} />
+        <Stack.Screen name="moderation" options={{ title: '', ...backable }} />
         <Stack.Screen name="terms" options={{ title: '', ...backable }} />
         <Stack.Screen name="privacy" options={{ title: '', ...backable }} />
         {/* Registered for the same reason as the routes above: without it the
@@ -265,6 +271,10 @@ function RootNavigator() {
       {/* D13's notice, read once before anything is sent (NOTES §37). It moved
           here from a card on Settings, at the owner's request. */}
       <PrivacyGate />
+      {/* The rules, when a social act meets them first; and a moderator's
+          warning, the next time the app opens (NOTES §55). Signed in only. */}
+      {signedIn ? <RulesSheet /> : null}
+      {signedIn ? <StandingNotice /> : null}
     </View>
   );
 }

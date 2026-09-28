@@ -206,6 +206,12 @@ async function main() {
 
   const A = await signIn('a');
   const B = await signIn('b');
+
+  // Both test accounts agree to the community rules (0030, NOTES §55): every
+  // social act below is refused with 'RULES' until they have. A database
+  // without 0030 has no such function, which is fine.
+  await A.client.rpc('accept_community_rules');
+  await B.client.rpc('accept_community_rules');
   console.log(`  user A = ${A.userId}`);
   console.log(`  user B = ${B.userId}\n`);
 
@@ -995,6 +1001,9 @@ async function main() {
 
     // ---- the friends' leaderboard (0029, NOTES §54) ----
     await checkLeaderboard(A, B);
+
+    // ---- the community rules, and who may moderate (0030, NOTES §55) ----
+    await checkModeration(A, B);
 
     // ---- unsharing is live ----
     // The filter is one line in each view. Turning it back off must actually
@@ -1942,6 +1951,84 @@ async function checkLeaderboard(
   else ok('leaderboard (block)', 'gone across a block');
 
   await strangers();
+}
+
+/**
+ * The community rules, and who may moderate (0030, NOTES §55).
+ *
+ * The test accounts are not moderators and must never be — HANDOFF prints their
+ * password — so what is checked is that EVERY moderator door is shut to them,
+ * that the rules gate really refuses before agreeing and really opens after,
+ * and that nobody can write their own standing. A restriction in force cannot
+ * be checked end to end from here without a moderator's session; the SQL that
+ * enforces it is held line for line by tests/moderation.test.ts.
+ */
+async function checkModeration(
+  A: { client: SupabaseClient; userId: string },
+  B: { client: SupabaseClient; userId: string },
+) {
+  const gate = await A.client.rpc('is_admin');
+  if (gate.error && (gate.error.code === 'PGRST202' || gate.error.code === '42883')) {
+    console.log('\n  ----  rules and moderation — not present (migration 0030), not checked');
+    return;
+  }
+  console.log('\nThe community rules, and who may moderate (0030):');
+
+  // ---- the rules gate ----
+  await B.client.from('profiles').update({ rules_accepted_at: null }).eq('id', B.userId);
+  const refused = await B.client.rpc('send_global_message', { message: 'rules probe — should never land' });
+  if (refused.error?.code === 'RULES') ok('rules (before)', 'a message refused until the rules are agreed to');
+  else {
+    fail('rules (before)', `expected RULES, got ${refused.error?.code ?? 'a sent message'}`);
+    await B.client.from('global_messages').delete().like('body', 'rules probe%');
+  }
+  const sharing = await B.client
+    .from('study_sets')
+    .insert({ user_id: B.userId, title: 'Rules probe set', status: 'ready', visibility: 'public' });
+  if (sharing.error?.code === 'RULES') ok('rules (sharing)', 'a set cannot be shared before the rules either');
+  else fail('rules (sharing)', `expected RULES, got ${sharing.error?.code ?? 'a shared set'}`);
+  await B.client.from('study_sets').delete().eq('title', 'Rules probe set');
+
+  const agreed = await B.client.rpc('accept_community_rules');
+  const after = await B.client.rpc('send_global_message', { message: 'rules probe — agreed' });
+  if (agreed.error || after.error) fail('rules (after)', `${agreed.error?.message ?? ''} ${after.error?.message ?? ''}`.trim());
+  else ok('rules (after)', 'agreed, and the message goes');
+  await B.client.from('global_messages').delete().like('body', 'rules probe%');
+
+  // ---- nobody writes their own standing ----
+  const selfRestrict = await B.client.from('restrictions').insert({ user_id: A.userId, until: null });
+  if (!selfRestrict.error) fail('restrictions insert', 'B restricted A with a direct insert');
+  else ok('restrictions insert', `refused (${selfRestrict.error.code ?? 'error'})`);
+  const selfWarn = await B.client.from('warnings').insert({ user_id: A.userId, rule: 'kind' });
+  if (!selfWarn.error) fail('warnings insert', 'B warned A with a direct insert');
+  else ok('warnings insert', `refused (${selfWarn.error.code ?? 'error'})`);
+  const selfAdmin = await B.client.from('app_admins').insert({ user_id: B.userId });
+  if (!selfAdmin.error) {
+    fail('app_admins insert', 'B MADE THEMSELVES A MODERATOR');
+    await B.client.from('app_admins').delete().eq('user_id', B.userId);
+  } else ok('app_admins insert', `refused (${selfAdmin.error.code ?? 'error'})`);
+
+  // ---- every moderator door, shut ----
+  const isAdmin = await B.client.rpc('is_admin');
+  if (isAdmin.data !== false) fail('is_admin', 'the test account is a moderator — it must never be');
+  else ok('is_admin', 'not a moderator');
+  const queue = await B.client.from('report_queue').select('id').limit(1);
+  if ((queue.data ?? []).length > 0) fail('report_queue', 'B CAN READ THE REPORT QUEUE');
+  else ok('report_queue', 'empty to somebody who is not a moderator');
+  for (const [fnName, args] of [
+    ['resolve_reports', { p_kind: 'person', p_target: A.userId, p_status: 'dismissed' }],
+    ['moderate_remove', { p_kind: 'post', p_target: A.userId }],
+    ['restrict_account', { p_user: A.userId, p_days: 7, p_reason: 'probe' }],
+    ['lift_restriction', { p_user: A.userId }],
+    ['warn_account', { p_user: A.userId, p_rule: 'kind', p_note: 'probe' }],
+  ] as const) {
+    const r = await B.client.rpc(fnName, args);
+    if (!r.error) fail(fnName, `B CALLED ${fnName.toUpperCase()} AS IF A MODERATOR`);
+    else ok(fnName, `refused (${r.error.code ?? 'error'})`);
+  }
+  const standing = await A.client.from('restrictions').select('user_id').eq('user_id', A.userId);
+  if ((standing.data ?? []).length > 0) fail('restrictions (A)', 'A ended up restricted by a probe');
+  else ok('restrictions (A)', 'nothing written');
 }
 
 main().catch((err) => {

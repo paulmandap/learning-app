@@ -3,6 +3,7 @@ import { isMissingColumn, isMissingTable } from '../core/db-errors';
 import { EDIT_WINDOW_MINUTES, validateMessage } from '../core/community';
 import type { Conversation, DirectMessage } from '../core/messages';
 import type { Reaction } from '../core/emoji';
+import { throwIfGated } from './moderation';
 
 /**
  * Messages between friends (NOTES §53, migration 0028).
@@ -77,6 +78,7 @@ export async function unreadMessages(db: Db = supabase): Promise<number> {
 /** Open a conversation with a friend, or find the one there is. */
 export async function startConversation(personId: string, db: Db = supabase): Promise<string> {
   const { data, error } = await db.rpc('start_conversation', { p_other: personId });
+  await throwIfGated(error, db);
   if (unavailable(error)) throw new MessagesUnavailableError();
   if (error?.code === '42501') throw new Error('You can only message friends.');
   if (error) throw new Error(error.message);
@@ -106,6 +108,7 @@ export async function sendDirectMessage(conversationId: string, raw: string, db:
   const check = validateMessage(raw);
   if (!check.ok) throw new Error(check.reason);
   const { error } = await db.rpc('send_direct_message', { p_conversation: conversationId, p_body: check.body });
+  await throwIfGated(error, db);
   if (unavailable(error)) throw new MessagesUnavailableError();
   if (error) {
     if (error.code === 'P0001') throw new Error('That is a lot of messages at once — give it a moment.');
@@ -119,6 +122,7 @@ export async function editDirectMessage(id: string, raw: string, db: Db = supaba
   const check = validateMessage(raw);
   if (!check.ok) throw new Error(check.reason);
   const { error } = await db.rpc('edit_direct_message', { p_id: id, p_body: check.body });
+  await throwIfGated(error, db);
   if (unavailable(error)) throw new MessagesUnavailableError();
   if (error) {
     if (error.code === 'P0001') throw new Error(`You can only edit a message for ${EDIT_WINDOW_MINUTES} minutes after sending it.`);

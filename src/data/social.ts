@@ -1,4 +1,5 @@
 import { supabase, type Db } from './supabase';
+import { throwIfGated } from './moderation';
 import { isMissingColumn, isMissingTable } from '../core/db-errors';
 import {
   searchTerm,
@@ -187,6 +188,7 @@ export async function listFriendLinks(db: Db = supabase): Promise<FriendLink[]> 
  */
 export async function sendFriendRequest(personId: string, db: Db = supabase): Promise<'requested' | 'friends'> {
   const { data, error } = await db.rpc('send_friend_request', { p_to: personId });
+  await throwIfGated(error, db);
   if (unavailable(error)) throw new SocialUnavailableError();
   if (error) {
     if (error.code === 'P0001') throw new Error("That's a lot of friend requests for one day. Try again tomorrow.");
@@ -200,6 +202,7 @@ export async function sendFriendRequest(personId: string, db: Db = supabase): Pr
 
 export async function acceptFriendRequest(personId: string, db: Db = supabase): Promise<void> {
   const { error } = await db.rpc('accept_friend_request', { p_from: personId });
+  await throwIfGated(error, db);
   if (unavailable(error)) throw new SocialUnavailableError();
   if (error?.code === 'P0002') throw new Error("That request isn't there any more.");
   if (error) throw new Error(error.message);

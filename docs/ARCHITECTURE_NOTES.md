@@ -8058,6 +8058,84 @@ pins it. **1401 tests**, built.
 **Not deployed; not committed.**
 
 
+## 55. Community rules, and a report queue (2026-09-28)
+
+Step five, the last of §51's. The owner chose, before anything was written:
+**remove, dismiss, restrict and warn** in the queue; and **agree once to the
+rules before a first social act, checked by the database**.
+
+### 55.1 Migration 0030 — DEPLOY THE CODE FIRST
+
+Unlike 0026–0029, the order matters. The moment 0030 is applied, every social
+act by somebody who has not agreed is refused with `RULES` — and a build without
+the rules sheet has no way to agree. So: deploy, confirm `deploy-status.ts` says
+*production is exactly HEAD*, then apply.
+
+- `app_admins`, seeded with the owner by his sign-in email; no insert policy, so
+  nothing in the app can add a moderator. `is_admin()`; `assert_admin()`.
+- `profiles.rules_accepted_at` and `accept_community_rules()`.
+- `restrictions` (one per person, `until` NULL for good) and `warnings` (a rule
+  key, a note, `seen_at`), each readable by its person and written only by a
+  moderator's function. **Kept by Delete my data**, and the policy says so.
+- **`assert_can_socialize()`** — agreed, and not restricted — raising `RULES` or
+  `RSTRC`, SQLSTATEs of our own that PostgREST passes through. Added as ONE LINE
+  to ten functions recreated in place (send and edit in the chat, a friend
+  request and accepting one, a post, editing it, a comment, opening a
+  conversation, sending and editing in one), and asked by a trigger before a set
+  is shared — on insert too, since a set can be inserted public. Reading an old
+  conversation is not a social act, so `start_conversation` asks only when it
+  would open a new one. Reactions do not ask.
+- `report_queue`, filtered by `is_admin()` inside the view; `resolve_reports`,
+  `moderate_remove` (a set is unshared, never deleted; a person has nothing to
+  remove), `restrict_account`, `lift_restriction`, `warn_account`.
+
+`tests/moderation.test.ts` holds **each of the ten recreated functions to its
+previous version, whitespace aside, with only the gate line allowed to
+differ** — the check that would catch a copy that lost a block test or a limit.
+All ten matched first time.
+
+### 55.2 On screen
+
+- **One rules sheet**, mounted in the root: any social act the database refuses
+  with `RULES` opens it (`throwIfGated`, first in the error handling of every
+  social write in src/data). "I agree", then "Now try that again" — the act is
+  not retried behind the person's back. `RSTRC` becomes a sentence saying what
+  they cannot do and until when, and that they can still study.
+- **A warning** is a sheet the next time the app opens, naming the rule, with
+  the moderator's note and a link to the rules; "I understand" marks it seen.
+- **`/rules`** — seven rules in plain words, readable signed out like the Terms;
+  linked from Profile and from every report sheet.
+- **`/moderation`** — one card per reported THING (three reports on one post
+  are one decision): what it is, who it is about and whether they are restricted,
+  the database's copy, each reason and who sent it; Remove / Unshare, Warn (pick
+  the rule, add a note), Restrict (7 days, 30 days, for good), Lift, Dismiss, and
+  Open for a post, set or person. Reached from a button on Profile that only a
+  moderator sees; anybody else at that address gets "This page is for Nomi's
+  moderator."
+- Privacy Policy and Terms (September 28): the rules are part of the agreement,
+  agreed to in the app; warnings and restrictions are recorded and kept. The Home
+  card mentions the rules.
+
+### 55.3 Measured, before 0030
+
+typecheck clean with and without `.expo/` · **1431 tests**, 3 skipped · built
+· `friends-probe` **18/18** (its rules step waiting on 0030) · `messages-probe`
+**8/8** · `/rules` and `/moderation` (as a non-moderator) photographed.
+
+### 55.4 Not verified yet — needs 0030
+
+The isolation test agrees to the rules for both test accounts first (every
+social probe now does), then checks the gate refuses a message and a shared set
+before agreeing and lets them through after; that nobody can write a
+restriction, a warning or themselves into `app_admins`; and that every moderator
+function and the queue are shut to a test account. `friends-probe` meets the
+rules sheet at a first message, agrees, and sends. **The test accounts are not
+moderators and must never be** — their password is in HANDOFF — so the queue
+itself can only be tried by the owner, on the probe reports the test runs leave.
+
+**Not deployed; not committed.**
+
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)

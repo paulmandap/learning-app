@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
+import { TextLink } from './legal';
 import { Body, Button, Notice } from './components';
 import { PersonAvatar } from './avatar';
 import { elevation, INPUT_FONT_SIZE, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
@@ -238,6 +240,7 @@ export function ReportSheet({
   onClose: () => void;
 }) {
   const t = useTheme();
+  const router = useRouter();
   const [reason, setReason] = useState<ReportReason | null>(null);
   const [details, setDetails] = useState('');
   const [busy, setBusy] = useState(false);
@@ -339,6 +342,14 @@ export function ReportSheet({
         />
       </View>
 
+      {/* What counts as breaking the rules, one tap away (NOTES §55). */}
+      <TextLink
+        label="Read the community rules"
+        onPress={() => {
+          onClose();
+          router.push('/rules');
+        }}
+      />
       {error ? <Notice tone="error">{error}</Notice> : null}
       <Button label="Send report" onPress={send} busy={busy} />
       <Button label="Cancel" variant="secondary" onPress={onClose} disabled={busy} />

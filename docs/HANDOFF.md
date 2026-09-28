@@ -33,9 +33,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1401 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
+- **1431 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
   CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§54 work added the rest.)
+  2026-09-06; Phases A-G and the NOTES §35–§55 work added the rest.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -58,7 +58,15 @@ pushed screen at /settings, reached from Profile's top right and Home's picture.
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 29, all applied
+### Migrations — 30; **0030 waiting — DEPLOY FIRST**, the rest applied
+
+**0030 (community rules and moderation — NOTES §55) is written and waiting, and
+the order is not optional:** deploy the code, confirm `deploy-status.ts` says
+*production is exactly HEAD*, THEN apply 0030. Applied first, every post or
+message by somebody who has not agreed to the rules is refused, and the old
+build has no rules sheet to agree with. After applying: `isolation-test.ts`,
+then `friends-probe.ts`; the owner tries `/moderation` himself (the test
+accounts must never be moderators).
 
 **0029 (friends' streaks — NOTES §54) was applied by the owner on 2026-09-28**
 and verified the same day: isolation **163/163**, `friends-probe` **18/18**.
@@ -454,6 +462,10 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 53. **A streak is seen by friends only, and only while they show it**
     (`friends_leaderboard`, NOTES §54). `streak_of` and `best_streak_of` are
     granted to nobody; never widen that without the Privacy Policy saying so.
+54. **Every social act asks `assert_can_socialize()` first** (NOTES §55):
+    rules agreed, not restricted. A new function that lets one person reach
+    another adds the same one line, and `tests/moderation.test.ts` gains it.
+    The test accounts must never be in `app_admins`.
 
 ## Hard-won gotchas — do not rediscover these
 
