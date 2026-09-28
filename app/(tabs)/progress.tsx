@@ -25,6 +25,7 @@ import { petStage, toPetSpecies } from '../../src/core/pet';
 import { petGrewToday } from '../../src/core/posts';
 import { fetchProfile } from '../../src/data/profile';
 import { claimStreakRestore } from '../../src/data/streak';
+import { FriendsBoard } from '../../src/ui/leaderboard';
 
 /** The plotting height of a column chart. Enough for a week to read at a glance. */
 const CHART_HEIGHT = 128;
@@ -109,6 +110,9 @@ export default function Progress() {
           detail="Study a set and this fills in: how many days in a row you've kept going, what you know, what's coming up, and how each part of your notes is going."
           action={{ label: 'Go to your sets', onPress: () => router.push('/') }}
         />
+        {/* Friends' streaks go on the empty Progress too (NOTES §54): somebody
+            who has answered nothing yet may well have friends who have. */}
+        <FriendsBoard />
         {/* Someone can have uploaded a large file and answered nothing yet —
             which is exactly when "how much room have I used?" gets asked. */}
         <Space data={data} />
@@ -120,6 +124,9 @@ export default function Progress() {
     <Screen>
       <TitleRow title="Progress" />
       <Streak data={data} />
+      {/* Right after your own streak (NOTES §54): how you are going first,
+          then the company you keep while you do it. */}
+      <FriendsBoard />
       <Mastery data={data} />
       <Forecast data={data} />
       <Sections data={data} />

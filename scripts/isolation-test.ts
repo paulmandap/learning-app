@@ -71,6 +71,9 @@
  *     marked read and "Seen"; only the sender edits or unsends; reactions in
  *     your own name only; a message reportable and the report invisible to its
  *     sender; unfriended, readable and closed; blocked, gone for both
+ *   - the friends' leaderboard (0029, NOTES §54): a stranger's streak not on
+ *     your board, a friend's on it, off when they turn it off (and only they
+ *     can), gone across a block, and nobody's best streak readable directly
  *
  * The views matter most. A Postgres view runs as its OWNER by default, which
  * bypasses RLS on the tables underneath. Testing only base tables would pass
@@ -990,6 +993,9 @@ async function main() {
     // ---- messages between friends (0028, NOTES §53) ----
     await checkMessages(A, B);
 
+    // ---- the friends' leaderboard (0029, NOTES §54) ----
+    await checkLeaderboard(A, B);
+
     // ---- unsharing is live ----
     // The filter is one line in each view. Turning it back off must actually
     // take the set away, or "stop sharing" is a button that does nothing.
@@ -1863,6 +1869,79 @@ async function checkMessages(
   await strangers();
   await A.client.from('direct_messages').delete().like('body', `${DM_PROBE}%`);
   await B.client.from('direct_messages').delete().like('body', `${DM_PROBE}%`);
+}
+
+/**
+ * The friends' leaderboard (0029, NOTES §54) — the first time anybody else sees
+ * a streak, so every way onto somebody's board is checked, and every way off.
+ */
+async function checkLeaderboard(
+  A: { client: SupabaseClient; userId: string },
+  B: { client: SupabaseClient; userId: string },
+) {
+  const gate = await A.client.rpc('friends_leaderboard');
+  if (gate.error && (gate.error.code === 'PGRST202' || gate.error.code === '42883')) {
+    console.log('\n  ----  leaderboard — not present (migration 0029), not checked');
+    return;
+  }
+  console.log("\nThe friends' leaderboard (0029):");
+
+  type Row = { person_id: string; current_streak: number; best_streak: number; is_me: boolean };
+  const board = async (who: { client: SupabaseClient }) =>
+    ((await who.client.rpc('friends_leaderboard')).data ?? []) as Row[];
+  const strangers = async () => {
+    await A.client.from('blocks').delete().eq('blocker_id', A.userId);
+    await B.client.from('blocks').delete().eq('blocker_id', B.userId);
+    await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
+  };
+  const befriend = async () => {
+    await B.client.rpc('send_friend_request', { p_to: A.userId });
+    await A.client.rpc('accept_friend_request', { p_from: B.userId });
+  };
+  await strangers();
+  await B.client.from('profiles').update({ show_streak: true }).eq('id', B.userId);
+
+  const alone = await board(A);
+  if (alone.some((r) => r.person_id === B.userId)) fail('leaderboard (strangers)', "A SEES B'S STREAK WITHOUT BEING FRIENDS");
+  else ok('leaderboard (strangers)', 'a stranger’s streak is not on the board');
+  const me = alone.find((r) => r.is_me);
+  if (!me || me.person_id !== A.userId) fail('leaderboard (self)', 'A is not on their own board');
+  else if (me.current_streak > me.best_streak) fail('leaderboard (self)', `a streak of ${me.current_streak} beats the best ever, ${me.best_streak}`);
+  else ok('leaderboard (self)', `A, ${me.current_streak} now, best ${me.best_streak}`);
+
+  await befriend();
+  const aBoard = await board(A);
+  const bBoard = await board(B);
+  if (!aBoard.some((r) => r.person_id === B.userId) || !bBoard.some((r) => r.person_id === A.userId)) {
+    fail('leaderboard (friends)', 'friends are not on each other’s boards');
+  } else ok('leaderboard (friends)', 'each on the other’s board');
+
+  // B turns it off: gone from A's board, still on their own.
+  const off = await B.client.from('profiles').update({ show_streak: false }).eq('id', B.userId);
+  if (off.error) fail('show_streak', off.error.message);
+  const hidden = await board(A);
+  const ownStill = await board(B);
+  if (hidden.some((r) => r.person_id === B.userId)) fail('show_streak off', "B turned it off and A still sees B's streak");
+  else ok('show_streak off', "gone from A's board");
+  if (!ownStill.some((r) => r.is_me)) fail('show_streak off (self)', 'B vanished from their own board');
+  else ok('show_streak off (self)', 'still on their own');
+
+  // Nobody else can flip it.
+  await A.client.from('profiles').update({ show_streak: true }).eq('id', B.userId);
+  const stillOff = await B.client.from('profiles').select('show_streak').eq('id', B.userId).maybeSingle();
+  if ((stillOff.data as { show_streak?: boolean } | null)?.show_streak !== false) fail('show_streak (as A)', "A TURNED B'S STREAK BACK ON");
+  else ok('show_streak (as A)', 'only B decides');
+  await B.client.from('profiles').update({ show_streak: true }).eq('id', B.userId);
+
+  const direct = await B.client.rpc('best_streak_of', { p_user: A.userId });
+  if (!direct.error) fail('best_streak_of', "B READ A'S BEST STREAK DIRECTLY");
+  else ok('best_streak_of', `not callable (${direct.error.code ?? 'error'})`);
+
+  await A.client.rpc('block_person', { p_other: B.userId });
+  if ((await board(B)).some((r) => r.person_id === A.userId)) fail('leaderboard (block)', 'B still sees the streak of somebody who blocked them');
+  else ok('leaderboard (block)', 'gone across a block');
+
+  await strangers();
 }
 
 main().catch((err) => {

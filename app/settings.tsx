@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Linking, Pressable, Text, View } from 'react-native';
+import { Linking, Pressable, Switch, Text, View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Body, Button, Card, Field, Label, Notice, Screen, Title } from '../src/ui/components';
 import {
@@ -26,6 +26,7 @@ import { RemindersCard } from '../src/ui/reminders';
 import { forgetThisDevice } from '../src/data/reminders';
 import { toPetSpecies, type PetSpecies } from '../src/core/pet';
 import { deleteAllMyData } from '../src/data/sets';
+import { fetchShowStreak, saveShowStreak } from '../src/data/leaderboard';
 import { supabase } from '../src/data/supabase';
 import { GeminiBrowserProvider } from '../src/ai/gemini';
 import { reasonToMessage } from '../src/core/ai-errors';
@@ -75,6 +76,28 @@ export default function Settings() {
   const [pendingPet, setPendingPet] = useState<PetSpecies | null>(null);
   const [petError, setPetError] = useState<string | null>(null);
   const pet = pendingPet ?? toPetSpecies(profile?.pet);
+
+  /**
+   * Do friends see my streak on their leaderboard (NOTES §54)? Null before
+   * migration 0029, when there is no board and so no switch to show. Held
+   * locally while it saves, like the pet, so the switch moves when tapped.
+   */
+  const { data: showStreak } = useQuery({ queryKey: ['show-streak'], queryFn: () => fetchShowStreak() });
+  const [pendingShow, setPendingShow] = useState<boolean | null>(null);
+  const [showError, setShowError] = useState<string | null>(null);
+  async function chooseShowStreak(on: boolean) {
+    setPendingShow(on);
+    setShowError(null);
+    try {
+      await saveShowStreak(on);
+      await queryClient.invalidateQueries({ queryKey: ['show-streak'] });
+      await queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
+    } catch {
+      setShowError("Couldn't save that just now. Try again in a moment.");
+    } finally {
+      setPendingShow(null);
+    }
+  }
 
   // --- you: the name Home greets, and the picture beside it (NOTES §36) ---
   const userId = useSessionStore((s) => s.session?.user.id) ?? '';
@@ -284,6 +307,22 @@ export default function Settings() {
         </Body>
         <PetChooser value={pet} onChange={choosePet} disabled={!profile} />
         {petError ? <Notice tone="error">{petError}</Notice> : null}
+        {/* Here because this card is the streak's (NOTES §54). */}
+        {showStreak === null || showStreak === undefined ? null : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Body>Show my streak to friends</Body>
+              <Body muted>They see how many days in a row, and your best, on their leaderboard.</Body>
+            </View>
+            <Switch
+              value={pendingShow ?? showStreak}
+              onValueChange={chooseShowStreak}
+              accessibilityLabel="Show my streak to friends"
+              trackColor={{ true: t.accent, false: t.border }}
+            />
+          </View>
+        )}
+        {showError ? <Notice tone="error">{showError}</Notice> : null}
       </Card>
 
       {/* --------------------------------------------------- reminders -- */}

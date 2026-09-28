@@ -213,6 +213,42 @@ async function main() {
     await typeInto(page, 'A name or @username', '');
     await shot(page, '04-profile-friends.png');
 
+    // --- friends' streaks on Progress (NOTES §54) ------------------------------
+    const board = await A.client.rpc('friends_leaderboard');
+    if (board.error) {
+      console.log('  ----  leaderboard — not present (migration 0029), not checked');
+    } else {
+      await page.goto('/progress');
+      await showing(page, "Friends' streaks");
+      await page.waitFor(
+        `[...document.querySelectorAll('[role="button"]')].some((b) => /^(\\d+\\. )?${B_NAME},/.test(b.getAttribute('aria-label') ?? '')) ? 'y' : ''`,
+        'B on the board',
+      );
+      ok('leaderboard', "B is on A's board, ranked, now that they are friends");
+      await shot(page, '04b-leaderboard.png');
+
+      // The switch in Settings, and the database agreeing.
+      await page.goto('/settings');
+      await showing(page, 'Show my streak to friends');
+      await page.evaluate(`(() => {
+        const s = document.querySelector('[aria-label="Show my streak to friends"]');
+        s.click();
+      })()`);
+      let shown: boolean | undefined = true;
+      for (let i = 0; i < 20 && shown !== false; i++) {
+        await new Promise((r) => setTimeout(r, 300));
+        shown = ((await A.client.from('profiles').select('show_streak').eq('id', A.userId).maybeSingle()).data as {
+          show_streak?: boolean;
+        } | null)?.show_streak;
+      }
+      const bSeesA = (((await B.client.rpc('friends_leaderboard')).data ?? []) as { person_id: string }[]).some(
+        (r) => r.person_id === A.userId,
+      );
+      if (shown === false && !bSeesA) ok('show my streak', "switched off in Settings: saved, and A is off B's board");
+      else fail('show my streak', `saved: ${shown === false}, still on B's board: ${bSeesA}`);
+      await A.client.from('profiles').update({ show_streak: true }).eq('id', A.userId);
+    }
+
     // --- their page ---------------------------------------------------------
     await page.goto(`/person/${B.userId}`);
     await showing(page, "You're friends.");

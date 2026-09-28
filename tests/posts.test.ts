@@ -352,8 +352,8 @@ describe('what the Privacy Policy says about posts is what the app does', () => 
     expect(readFileSync('src/data/sets.ts', 'utf8')).toContain('await removeMyPosts()');
   });
 
-  it('a profile does not show a streak — unless you shared it in a post', () => {
-    expect(privacy).toMatch(/It does not show your friends, your streak or how you are doing — unless you share your streak in a post/);
+  it('a profile does not show a streak — only friends see it, and a post you share it in (NOTES §54)', () => {
+    expect(privacy).toMatch(/It does not show your friends, your streak or how you are doing — your streak is seen only by your friends, on their leaderboard/);
   });
 });
 

@@ -7988,6 +7988,76 @@ Pasted by the owner the same day — *"success"*.
 **Not deployed; not committed.**
 
 
+## 54. Friends' streaks on Progress (2026-09-28)
+
+Step four of §51's five. The owner deployed §53 (*"sure continue. done with
+deploy"*) and, in the same message, found the whole social side *"messy ... all
+over the place"* and asked for a cleaner, more professional look — then, before
+anything was changed: *"or maybe we make the updated ui after all the steps is
+done."* Agreed: step five still adds screens, and redesigning twice is waste. The
+redesign is next after step five, starting from a Gemini image prompt he asked
+for, to be written then and covering every screen.
+
+The measure was chosen on 2026-09-27: **longest streak**, shown as the one
+running now with the best ever beside it.
+
+### 54.1 Migration 0029
+
+- `profiles.show_streak`, **on by default** — a board nobody is on is not one —
+  with "Show my streak to friends" in Settings. Named to the owner as a default
+  he can change.
+- `best_streak_of(user)`: the longest run of consecutive UTC days studied or
+  restored (gaps and islands: day minus row number is constant inside a run),
+  counting only runs with at least one real day, as `studyStreak` does. Granted
+  to nobody, like 0027's `streak_of`.
+- `friends_leaderboard()`: the caller, always, and every accepted friend who
+  shows their streak, with nothing across a block; current and best from the
+  database. A SECURITY DEFINER function rather than a view, because a view's
+  functions are checked against its reader and nobody may call `streak_of`.
+
+### 54.2 On screen
+
+- **"Friends' streaks"** on Progress, right after your own pet and streak: rank
+  (a number, never a medal — the Top sets rule), face, name, "12 days", and
+  "Best 30" only when it says more. Your own row outlined as well as shaded.
+  Every time: "Your friends see your streak here", linked to Settings. With no
+  friends: "Add friends to see how your streaks compare" and a way to Profile.
+- **The switch** is in Settings' study-pet card, the card that is already the
+  streak's.
+- Privacy Policy (September 28): the profile still does not show your streak;
+  your friends see it on their leaderboard unless you turn it off, and anybody
+  who can see a post you share it in. The Home card is "New: friends, posts,
+  messages and streaks", with a new id.
+
+### 54.3 Measured, before 0029
+
+typecheck clean with and without `.expo/` · **1400 tests**, 3 skipped
+(`tests/leaderboard.test.ts`: ranking, ties, labels, who is on a board, the
+best-streak rule, and the Privacy Policy's claims) · built · `destructiveDrops`
+finds nothing.
+
+### 54.4 0029 applied, and verified (2026-09-28)
+
+Pasted by the owner the same day.
+
+- **`isolation-test.ts`: 163/163**, 8 of them new: a stranger's streak not on
+  your board, your own on it (A: 0 now, best 3 — current never above best), a
+  friend's on it, off when they turn it off and only they can, still on their
+  own, gone across a block, `best_streak_of` not callable (42501).
+- **`friends-probe.ts`: 18/18**, with a Progress step (B on A's board) and a
+  Settings step (the switch saves, and A leaves B's board).
+
+### 54.5 Seen, and changed
+
+Photographed at 393 px, dark: both test accounts had no streak, and **both were
+ranked 1**. A rank for nothing reads as a win. Now a row with no streak has no
+rank — a dash — and sorts below everybody with one: the Top sets rule, where a
+set with no stars is unrated rather than last. `tests/leaderboard.test.ts`
+pins it. **1401 tests**, built.
+
+**Not deployed; not committed.**
+
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)
