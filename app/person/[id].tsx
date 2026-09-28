@@ -1,27 +1,20 @@
-import { useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import { useMemo, useState, type ReactNode } from 'react';
+import { View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Body,
-  Button,
-  Card,
-  EmptyState,
-  ListRow,
-  LoadingState,
-  Notice,
-  Screen,
-  SectionRow,
-} from '../../src/ui/components';
+import { Body, Button, EmptyState, LoadingState, Notice, Rows, Screen } from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
 import { OverflowMenu } from '../../src/ui/menu';
 import { PersonAvatar } from '../../src/ui/avatar';
 import { BlockSheet, ReportSheet } from '../../src/ui/people';
-import { PostList } from '../../src/ui/post';
-import { listFeed, PostsUnavailableError } from '../../src/data/posts';
+import { UnderlineTabs } from '../../src/ui/segment';
+import { PostGrid } from '../../src/ui/post-grid';
+import { ProfileHeader, SetRow, StatsRow } from '../../src/ui/profile-header';
+import { countPosts, listFeed, PostsUnavailableError } from '../../src/data/posts';
 import { startConversation } from '../../src/data/messages';
 import { joinPages, nextCursor, type FeedCursor } from '../../src/core/posts';
-import { space, type, useTheme } from '../../src/ui/theme';
+import { countLabel } from '../../src/core/profile';
+import { space } from '../../src/ui/theme';
 import {
   acceptFriendRequest,
   getPerson,
@@ -34,17 +27,33 @@ import {
 } from '../../src/data/social';
 import { listPublicSets } from '../../src/data/community';
 import { atUsername, friendState, personName } from '../../src/core/social';
-import { browseOrder, starLabel } from '../../src/core/community';
+import { browseOrder } from '../../src/core/community';
 import { useSessionStore } from '../../src/data/session';
 
+const PERSON_TABS = [
+  { key: 'posts' as const, label: 'Posts' },
+  { key: 'sets' as const, label: 'Sets' },
+];
+
+/** Two buttons side by side, each half the width — the picture's pair. */
+function Pair({ first, second }: { first: ReactNode; second: ReactNode }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: space.sm }}>
+      <View style={{ flex: 1 }}>{first}</View>
+      <View style={{ flex: 1 }}>{second}</View>
+    </View>
+  );
+}
+
 /**
- * Somebody's page (NOTES §51).
+ * Somebody's page (NOTES §51; redrawn in §59 to match your own Profile).
  *
  * Reached by tapping a name — in the chat, beside a shared set, in search, in
  * your friends. What it shows is what the Privacy Policy says anyone signed in
  * can see of a person: their name, their @username, the picture they are using,
- * and the sets they chose to share. NOT their friends, their streak or how they
- * are doing — none of that is anybody else's, and none of it is in the views.
+ * their bio, the sets they chose to share, and the posts you may see. NOT their
+ * friends, their streak or how they are doing — none of that is anybody
+ * else's, and none of it is in the views.
  *
  * ## One screen for every relationship
  *
@@ -54,7 +63,6 @@ import { useSessionStore } from '../../src/data/session';
  * button.
  */
 export default function PersonPage() {
-  const t = useTheme();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -76,6 +84,8 @@ export default function PersonPage() {
     retry: (count, err) => !(err instanceof PostsUnavailableError) && count < 1,
   });
   const theirPosts = useMemo(() => joinPages(posts.data?.pages ?? []), [posts.data]);
+  const postCount = useQuery({ queryKey: ['post-count', personId], queryFn: () => countPosts(personId) });
+  const [tab, setTab] = useState<'posts' | 'sets'>('posts');
 
   const off = links.error instanceof SocialUnavailableError;
   const blockedIds = useMemo(() => new Set((blocked.data ?? []).map((b) => b.person_id)), [blocked.data]);
@@ -166,107 +176,117 @@ export default function PersonPage() {
         }}
       />
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.lg }}>
-        <PersonAvatar avatar={who.avatar} userId={who.id} name={name} size={88} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={[type.display, { color: t.text }]} numberOfLines={2}>
-            {name}
-          </Text>
-          {handle && handle !== name ? <Text style={[type.body, { color: t.textMuted }]}>{handle}</Text> : null}
-        </View>
-      </View>
+      <ProfileHeader
+        picture={<PersonAvatar avatar={who.avatar} userId={who.id} name={name} size={88} />}
+        name={name}
+        handle={handle}
+        bio={who.bio}
+      />
+
+      {/* Only what they chose to share, counted: never their friends or their
+          streak, which are nobody else's (the Privacy Policy, NOTES §59). */}
+      {state !== 'blocked' ? (
+        <StatsRow
+          stats={[
+            { value: postCount.data ?? 0, label: countLabel(postCount.data ?? 0, 'Post', 'Posts') },
+            { value: theirSets.length, label: countLabel(theirSets.length, 'Shared set', 'Shared sets') },
+          ]}
+        />
+      ) : null}
 
       {failed ? <Notice tone="error">{failed.message}</Notice> : null}
 
-      {/* The one thing to do next, for where you stand with them. */}
+      {/* The one thing to do next, for where you stand with them — side by
+          side with the second, as the picture's Edit / Share are. */}
       {off ? null : state === 'self' ? (
-        <Card>
-          <Body>This is you — how other people see your page.</Body>
+        <View style={{ gap: space.sm }}>
+          <Body muted>This is you — how other people see your page.</Body>
           <Button label="Go to your profile" variant="secondary" onPress={() => router.replace('/profile')} />
-        </Card>
+        </View>
       ) : state === 'blocked' ? (
-        <Card>
+        <View style={{ gap: space.sm }}>
           <Body>You blocked {name}.</Body>
           <Body muted>You can&apos;t see each other&apos;s messages or shared sets, and they can&apos;t find you.</Body>
           <Button label={`Unblock ${name}`} variant="secondary" onPress={() => unblock.mutate()} busy={unblock.isPending} />
-        </Card>
+        </View>
       ) : state === 'friends' ? (
-        <Card>
-          <Body>You&apos;re friends.</Body>
-          <Button label={`Message ${name}`} variant="outline" onPress={() => message.mutate()} busy={message.isPending} />
+        <View style={{ gap: space.sm }}>
+          <Body muted>You&apos;re friends.</Body>
           {confirmUnfriend ? (
             <>
               <Body muted>Unfriend {name}? They won&apos;t be told, and you can ask again later.</Body>
-              <Button label="Unfriend" variant="danger" onPress={() => remove.mutate()} busy={remove.isPending} />
-              <Button label="Stay friends" variant="secondary" onPress={() => setConfirmUnfriend(false)} />
+              <Pair
+                first={<Button label="Unfriend" variant="danger" onPress={() => remove.mutate()} busy={remove.isPending} />}
+                second={<Button label="Stay friends" variant="secondary" onPress={() => setConfirmUnfriend(false)} />}
+              />
             </>
           ) : (
-            <Button label="Unfriend" variant="secondary" onPress={() => setConfirmUnfriend(true)} />
+            <Pair
+              first={<Button label={`Message ${name}`} onPress={() => message.mutate()} busy={message.isPending} />}
+              second={<Button label="Unfriend" variant="secondary" onPress={() => setConfirmUnfriend(true)} />}
+            />
           )}
-        </Card>
+        </View>
       ) : state === 'received' ? (
-        <Card>
+        <View style={{ gap: space.sm }}>
           <Body>{name} wants to be friends.</Body>
-          <Button label="Accept" onPress={() => accept.mutate()} busy={accept.isPending} />
-          <Button label="Decline" variant="secondary" onPress={() => remove.mutate()} disabled={accept.isPending} />
-        </Card>
+          <Pair
+            first={<Button label="Accept" onPress={() => accept.mutate()} busy={accept.isPending} />}
+            second={<Button label="Decline" variant="secondary" onPress={() => remove.mutate()} disabled={accept.isPending} />}
+          />
+        </View>
       ) : state === 'sent' ? (
-        <Card>
-          <Body>Friend request sent. It&apos;s up to them now.</Body>
+        <View style={{ gap: space.sm }}>
+          <Body muted>Friend request sent. It&apos;s up to them now.</Body>
           <Button label="Cancel request" variant="secondary" onPress={() => remove.mutate()} busy={remove.isPending} />
-        </Card>
+        </View>
       ) : (
         <Button label="Add friend" onPress={() => add.mutate()} busy={add.isPending} />
       )}
 
-      {/* What they chose to share. Nothing else of theirs is anybody's. */}
       {state !== 'blocked' ? (
-        <View style={{ gap: space.sm }}>
-          <SectionRow title="Shared sets" />
-          {sets.isLoading ? <LoadingState /> : null}
-          {sets.data && theirSets.length === 0 ? (
-            <EmptyState title={state === 'self' ? "You haven't shared a set yet" : 'Nothing shared yet'} />
-          ) : null}
-          {theirSets.map((set) => (
-            <ListRow
-              key={set.id}
-              title={set.title}
-              meta={`${set.cards} card${set.cards === 1 ? '' : 's'} · ${starLabel(set.stars)}`}
-              onPress={() => router.push(`/set/${set.id}`)}
-            />
-          ))}
-        </View>
-      ) : null}
-
-      {/* Posts, after the sets: a page is who somebody is before what they said. */}
-      {state !== 'blocked' && !(posts.error instanceof PostsUnavailableError) ? (
-        <View style={{ gap: space.sm }}>
-          <SectionRow title="Posts" />
-          {posts.isLoading ? <LoadingState /> : null}
-          {posts.data && theirPosts.length === 0 ? (
-            <EmptyState
-              title={state === 'self' ? "You haven't posted yet" : 'No posts to show'}
-              detail={
-                state === 'self' || state === 'friends'
-                  ? undefined
-                  : 'Posts for friends only show here once you are friends.'
-              }
-            />
-          ) : null}
-          <PostList
-            posts={theirPosts}
-            myId={me}
-            onChanged={() => queryClient.invalidateQueries({ queryKey: ['person-posts', personId] })}
-          />
-          {posts.hasNextPage ? (
-            <Button
-              label="Show older posts"
-              variant="secondary"
-              onPress={() => void posts.fetchNextPage()}
-              busy={posts.isFetchingNextPage}
-            />
-          ) : null}
-        </View>
+        <>
+          <UnderlineTabs value={tab} options={PERSON_TABS} onChange={setTab} />
+          {tab === 'posts' ? (
+            posts.error instanceof PostsUnavailableError ? null : (
+              <View style={{ gap: space.md }}>
+                {posts.isLoading ? <LoadingState /> : null}
+                {posts.data && theirPosts.length === 0 ? (
+                  <EmptyState
+                    title={state === 'self' ? "You haven't posted yet" : 'No posts to show'}
+                    detail={
+                      state === 'self' || state === 'friends'
+                        ? undefined
+                        : 'Posts for friends only show here once you are friends.'
+                    }
+                  />
+                ) : null}
+                <PostGrid posts={theirPosts} />
+                {posts.hasNextPage ? (
+                  <Button
+                    label="Show older posts"
+                    variant="secondary"
+                    onPress={() => void posts.fetchNextPage()}
+                    busy={posts.isFetchingNextPage}
+                  />
+                ) : null}
+              </View>
+            )
+          ) : (
+            /* What they chose to share. Nothing else of theirs is anybody's. */
+            <View style={{ gap: space.sm }}>
+              {sets.isLoading ? <LoadingState /> : null}
+              {sets.data && theirSets.length === 0 ? (
+                <EmptyState title={state === 'self' ? "You haven't shared a set yet" : 'Nothing shared yet'} />
+              ) : null}
+              <Rows>
+                {theirSets.map((set) => (
+                  <SetRow key={set.id} title={set.title} cards={set.cards} stars={set.stars} onPress={() => router.push(`/set/${set.id}`)} />
+                ))}
+              </Rows>
+            </View>
+          )}
+        </>
       ) : null}
 
       {reporting ? (

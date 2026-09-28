@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   agoShort,
@@ -288,8 +288,14 @@ describe('on screen', () => {
     expect(readFileSync('app/_layout.tsx', 'utf8')).toContain("path[0] !== 'post'");
   });
 
-  it('Saved is registered with a back control, and reads posts through the feed’s rule', () => {
-    expect(readFileSync('app/_layout.tsx', 'utf8')).toContain('<Stack.Screen name="saved" options={{ title: \'\', ...backable }} />');
+  it('Saved is a tab on Profile (§59), and reads posts through the feed’s rule', () => {
+    const profile = readFileSync('app/(tabs)/profile.tsx', 'utf8');
+    expect(profile).toContain("{ key: 'saved' as const, label: 'Saved' }");
+    expect(profile).toContain('<SavedPosts myId={userId} />');
+    expect(readFileSync('src/ui/saved.tsx', 'utf8')).toContain('Only you can see what you save.');
+    // The screen it was is gone, and so is its registration.
+    expect(existsSync('app/saved.tsx')).toBe(false);
+    expect(readFileSync('app/_layout.tsx', 'utf8')).not.toContain('name="saved"');
     const data = readFileSync('src/data/posts.ts', 'utf8');
     const body = data.slice(data.indexOf('export async function listSaved'));
     expect(body).toContain(".from('feed_posts').select(POST_COLUMNS).in('id', order)");

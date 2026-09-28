@@ -12,7 +12,7 @@ import { PostList } from '../../src/ui/post';
 import { Icon } from '../../src/ui/glyphs';
 import { PostsUnavailableError, listFeed } from '../../src/data/posts';
 import { joinPages, nextCursor, type FeedCursor } from '../../src/core/posts';
-import { CONTENT_MAX_WIDTH, INPUT_FONT_SIZE, radius, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
+import { CONTENT_MAX_WIDTH, INPUT_FONT_SIZE, NO_FOCUS_RING, radius, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
 import {
   authorName,
   browseOrder,
@@ -84,6 +84,7 @@ const SET_ORDERS = [
 
 export default function Community() {
   const t = useTheme();
+  const router = useRouter();
   const [pane, setPane] = useState<Pane>('feed');
   const [composing, setComposing] = useState(false);
   const signedIn = useSessionStore((s) => !!s.session);
@@ -110,11 +111,12 @@ export default function Community() {
           <TopBar
             title="Community"
             brand
-            actions={
+            actions={[
+              { icon: 'search', label: 'Search', onPress: () => router.push('/search') },
               pane === 'chat'
-                ? [{ icon: 'compose', label: 'New message', onPress: () => setComposing(true) }]
-                : [{ icon: 'send', label: 'Messages', badge: badgeLabel(unread), onPress: () => setPane('chat') }]
-            }
+                ? { icon: 'compose', label: 'New message', onPress: () => setComposing(true) }
+                : { icon: 'send', label: 'Messages', badge: badgeLabel(unread), onPress: () => setPane('chat') },
+            ]}
           />
           <UnderlineTabs value={pane} options={PANES} onChange={setPane} />
         </View>
@@ -521,6 +523,7 @@ function InboxPane({ composing, onCloseCompose }: { composing: boolean; onCloseC
   const router = useRouter();
   const myId = useSessionStore((s) => s.session?.user.id ?? '');
   const [query, setQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
 
   const inbox = useQuery({
     queryKey: ['conversations'],
@@ -566,7 +569,7 @@ function InboxPane({ composing, onCloseCompose }: { composing: boolean; onCloseC
           borderRadius: radius.pill,
           backgroundColor: t.card,
           borderWidth: 1,
-          borderColor: t.border,
+          borderColor: searchFocused ? t.accent : t.border,
         }}
       >
         <Icon name="search" color={t.textMuted} size={20} />
@@ -578,7 +581,10 @@ function InboxPane({ composing, onCloseCompose }: { composing: boolean; onCloseC
           accessibilityLabel="Search messages"
           autoCapitalize="none"
           autoCorrect={false}
-          style={{ flex: 1, minHeight: TOUCH_TARGET, color: t.text, fontSize: INPUT_FONT_SIZE }}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
+          // The pill's edge turns accent as the focus mark.
+          style={[{ flex: 1, minHeight: TOUCH_TARGET, color: t.text, fontSize: INPUT_FONT_SIZE }, NO_FOCUS_RING]}
         />
         {query ? (
           <Pressable accessibilityRole="button" accessibilityLabel="Clear the search" onPress={() => setQuery('')} hitSlop={10}>
@@ -661,16 +667,19 @@ function InboxPane({ composing, onCloseCompose }: { composing: boolean; onCloseC
           {friends.data && splitFriends(friends.data).friends.length === 0 ? (
             <Body muted>You can message friends. Add some from your Profile first.</Body>
           ) : null}
-          {splitFriends(friends.data ?? []).friends.map((f) => (
-            <PersonRow
-              key={f.id}
-              id={f.person_id}
-              name={f.name}
-              username={f.username}
-              avatar={f.avatar}
-              onPress={() => start.mutate(f.person_id)}
-            />
-          ))}
+          <Rows card>
+            {splitFriends(friends.data ?? []).friends.map((f) => (
+              <PersonRow
+                key={f.id}
+                id={f.person_id}
+                name={f.name}
+                username={f.username}
+                avatar={f.avatar}
+                inset
+                onPress={() => start.mutate(f.person_id)}
+              />
+            ))}
+          </Rows>
         </Sheet>
       ) : null}
     </Pane>

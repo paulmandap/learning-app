@@ -1,4 +1,4 @@
-import { useColorScheme } from 'react-native';
+import { Platform, useColorScheme, type TextStyle } from 'react-native';
 import { DARK, LIGHT, type ChartPalette, type Theme } from '../core/palette';
 
 export type { ChartPalette, Theme };
@@ -116,6 +116,15 @@ export const TOUCH_TARGET = 44;
  * source instead, which is the only check that would have caught it.
  */
 export const INPUT_FONT_SIZE = 16;
+
+/**
+ * The browser's own focus ring, off — for a text box inside a pill whose edge
+ * already shows focus (search, NOTES §59). Chrome drew a second box inside the
+ * pill. `outlineWidth: 0` does not do it: Chrome's ring is `outline-style:
+ * auto`, which ignores the width. React Native's types allow no `none` here,
+ * so the cast; it is only ever a style on the web.
+ */
+export const NO_FOCUS_RING = (Platform.OS === 'web' ? { outlineStyle: 'none' } : {}) as unknown as TextStyle;
 
 /** Swipe feedback colours, independent of light/dark palette roles. */
 export const swipeTint = {

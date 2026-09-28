@@ -73,7 +73,7 @@ export const PRIVACY_POLICY: LegalDocument = {
         'Information you give us:',
         [
           'Your email address, which is how you sign in. We send a 6-digit code to it; there is no password.',
-          'The name you want to be called, your profile picture (a photo you upload, or one of the built-in faces), and the study pet you choose.',
+          'The name you want to be called, your profile picture (a photo you upload, or one of the built-in faces), a short bio if you write one, and the study pet you choose.',
           'Your Gemini key, which Nomi needs to make cards and to chat.',
           "If you turn on reminders: the times you want them, and an address for your device from Apple's or Google's notification service, so a reminder can reach it.",
         ],
@@ -162,7 +162,7 @@ export const PRIVACY_POLICY: LegalDocument = {
           'A set you share. Sets are private until you share one. When you do, anyone signed in to Nomi can find it, study its cards, and star it — and they see the questions, the answers, and the bit of your notes each card came from. They do not see the files you uploaded, your notes, your other sets, or how you are doing. You can stop sharing at any time, and it disappears from the list.',
           "What you say in the chat. Nomi has one room that everyone signed in shares. Anything you send there can be read by everyone. You can delete your own messages, but somebody may have read one already, so please don't put anything private in it.",
           'Your name and picture. Beside a set you share and beside anything you say in the chat, other people signed in to Nomi see the name you chose and the picture you are using — a drawn face, or a photo if you uploaded one. Only the picture you are using now: Nomi keeps your last few uploads so you can switch back to them, and the ones you are not using stay private. Nobody outside Nomi can see any of them, and your pictures are never on the open internet.',
-          'Your profile. Anyone signed in to Nomi can find you by your name or your username, and open your profile, which shows your name, your username, your picture, the sets you share, and the posts they are allowed to see. It does not show your friends, your streak or how you are doing — your streak is seen only by your friends, on their leaderboard (below), and by whoever can see a post you share it in.',
+          'Your profile. Anyone signed in to Nomi can find you by your name or your username, and open your profile, which shows your name, your username, your picture, your bio if you write one, the sets you share, and the posts they are allowed to see. It does not show your friends, your streak or how you are doing — your streak is seen only by your friends, on their leaderboard (below), and by whoever can see a post you share it in.',
           "Friends. When you ask someone to be friends, they see your request, and when they say yes, you are both each other's friend. Your friends list is yours: nobody else can see who your friends are. Declining a request or unfriending someone doesn't tell them.",
           'Your posts. A post is seen by your friends, or by everyone signed in to Nomi if you choose that for it — each post says which, and you can change it. Whoever can see a post can see its comments, the replies to them and its reactions, and who left them, and how many hearts each comment has — but not who gave them. If a comment is deleted, the replies to it go with it. The posts you save are private: nobody else, including whoever wrote them, can see that you saved one. A photo in a post is shown only to the people who can see that post, and is never on the open internet. If someone stops being able to see a post — because you unfriend or block them, make it friends-only, or delete it — a photo they already had open can stay reachable to them for a short while afterwards. You can delete your posts, and remove comments from them.',
           "Messages to friends. A message you send a friend is seen by the two of you and nobody else in Nomi. They can see when you've read their messages (\"Seen\"), and you can see when they've read yours. If you stop being friends, you can both still read the conversation, and neither of you can send more. Messages aren't end-to-end encrypted: like everything else in Nomi, they're kept by our database provider, and the person who runs Nomi can technically reach them — only for the reasons in \"How we protect it\". If your friend reports a message, a copy of it goes with the report.",
@@ -171,9 +171,9 @@ export const PRIVACY_POLICY: LegalDocument = {
           "Your streak, to your friends. Your friends see how many days in a row you have studied, and your best ever, on a leaderboard on their Progress. Only friends — not everyone, and nobody across a block. You can turn this off in Settings (\"Show my streak to friends\"), and then you are on nobody's leaderboard but your own.",
         ],
         "Blocking. If you block someone, they can't find you, see your profile, your posts or your shared sets, see what you say in the chat or under a post, send you a friend request, or message you — and you stop seeing theirs, and your conversation is hidden for both of you. In a group you are both in, you stop seeing each other's messages. If you were friends, you aren't any more. They aren't told, but they may notice. You can unblock them from your Profile.",
-        "Reporting. You can report a person, a message (in the chat, to you, or in a group you are in), a shared set, a post or a comment. Reports go to the person who runs Nomi, who reads them. A copy of what was reported — the words of a message, post or comment, the set's name, or the person's name and username — is kept with the report, so it can still be checked if it is deleted afterwards. The person you report is not told who reported them.",
+        "Reporting. You can report a person, a message (in the chat, to you, or in a group you are in), a shared set, a post or a comment. Reports go to the person who runs Nomi, who reads them. A copy of what was reported — the words of a message, post or comment, the set's name, or the person's name, username and bio — is kept with the report, so it can still be checked if it is deleted afterwards. The person you report is not told who reported them.",
         'Stars and hearts on comments are counted but not named: people can see how many a set or a comment has, and nobody can see who gave one.',
-        'We can remove a shared set, a post, a comment or a message that breaks our Terms of Use or the community rules, warn the account, and stop it from sharing, posting, messaging or adding friends.',
+        'We can remove a shared set, a post, a comment or a message, or clear a bio, that breaks our Terms of Use or the community rules, warn the account, and stop it from sharing, posting, messaging or adding friends.',
       ],
     },
     {
@@ -187,7 +187,7 @@ export const PRIVACY_POLICY: LegalDocument = {
       body: [
         [
           'Your profile, study material, answers, notes and conversations are kept until you delete them or use Delete my data.',
-          "Delete my data removes your sets, uploaded files, cards, answers, review schedule, the days you studied, the daily count of Nomi's replies, your notes, your conversations with Nomi, your reminders, your profile pictures, the stars you gave, the messages you sent in the chat, your friends and friend requests, your posts and their photos, the comments, replies and reactions you left, the hearts you gave comments, the posts you saved, and the messages you sent to friends and your reactions to theirs, the messages you sent in groups and your reactions there, and it takes you out of every group and stops sharing every set you shared. It clears your name, your username and your Gemini key. It does not remove your account itself — your email address and sign-in record. To remove those too, email us.",
+          "Delete my data removes your sets, uploaded files, cards, answers, review schedule, the days you studied, the daily count of Nomi's replies, your notes, your conversations with Nomi, your reminders, your profile pictures, the stars you gave, the messages you sent in the chat, your friends and friend requests, your posts and their photos, the comments, replies and reactions you left, the hearts you gave comments, the posts you saved, and the messages you sent to friends and your reactions to theirs, the messages you sent in groups and your reactions there, and it takes you out of every group and stops sharing every set you shared. It clears your name, your username, your bio and your Gemini key. It does not remove your account itself — your email address and sign-in record. To remove those too, email us.",
           'Some things are kept on purpose. The people you blocked stay blocked, so they still cannot reach you if you come back; you can unblock them from your Profile. Reports you made are kept until we have dealt with them, so deleting your data cannot remove the evidence of what happened to you — or, if you were reported, of what you did. And any warning or restriction on your account stays, so deleting your data is not a way around one.',
           `Backups are encrypted, and each one is kept for ${BACKUP_DAYS} days, so something you delete can remain in a backup for up to ${BACKUP_DAYS} days before it is gone.`,
           "What Google receives through your key is kept according to Google's terms, and server logs according to our providers' own policies.",
@@ -216,7 +216,7 @@ export const PRIVACY_POLICY: LegalDocument = {
           'be paid damages if you are harmed by information about you that is wrong, unlawfully obtained or used without permission;',
           'file a complaint with the National Privacy Commission (privacy.gov.ph).',
         ],
-        `Much of this you can do yourself in Nomi: change your name and picture in Settings and your username on your Profile, edit or delete your notes and sets, remove your Gemini key, and use Delete my data. For anything else — a copy of your information, or deleting your account — email ${CONTACT_EMAIL}. We may need to confirm it is you, and we will reply within 30 days. If you live outside the Philippines, your local law may give you similar rights; contact us the same way.`,
+        `Much of this you can do yourself in Nomi: change your picture in Settings and your name, username and bio in Edit profile, edit or delete your notes and sets, remove your Gemini key, and use Delete my data. For anything else — a copy of your information, or deleting your account — email ${CONTACT_EMAIL}. We may need to confirm it is you, and we will reply within 30 days. If you live outside the Philippines, your local law may give you similar rights; contact us the same way.`,
       ],
     },
     {
@@ -305,7 +305,7 @@ export const TERMS_OF_USE: LegalDocument = {
           "Only post photos you have the right to share, and never a photo of someone who hasn't agreed to it. You keep ownership of what you post, and give the people who can see it permission to see it, and us permission to show it to them.",
           'You can block anyone, for any reason, and report a person, a message or a shared set that breaks these terms. Please only report things honestly — reporting someone to get back at them is itself misuse.',
         ],
-        'We can remove a shared set, a post, a comment or a message, take away a username, warn an account, or stop it from sharing, posting, messaging or making friends — for a while or for good — if it breaks these terms or the community rules — and we can do it without notice where something is harmful or unlawful.',
+        'We can remove a shared set, a post, a comment or a message, take away a username, clear a bio, warn an account, or stop it from sharing, posting, messaging or making friends — for a while or for good — if it breaks these terms or the community rules — and we can do it without notice where something is harmful or unlawful.',
       ],
     },
     {
@@ -315,7 +315,7 @@ export const TERMS_OF_USE: LegalDocument = {
         [
           'break any law, or use Nomi for anything harmful, fraudulent or abusive;',
           "upload material that infringes someone else's copyright or other rights, or that is illegal, hateful, sexually explicit or violent;",
-          'share a set, post, comment or send a message that harasses, bullies, threatens or impersonates anyone, or that is spam;',
+          'share a set, post, comment, write a bio or send a message that harasses, bullies, threatens or impersonates anyone, or that is spam;',
           'send friend requests to pester someone, or make another account to reach someone who blocked you;',
           "share other people's personal information, in a set or in the chat;",
           "try to reach another person's account or information, or get around Nomi's security or limits;",

@@ -8522,6 +8522,101 @@ cleared (*"done"*).
   "Message the group". Not yet deployed.
 
 
+## 59. Step four: Profile, a person's page, a bio, share profile, search (2026-09-28)
+
+The owner, after step three went live as `2c0a897` (production exactly HEAD):
+*"sure you can start it."* Profile, somebody's page and search rebuilt to the
+picture (`prompt-b.png`), and three of the extras from §56.2: a bio, Share
+profile, and search for sets and posts with recent searches. Migration 0033.
+
+### 59.1 Decisions made here, named to the owner
+
+- **The bio is one line of up to 150 characters** — spaces and line breaks run
+  together, as a caption. Anyone signed in sees it, on your Profile and your
+  page; never across a block; reportable, and the moderator can clear it.
+- **Writing a bio asks the rules first; clearing one never does.** A bio
+  reaches other people, so a trigger asks `assert_can_socialize()` — as 0030's
+  sharing guard does — and a restricted account can always take its bio down.
+- **Your @username shows twice on your own Profile** — in the top bar and under
+  your name — because the picture has it twice.
+- **Somebody else's page shows two numbers: posts and shared sets.** Never
+  friends or streak (the Privacy Policy, unchanged). Your own Profile shows
+  Friends · Posts · Streak, as in the picture; only you see it.
+- **Saved is a tab on Profile** (§57's promise); the `/saved` screen is gone.
+- **Picking a username the first time stays on Profile**; changing it later is
+  in Edit profile, with your name and bio. Your picture stays in Settings, with
+  a link to it from Edit profile.
+- **A shared profile link, `/u/<username>`, asks you to sign in** like every
+  page, then opens that person's page (or your own Profile). A link to a
+  username that changed says so.
+- **Search finds only what the reader could already reach**: people through
+  `search_people`, sets through `public_sets`, posts through `feed_posts` —
+  nothing new in the database for it. Recent searches are kept on the phone,
+  per account, eight at most, never sent anywhere.
+
+### 59.2 Migration 0033 — additive, either order
+
+- `profiles.bio text check (bio is null or char_length(bio) <= 150)`, written
+  by the app as a plain update of your own row (the policy since 0002).
+- `profiles_bio_guard`, a `before insert or update of bio` trigger: a bio that
+  says something, and changed, asks the rules. Not when nobody is signed in —
+  the owner in the SQL editor, or `moderate_remove` clearing one. Its function
+  is revoked from everyone.
+- **`public_profiles` gains `bio` at the end with `create or replace`**, not a
+  drop: `search_people` reads that view. The block filter is 0026's, word for
+  word.
+- `report_content`: a person's copy gains their bio. `moderate_remove`: `person`
+  now clears the bio (their name and picture are still for a warning), and the
+  else-message is general. Both recreated from 0032's.
+- `tests/profile.test.ts` (32) holds `public_profiles` to 0026's columns plus
+  only `bio` and to 0026's rows exactly; `report_content` and `moderate_remove`
+  to 0032's plus only their change; the guard, the grants and the Privacy
+  Policy to the SQL. `destructiveDrops` finds nothing.
+
+### 59.3 On screen
+
+- **Profile:** the @username as its title with search and Settings beside it;
+  the picture (88), name, @username and bio; Friends · Posts · Streak (the
+  flame drawn in the streak's amber — filled, at that size, it read as a
+  thumb); Edit profile and Share profile side by side ("Link copied."); the
+  requests waiting as one line with their faces, opening a sheet to Accept or
+  Decline; then **Posts · Sets · Friends · Saved** — posts as a three-column
+  grid (a photo, a set's tile, a streak's pet, or the words), your shared sets
+  as rows, your friends with the requests you sent and the people you blocked
+  under them, and what you saved.
+- **A person's page:** the same header (`ProfileHeader`), Posts and Shared sets,
+  the buttons without a card around them — "Message Maria" and Unfriend side
+  by side for a friend — and Posts · Sets tabs.
+- **Search (`/search`):** a pill at the top with Cancel beside it; recent
+  searches as chips with Clear; People (with Add friend / Accept / Friends /
+  Requested), Sets and Posts. From the search icon on Profile and Community.
+- **Edit profile (`/edit-profile`):** Name, Username, Bio with a count; saves
+  only what changed, one after another, so a taken username does not lose the
+  bio typed beside it.
+- The moderator's report card says "Clear their bio" for a person.
+- **Chrome drew its own focus ring inside the search pills** (seen on the first
+  photograph). `outlineWidth: 0` does not remove it — Chrome's ring is
+  `outline-style: auto` — so `NO_FOCUS_RING` in `src/ui/theme.ts` sets
+  `outlineStyle: 'none'` on the web, for a box whose pill already shows focus.
+  Messages' search pill now turns accent while focused.
+- Privacy Policy and Terms (still September 28): a bio is collected if you
+  write one, shown on your profile, copied into a report, clearable by the
+  moderator, and cleared by Delete my data; Edit profile named.
+
+### 59.4 Measured, before 0033
+
+- typecheck clean with and without `.expo/` (the dev server once, for the new
+  routes) · **1557 tests**, 3 skipped · built and booted.
+- `friends-probe` **22/22** (now: the request line and its sheet, search from
+  Profile's top bar, Accept in the sheet, the Friends tab, unblocking there;
+  its bio step says "not present" until 0033), `posts-probe` **14/14** (Saved
+  through Profile's tab), `messages-probe` **8/8**, `groups-probe` **7/7**,
+  `community-probe` **11/11**, `scroll-probe` **10/10** — all against the
+  database without 0033.
+- `isolation-test.ts` **212/212**; `checkBio` (7 checks) says "not present"
+  until 0033.
+
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)

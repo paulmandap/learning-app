@@ -9,6 +9,7 @@ import {
   type ReportKind,
   type ReportReason,
 } from '../core/social';
+import { BIO_MAX, validateBio } from '../core/profile';
 
 /**
  * Usernames, friends, blocking and reporting (NOTES §51, migration 0026).
@@ -65,6 +66,8 @@ export interface Person {
   display_name: string | null;
   username: string | null;
   avatar: string | null;
+  /** Since 0033 (NOTES §59). Null when there is none, or before the migration. */
+  bio?: string | null;
 }
 
 // -------------------------------------------------------------- usernames --
@@ -83,6 +86,51 @@ export async function fetchMyUsername(db: Db = supabase): Promise<string | null>
   if (unavailable(error)) throw new SocialUnavailableError();
   if (error) throw new Error(error.message);
   return ((data as { username?: string | null } | null)?.username ?? null) || null;
+}
+
+/** Bios arrive with 0033 (NOTES §59). */
+export class BiosUnavailableError extends Error {
+  constructor() {
+    super("Bios aren't switched on yet.");
+    this.name = 'BiosUnavailableError';
+  }
+}
+
+/** My own bio, or null. Throws BiosUnavailableError before 0033. */
+export async function fetchMyBio(db: Db = supabase): Promise<string | null> {
+  const { data, error } = await db.from('profiles').select('bio').maybeSingle();
+  if (isMissingColumn(error)) throw new BiosUnavailableError();
+  if (error) throw new Error(error.message);
+  return ((data as { bio?: string | null } | null)?.bio ?? null) || null;
+}
+
+/**
+ * Write my bio, or clear it. The database checks the length again and — for a
+ * bio that says something — asks the community rules first (0033's trigger),
+ * so a refusal opens the rules sheet like any other social act.
+ */
+export async function saveBio(raw: string, db: Db = supabase): Promise<void> {
+  const check = validateBio(raw);
+  if (!check.ok) throw new Error(check.reason);
+  const id = await currentUserId(db);
+  const { error } = await db.from('profiles').update({ bio: check.bio }).eq('id', id);
+  await throwIfGated(error, db);
+  if (isMissingColumn(error)) throw new BiosUnavailableError();
+  if (error?.code === '23514') throw new Error(`Keep your bio under ${BIO_MAX} characters.`);
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Who has this username — for a shared profile link, /u/<username>. Null for
+ * nobody, and for somebody across a block: the same answer, as for their page.
+ */
+export async function personByUsername(raw: string, db: Db = supabase): Promise<string | null> {
+  const username = raw.trim().replace(/^@+/, '').toLowerCase();
+  if (!username) return null;
+  const { data, error } = await db.from('public_profiles').select('id').eq('username', username).maybeSingle();
+  if (unavailable(error)) return null;
+  if (error) throw new Error(error.message);
+  return ((data as { id?: string } | null)?.id ?? null) || null;
 }
 
 /**
@@ -139,11 +187,11 @@ export async function getPerson(
   id: string,
   db: Db = supabase,
 ): Promise<(Person & { blocked: boolean }) | null> {
-  const { data, error } = await db
-    .from('public_profiles')
-    .select('id, display_name, username, avatar')
-    .eq('id', id)
-    .maybeSingle();
+  const ask = (columns: string) => db.from('public_profiles').select(columns).eq('id', id).maybeSingle();
+  let { data, error } = await ask('id, display_name, username, avatar, bio');
+
+  // Before 0033 there is no `bio` on the view (NOTES §59): the page as it was.
+  if (isMissingColumn(error)) ({ data, error } = await ask('id, display_name, username, avatar'));
 
   // Before 0026 there is no `username` on the view. The page still works as a
   // page — a name and a picture — it just cannot offer to be friends.
@@ -153,7 +201,7 @@ export async function getPerson(
     return older.data ? { ...(older.data as Omit<Person, 'username'>), username: null, blocked: false } : null;
   }
   if (error) throw new Error(error.message);
-  if (data) return { ...(data as Person), blocked: false };
+  if (data) return { ...(data as unknown as Person), blocked: false };
 
   const mine = await db
     .from('my_blocks')
@@ -310,4 +358,9 @@ export async function removeMySocialData(db: Db = supabase): Promise<void> {
 
   const cleared = await db.from('profiles').update({ username: null }).eq('id', me);
   if (cleared.error && !unavailable(cleared.error)) throw new Error(cleared.error.message);
+
+  // The bio (0033, NOTES §59) — its own update, so a database without the
+  // column still has the username cleared above.
+  const bio = await db.from('profiles').update({ bio: null }).eq('id', me);
+  if (bio.error && !unavailable(bio.error)) throw new Error(bio.error.message);
 }

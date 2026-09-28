@@ -64,6 +64,8 @@ describe('what counts as a dangerous migration', () => {
     // 0032 recreates two views and two functions, and widens reports_kind_check
     // by name (NOTES §58).
     expect(destructiveDrops(sql('0032_message_replies_and_group_chats.sql'))).toEqual([]);
+    // 0033 replaces public_profiles in place and its bio trigger by name (NOTES §59).
+    expect(destructiveDrops(sql('0033_profile_bio.sql'))).toEqual([]);
     expect(
       destructiveDrops('alter table t drop constraint if exists c1;\nalter table t add constraint c1 check (x > 0);'),
     ).toEqual([]);

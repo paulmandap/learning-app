@@ -43,7 +43,7 @@ import { throwIfGated } from './moderation';
  */
 
 /** Columns of `public_sets`, in the order the view declares them. */
-const PUBLIC_SET_COLUMNS =
+export const PUBLIC_SET_COLUMNS =
   'id, owner_id, owner_name, owner_avatar, title, published_at, updated_at, stars, cards';
 
 /** Columns of `global_chat`. `edited_at` arrives with 0025 (NOTES §48). */

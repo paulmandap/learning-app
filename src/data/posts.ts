@@ -47,7 +47,7 @@ async function currentUserId(db: Db = supabase): Promise<string> {
   return id;
 }
 
-const POST_COLUMNS =
+export const POST_COLUMNS =
   'id, author_id, author_name, author_username, author_avatar, body, audience, image_path, image_width, image_height, set_id, set_title, set_cards, streak_days, pet, created_at, edited_at, comments';
 
 /**
@@ -82,6 +82,21 @@ export async function listFeed(
   if (unavailable(error)) throw new PostsUnavailableError();
   if (error) throw new Error(error.message);
   return (data ?? []) as unknown as FeedPost[];
+}
+
+/**
+ * How many posts somebody has that the reader may see — a number on a profile
+ * (NOTES §59). Counted by the database through `feed_posts`, so it is the
+ * same rule as the posts listed under it; your own count is all of yours.
+ */
+export async function countPosts(authorId: string, db: Db = supabase): Promise<number> {
+  const { count, error } = await db
+    .from('feed_posts')
+    .select('id', { count: 'exact', head: true })
+    .eq('author_id', authorId);
+  if (unavailable(error)) return 0;
+  if (error) throw new Error(error.message);
+  return count ?? 0;
 }
 
 /** One post — or null for one that is gone or that the caller may not see, alike. */

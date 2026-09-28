@@ -179,6 +179,8 @@ function RootNavigator() {
     path[0] !== 'messages' &&
     // And the groups (NOTES §58): the same room, the same pinned Send.
     path[0] !== 'groups' &&
+    // Search (NOTES §59): a focused screen of its own, one thing at a time.
+    path[0] !== 'search' &&
     // A post's page, and writing one (NOTES §57): the comment box is pinned
     // to the bottom now, as in the owner's picture, and so is Send.
     path[0] !== 'post' &&
@@ -255,8 +257,12 @@ function RootNavigator() {
             not places: pushed with their own back control. */}
         <Stack.Screen name="post/new" options={{ title: '', ...backable }} />
         <Stack.Screen name="post/[id]" options={{ title: '', ...backable }} />
-        {/* The posts you saved (NOTES §57), from Profile's top bar. */}
-        <Stack.Screen name="saved" options={{ title: '', ...backable }} />
+        {/* Search (NOTES §59): its own box and Cancel at the top, so no header. */}
+        <Stack.Screen name="search" options={{ headerShown: false }} />
+        {/* Your name, username and bio (§59), from Profile's Edit profile. */}
+        <Stack.Screen name="edit-profile" options={{ title: '', ...backable }} />
+        {/* A shared profile link, /u/<username> (§59): finds the person, opens their page. */}
+        <Stack.Screen name="u/[username]" options={{ title: '', ...backable }} />
         {/* Every icon, for photographing while the redesign is built (§56.2). */}
         <Stack.Screen name="icons" options={{ title: '', ...backable }} />
         {/* The Everyone room and a conversation with a friend (NOTES §53):

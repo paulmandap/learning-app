@@ -1011,6 +1011,9 @@ async function main() {
     // ---- the community rules, and who may moderate (0030, NOTES §55) ----
     await checkModeration(A, B);
 
+    // ---- a bio (0033, NOTES §59) ----
+    await checkBio(A, B);
+
     // ---- unsharing is live ----
     // The filter is one line in each view. Turning it back off must actually
     // take the set away, or "stop sharing" is a button that does nothing.
@@ -2352,6 +2355,84 @@ async function checkModeration(
   const standing = await A.client.from('restrictions').select('user_id').eq('user_id', A.userId);
   if ((standing.data ?? []).length > 0) fail('restrictions (A)', 'A ended up restricted by a probe');
   else ok('restrictions (A)', 'nothing written');
+}
+
+/**
+ * A bio (0033, NOTES §59), both directions.
+ *
+ * Written by its owner as a plain update of their own profile row; seen by
+ * anyone signed in through `public_profiles`, never across a block; checked
+ * for length by the database; and, when it says something, refused until the
+ * rules are agreed to — the trigger's job, since there is no function in the
+ * way to ask. A report on a person keeps a copy of it.
+ */
+const BIO_PROBE = 'isolation probe bio';
+
+async function checkBio(
+  A: { client: SupabaseClient; userId: string },
+  B: { client: SupabaseClient; userId: string },
+) {
+  const gate = await A.client.from('public_profiles').select('bio').limit(1);
+  if (gate.error && gate.error.code === '42703') {
+    console.log('\n  ----  bio — not present (migration 0033), not checked');
+    return;
+  }
+  console.log('\nA bio (0033):');
+
+  await A.client.from('blocks').delete().eq('blocker_id', A.userId);
+  await B.client.from('blocks').delete().eq('blocker_id', B.userId);
+
+  // ---- written by its owner, read by anyone signed in ----
+  const wrote = await B.client.from('profiles').update({ bio: BIO_PROBE }).eq('id', B.userId);
+  const seen = await A.client.from('public_profiles').select('bio').eq('id', B.userId).maybeSingle();
+  if (!wrote.error && (seen.data as { bio?: string } | null)?.bio === BIO_PROBE) ok('bio', 'B wrote one; A reads it');
+  else fail('bio', wrote.error?.message ?? `A sees ${JSON.stringify(seen.data)}`);
+
+  const tooLong = await B.client.from('profiles').update({ bio: 'x'.repeat(151) }).eq('id', B.userId);
+  if (tooLong.error?.code === '23514') ok('bio (too long)', 'refused by the database past 150 characters');
+  else fail('bio (too long)', `expected 23514, got ${tooLong.error?.code ?? 'a saved bio'}`);
+
+  await A.client.from('profiles').update({ bio: 'written by A' }).eq('id', B.userId);
+  const untouched = await B.client.from('profiles').select('bio').eq('id', B.userId).maybeSingle();
+  if ((untouched.data as { bio?: string } | null)?.bio === BIO_PROBE) ok('bio (somebody else’s)', 'A cannot write B’s bio');
+  else fail('bio (somebody else’s)', `B's bio is now ${JSON.stringify(untouched.data)}`);
+
+  // ---- a block hides it, both ways ----
+  await A.client.rpc('block_person', { p_other: B.userId });
+  const aBlocked = await A.client.from('public_profiles').select('bio').eq('id', B.userId);
+  const bBlocked = await B.client.from('public_profiles').select('bio').eq('id', A.userId);
+  if ((aBlocked.data ?? []).length === 0 && (bBlocked.data ?? []).length === 0) ok('bio (block)', 'neither sees the other’s page');
+  else fail('bio (block)', 'a bio is visible across a block');
+  await A.client.from('blocks').delete().eq('blocker_id', A.userId);
+
+  // ---- a report on a person keeps a copy of it ----
+  const report = await A.client.rpc('report_content', {
+    p_kind: 'person',
+    p_target: B.userId,
+    p_reason: 'other',
+    p_details: PROBE_REPORT,
+  });
+  if (report.error) fail('report (bio)', report.error.message);
+  else {
+    const mine = await A.client.from('reports').select('snapshot').eq('id', report.data as string).maybeSingle();
+    const snapshot = (mine.data as { snapshot?: string } | null)?.snapshot ?? '';
+    if (snapshot.includes(BIO_PROBE)) ok('report (bio)', 'the copy kept with the report includes the bio');
+    else fail('report (bio)', `the copy is ${JSON.stringify(snapshot)}`);
+  }
+
+  // ---- the rules, first; taking one down never waits for them ----
+  await B.client.from('profiles').update({ rules_accepted_at: null }).eq('id', B.userId);
+  const gated = await B.client.from('profiles').update({ bio: `${BIO_PROBE} again` }).eq('id', B.userId);
+  if (gated.error?.code === 'RULES') ok('bio (rules)', 'refused until the rules are agreed to');
+  else fail('bio (rules)', `expected RULES, got ${gated.error?.code ?? 'a saved bio'}`);
+  const cleared = await B.client.from('profiles').update({ bio: null }).eq('id', B.userId);
+  if (!cleared.error) ok('bio (clearing)', 'taking it down works without the rules');
+  else fail('bio (clearing)', cleared.error.message);
+  const agreed = await B.client.rpc('accept_community_rules');
+  if (agreed.error) fail('rules (restored)', agreed.error.message);
+
+  // ---- tidy up ----
+  await B.client.from('profiles').update({ bio: null }).eq('id', B.userId);
 }
 
 main().catch((err) => {

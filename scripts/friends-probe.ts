@@ -44,6 +44,7 @@ if (!url || !publishable || !creds.a.email || !creds.b.email) {
 const A_USERNAME = 'isoprobe_a';
 const B_USERNAME = 'isoprobe_b';
 const B_NAME = 'Probe B';
+const A_BIO = 'Biology, mostly. Probe bio.';
 const PROBE_REPORT = 'friends probe - not a real report';
 
 const outDir = (() => {
@@ -148,6 +149,7 @@ async function main() {
   };
   await clean();
   await A.client.from('profiles').update({ display_name: 'Probe A', username: null }).eq('id', A.userId);
+  await A.client.from('profiles').update({ bio: null }).eq('id', A.userId);
   await B.client.from('profiles').update({ display_name: B_NAME, username: B_USERNAME }).eq('id', B.userId);
 
   const page = await openPage({ width: 393, height: 852, dark: true });
@@ -191,20 +193,41 @@ async function main() {
     if ((await page.text()).includes('Pick a username')) fail('username folds away', 'the editor is still open after saving');
     else ok('username folds away', 'saved, and the editor gives the screen back');
 
+    // --- a bio, from Edit profile (0033, NOTES §59) -------------------------
+    const bioGate = await A.client.from('public_profiles').select('bio').limit(1);
+    if (bioGate.error?.code === '42703') {
+      console.log('  ----  bio — not present (migration 0033), not checked');
+    } else {
+      await page.click('Edit profile');
+      await page.waitFor(`location.pathname === '/edit-profile' ? 'y' : ''`, 'Edit profile to open');
+      await page.waitFor(`document.querySelector('input[placeholder^="A line about you"]') ? 'y' : ''`, 'the bio box');
+      await typeInto(page, "A line about you — what you study, what you're working towards", A_BIO);
+      await page.click('Save');
+      await showing(page, 'Saved.');
+      const bio = await B.client.from('public_profiles').select('bio').eq('id', A.userId).maybeSingle();
+      if ((bio.data as { bio?: string } | null)?.bio === A_BIO) ok('bio', 'saved from Edit profile, and B can read it');
+      else fail('bio', `the screen said Saved and B reads ${JSON.stringify(bio.data)}`);
+      await page.goto('/profile');
+      await showing(page, A_BIO);
+      ok('bio (profile)', 'under the name on Profile');
+      await shot(page, '01b-profile-bio.png');
+    }
+
     // --- a request, waiting ---------------------------------------------
     const asked = await B.client.rpc('send_friend_request', { p_to: A.userId });
     if (asked.error) throw new Error(`B could not ask A: ${asked.error.message}`);
     await page.goto('/profile');
-    await showing(page, 'Friend requests (1)');
-    const waiting = await page.text();
-    if (waiting.includes(B_NAME) && waiting.includes(`@${B_USERNAME}`)) ok('request shown', "B's request waits on Profile");
-    else fail('request shown', 'Profile does not show who is asking');
+    // One line to open, with their face — the picture (NOTES §59).
+    await showing(page, '1 friend request');
     await shot(page, '02-profile-request.png');
 
-    // --- search ---------------------------------------------------------
-    await typeInto(page, 'A name or @username', `@${B_USERNAME.slice(0, 6)}`);
-    // Only the search result says "Wants to be friends" — the request row above
-    // leaves it to its heading — so this cannot pass before search answers.
+    // --- search, from the top of Profile -------------------------------------
+    await page.click('Search');
+    await page.waitFor(`location.pathname === '/search' ? 'y' : ''`, 'search to open');
+    await page.waitFor(`document.querySelector('input[placeholder="Search people, sets and posts"]') ? 'y' : ''`, 'the search box');
+    await typeInto(page, 'Search people, sets and posts', `@${B_USERNAME.slice(0, 6)}`);
+    // Only a search result says "Wants to be friends", so this cannot pass
+    // before search answers.
     await page.waitFor(
       `[...document.querySelectorAll('[role="button"]')].some((n) => (n.getAttribute('aria-label') ?? '').startsWith(${JSON.stringify(
         `${B_NAME}, @${B_USERNAME}. Wants to be friends`,
@@ -213,14 +236,31 @@ async function main() {
     );
     ok('search', 'B found by the start of their username, marked "Wants to be friends"');
     await shot(page, '03-search.png');
+    await page.click('Cancel');
+    await page.waitFor(`location.pathname === '/profile' ? 'y' : ''`, 'Cancel to go back to Profile');
 
-    // --- accept -----------------------------------------------------------
+    // --- accept, from the requests sheet ------------------------------------
+    await page.click(`1 friend request. ${B_NAME}`);
+    await showing(page, 'Friend requests');
+    const waiting = await page.evaluate<string>('document.body.innerText');
+    if (waiting.includes(B_NAME) && waiting.includes(`@${B_USERNAME}`)) ok('request shown', 'who is asking, one tap from Profile');
+    else fail('request shown', 'the requests sheet does not show who is asking');
+    await shot(page, '03b-requests-sheet.png');
     await page.click('Accept');
-    await showing(page, 'Friends (1)');
+    await showing(page, 'Nobody is waiting for an answer.');
     const accepted = await A.client.from('my_friends').select('status').eq('person_id', B.userId).maybeSingle();
     if ((accepted.data as { status?: string } | null)?.status === 'accepted') ok('accept', 'friends, on screen and in the database');
     else fail('accept', `the screen says friends and the database says ${JSON.stringify(accepted.data)}`);
-    await typeInto(page, 'A name or @username', '');
+    await page.click('Close');
+    await gone(page, 'Nobody is waiting for an answer.');
+    await page.click('Friends');
+    await page.waitFor(
+      `[...document.querySelectorAll('[role="button"]')].some((n) => (n.getAttribute('aria-label') ?? '') === ${JSON.stringify(
+        `${B_NAME}, @${B_USERNAME}`,
+      )}) ? 'y' : ''`,
+      'B under Friends',
+    );
+    ok('friends tab', 'B is listed under Friends on Profile');
     await shot(page, '04-profile-friends.png');
 
     // --- friends' streaks on Progress (NOTES §54) ------------------------------
@@ -298,8 +338,9 @@ async function main() {
     if ((bLooks.data ?? []).length === 0) ok('block (as B)', 'A is gone from B’s side');
     else fail('block (as B)', 'B can still see A');
 
-    // --- unblock, from Profile ------------------------------------------------
+    // --- unblock, from Profile's Friends tab ------------------------------------
     await page.goto('/profile');
+    await page.click('Friends');
     await showing(page, 'Blocked');
     await shot(page, '08-profile-blocked-list.png');
     await page.click('Unblock');
@@ -373,7 +414,7 @@ async function main() {
 
     // --- Settings, from the top right of Profile ---------------------------
     await page.goto('/profile');
-    await showing(page, 'Change username');
+    await showing(page, 'Edit profile');
     await page.click('Settings');
     await page.waitFor(`location.pathname === '/settings' ? 'y' : ''`, 'Settings to open');
     await showing(page, 'Your Gemini key');
@@ -389,6 +430,9 @@ async function main() {
     await page.close();
     await clean();
     await A.client.from('profiles').update({ username: null }).eq('id', A.userId);
+    // Its own update: before 0033 there is no column, and that must not stop
+    // the username above from being cleared.
+    await A.client.from('profiles').update({ bio: null }).eq('id', A.userId);
     await B.client
       .from('profiles')
       .update({ display_name: bBefore.display_name, username: bBefore.username })

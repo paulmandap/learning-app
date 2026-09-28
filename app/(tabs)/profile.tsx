@@ -1,68 +1,88 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Body,
   Button,
   Card,
   EmptyState,
   Field,
+  Label,
   LoadingState,
   Notice,
+  Rows,
   Screen,
-  SectionRow,
   TopBar,
 } from '../../src/ui/components';
-import { Avatar } from '../../src/ui/avatar';
+import { Avatar, PersonAvatar } from '../../src/ui/avatar';
 import { TextLink } from '../../src/ui/legal';
 import { PersonRow, RowButton } from '../../src/ui/people';
-import { space, type, useTheme } from '../../src/ui/theme';
+import { Sheet, SheetTitle } from '../../src/ui/sheet';
+import { UnderlineTabs } from '../../src/ui/segment';
+import { ProfileHeader, SetRow, StatsRow } from '../../src/ui/profile-header';
+import { PostGrid } from '../../src/ui/post-grid';
+import { SavedPosts } from '../../src/ui/saved';
+import { GLYPH, Icon } from '../../src/ui/glyphs';
+import { shareLink } from '../../src/ui/share';
+import { space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
 import { fetchProfile } from '../../src/data/profile';
+import { getAppSnapshot } from '../../src/data/nomi';
+import { countPosts, listFeed, PostsUnavailableError } from '../../src/data/posts';
+import { listPublicSets } from '../../src/data/community';
 import {
   acceptFriendRequest,
+  fetchMyBio,
   fetchMyUsername,
   listBlocked,
   listFriendLinks,
   removeFriendLink,
   saveUsername,
-  searchPeople,
   SocialUnavailableError,
   unblockPerson,
 } from '../../src/data/social';
-import {
-  atUsername,
-  friendCountLabel,
-  friendState,
-  searchTerm,
-  splitFriends,
-  suggestUsername,
-  USERNAME_MAX,
-  type FriendState,
-} from '../../src/core/social';
+import { atUsername, personName, splitFriends, suggestUsername, USERNAME_MAX } from '../../src/core/social';
+import { joinPages, nextCursor, type FeedCursor } from '../../src/core/posts';
+import { browseOrder } from '../../src/core/community';
+import { countLabel } from '../../src/core/profile';
 import { useSessionStore } from '../../src/data/session';
 import { isModerator, listReportQueue } from '../../src/data/moderation';
 
 /**
- * Profile — who you are to everybody else, and who your friends are (NOTES §51).
+ * Profile — who you are to everybody else (NOTES §51; redrawn in §59 from the
+ * owner's picture).
  *
- * The tab that was Settings. The owner, planning the social side of the app:
- * *"i already have 5 buttons which are Nomi, Notes, community, progress,
- * settings. one has to go if ever. because having 6 buttons is too much."* So
- * nothing went — Settings moved behind the control at the top right, the way a
- * phone's own social apps keep it, and this took its place. Five tabs still fit
- * at 393px (NOTES §46.4), and "Profile" is a shorter word than the one it replaced.
+ * The tab that was Settings (the owner: *"having 6 buttons is too much"*).
+ * Now shaped like every social app's own profile: your @username at the top
+ * with search and Settings beside it; your picture, name and bio; your friends,
+ * posts and streak as numbers; Edit profile and Share profile; the friend
+ * requests waiting for you as one line to open; and what is yours in four tabs
+ * — Posts, Sets, Friends, Saved.
  *
- * ## What is here, in the order it is used
+ * ## Where everything went
  *
- * You (your picture, your name, your @username); the requests waiting for you,
- * because somebody is waiting on an answer; finding people; your friends; the
- * requests you sent; the people you blocked. Settings — the key, reminders,
- * Delete my data — is one tap away and none of it is about other people.
+ * Finding people was a box halfway down this page — the owner's own example of
+ * what the redesign fixes: *"the search in profile is at the bottom."* It is
+ * the search at the top now (`app/search.tsx`), for people, sets and posts.
+ * Changing your username is in Edit profile; picking one for the first time
+ * stays here, because nobody can find you without it. Requests you sent and
+ * the people you blocked are under Friends; Saved, which had a bookmark in
+ * the top bar for a step, is a tab (§57's promise).
+ *
+ * The streak here is your own — only you see this page this way. Somebody
+ * else's page never shows theirs (the Privacy Policy).
  */
 
-/** Waits this long after the last key before searching, so typing "maria" is one request, not five. */
-const SEARCH_DELAY_MS = 250;
+type Tab = 'posts' | 'sets' | 'friends' | 'saved';
+const TABS = [
+  { key: 'posts' as const, label: 'Posts' },
+  { key: 'sets' as const, label: 'Sets' },
+  { key: 'friends' as const, label: 'Friends' },
+  { key: 'saved' as const, label: 'Saved' },
+];
+
+/** How long "Link copied" stays under Share profile. */
+const COPIED_MS = 2500;
 
 function retryUnlessOff(count: number, err: unknown): boolean {
   return !(err instanceof SocialUnavailableError) && count < 1;
@@ -73,14 +93,31 @@ export default function Profile() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const userId = useSessionStore((s) => s.session?.user.id) ?? '';
+  const [tab, setTab] = useState<Tab>('posts');
 
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
   const username = useQuery({ queryKey: ['my-username'], queryFn: () => fetchMyUsername(), retry: retryUnlessOff });
+  const bio = useQuery({ queryKey: ['my-bio'], queryFn: () => fetchMyBio(), retry: false });
   const links = useQuery({ queryKey: ['friend-links'], queryFn: () => listFriendLinks(), retry: retryUnlessOff });
   const blocked = useQuery({ queryKey: ['blocked'], queryFn: () => listBlocked(), retry: retryUnlessOff });
+  const snapshot = useQuery({ queryKey: ['nomi-brain'], queryFn: () => getAppSnapshot() });
+  const postCount = useQuery({ queryKey: ['post-count', userId], queryFn: () => countPosts(userId), enabled: !!userId });
+  const sets = useQuery({ queryKey: ['public-sets'], queryFn: () => listPublicSets() });
+  const posts = useInfiniteQuery({
+    queryKey: ['person-posts', userId],
+    queryFn: ({ pageParam }) => listFeed(pageParam, userId),
+    initialPageParam: null as FeedCursor | null,
+    getNextPageParam: (last) => nextCursor(last),
+    enabled: !!userId,
+    retry: (count, err) => !(err instanceof PostsUnavailableError) && count < 1,
+  });
+  const myPosts = useMemo(() => joinPages(posts.data?.pages ?? []), [posts.data]);
+  const mySets = useMemo(
+    () => browseOrder((sets.data ?? []).filter((s) => s.owner_id === userId)),
+    [sets.data, userId],
+  );
 
-  const off =
-    username.error instanceof SocialUnavailableError || links.error instanceof SocialUnavailableError;
+  const off = username.error instanceof SocialUnavailableError || links.error instanceof SocialUnavailableError;
 
   // The moderator's way in to the reports (NOTES §55) — nobody else sees it.
   const moderator = useQuery({ queryKey: ['is-moderator'], queryFn: () => isModerator() });
@@ -90,76 +127,64 @@ export default function Profile() {
     enabled: moderator.data === true,
   });
 
-  // --- your username ---
+  // --- a username, the first time: nobody can find you without one ---
   const [draft, setDraft] = useState<string | null>(null);
   const [usernameSaved, setUsernameSaved] = useState(false);
-  /**
-   * Changing a username you already have. Folded away otherwise: photographed
-   * at 393px, a field, a paragraph and a button for a name you chose once
-   * pushed the requests waiting for you below the fold on every visit.
-   */
-  const [editingUsername, setEditingUsername] = useState(false);
   const saveName = useMutation({
     mutationFn: (raw: string) => saveUsername(raw),
     onSuccess: async () => {
       setDraft(null);
       setUsernameSaved(true);
-      setEditingUsername(false);
       await queryClient.invalidateQueries({ queryKey: ['my-username'] });
     },
   });
   const suggestion = suggestUsername(profile?.display_name);
 
-  // --- finding people ---
-  const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(query), SEARCH_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [query]);
-  const term = searchTerm(debounced);
-  const results = useQuery({
-    queryKey: ['people-search', term],
-    queryFn: () => searchPeople(term ?? ''),
-    enabled: term !== null && !off,
-  });
-
   const groups = useMemo(() => splitFriends(links.data ?? []), [links.data]);
-  const blockedIds = useMemo(() => new Set((blocked.data ?? []).map((b) => b.person_id)), [blocked.data]);
-
   const refreshPeople = async () => {
     await queryClient.invalidateQueries({ queryKey: ['friend-links'] });
     await queryClient.invalidateQueries({ queryKey: ['people-search'] });
   };
-
-  const accept = useMutation({
-    mutationFn: (personId: string) => acceptFriendRequest(personId),
-    onSettled: refreshPeople,
-  });
-  const remove = useMutation({
-    mutationFn: (linkId: string) => removeFriendLink(linkId),
-    onSettled: refreshPeople,
-  });
+  const accept = useMutation({ mutationFn: (personId: string) => acceptFriendRequest(personId), onSettled: refreshPeople });
+  const remove = useMutation({ mutationFn: (linkId: string) => removeFriendLink(linkId), onSettled: refreshPeople });
   const unblock = useMutation({
     mutationFn: (personId: string) => unblockPerson(personId),
     // Everything: an unblock brings a person back into the chat, the shared
     // sets and search at once.
     onSettled: () => queryClient.invalidateQueries(),
   });
-
   const actionError = [accept, remove, unblock].find((m) => m.isError)?.error as Error | undefined;
+
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [shareNote, setShareNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!shareNote) return;
+    const timer = setTimeout(() => setShareNote(null), COPIED_MS);
+    return () => clearTimeout(timer);
+  }, [shareNote]);
+
+  const handle = atUsername(username.data);
+  const name = profile?.display_name?.trim() || (username.data ?? 'No name yet');
   const open = (id: string) => router.push(`/person/${id}`);
+
+  const share = async () => {
+    if (!username.data) {
+      setShareNote('Pick a username first — your link is made from it.');
+      return;
+    }
+    const outcome = await shareLink(`${name} on Nomi`, `/u/${username.data}`);
+    if (outcome === 'copied') setShareNote('Link copied.');
+    if (outcome === 'failed') setShareNote("Couldn't share that just now.");
+  };
 
   return (
     <Screen>
-      {/* Settings at the top right, where the bar's actions go (NOTES §56.3).
-          A gear now, as in the owner's picture — it was the sliders the
-          Settings tab used to wear. The bookmark opens what you saved (§57)
-          until step four gives Profile its Saved tab. */}
+      {/* Your @username where the picture has it, with search and Settings
+          beside it (NOTES §56.3, §59). */}
       <TopBar
-        title="Profile"
+        title={handle ?? 'Profile'}
         actions={[
-          { icon: 'bookmark', label: 'Saved', onPress: () => router.push('/saved') },
+          { icon: 'search', label: 'Search', onPress: () => router.push('/search') },
           { icon: 'settings', label: 'Settings', onPress: () => router.push('/settings') },
         ]}
       />
@@ -172,52 +197,43 @@ export default function Profile() {
         />
       ) : null}
 
-      {/* ------------------------------------------------------------ you -- */}
-      <Card>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.lg }}>
-          <Avatar value={profile?.avatar} userId={userId} size={72} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={[type.title, { color: t.text }]} numberOfLines={2}>
-              {profile?.display_name?.trim() || 'No name yet'}
-            </Text>
-            <Text style={[type.body, { color: t.textMuted }]}>
-              {atUsername(username.data) ?? (off ? ' ' : 'No username yet')}
-            </Text>
-            {!off && links.data ? (
-              <Text style={[type.caption, { color: t.textMuted }]}>{friendCountLabel(groups.friends.length)}</Text>
-            ) : null}
-          </View>
+      <ProfileHeader
+        picture={<Avatar value={profile?.avatar} userId={userId} size={88} />}
+        name={name}
+        handle={handle}
+        bio={bio.data}
+      />
+
+      <StatsRow
+        stats={[
+          { value: groups.friends.length, label: countLabel(groups.friends.length, 'Friend', 'Friends') },
+          { value: postCount.data ?? 0, label: countLabel(postCount.data ?? 0, 'Post', 'Posts') },
+          { value: snapshot.data?.streak ?? 0, label: 'Streak', icon: 'streak', iconColor: t.chart.tricky },
+        ]}
+      />
+
+      <View style={{ flexDirection: 'row', gap: space.sm }}>
+        <View style={{ flex: 1 }}>
+          <Button label="Edit profile" variant="secondary" onPress={() => router.push('/edit-profile')} />
         </View>
-        {username.data && !editingUsername ? (
-          <TextLink
-            label="Change username"
-            onPress={() => {
-              setEditingUsername(true);
-              setUsernameSaved(false);
-            }}
-          />
-        ) : null}
-        {usernameSaved && !editingUsername ? <Notice tone="ok">Saved.</Notice> : null}
-        <Button
-          label="Change your name or picture"
-          variant="secondary"
-          onPress={() => router.push('/settings')}
-        />
-      </Card>
+        <View style={{ flex: 1 }}>
+          <Button label="Share profile" variant="secondary" onPress={() => void share()} />
+        </View>
+      </View>
+      {shareNote ? <Body muted>{shareNote}</Body> : null}
 
       {off ? (
         <NotSwitchedOn />
       ) : (
         <>
-          {/* ------------------------------------------------ username -- */}
-          {/* Open when there is none yet — you cannot be found without it —
-              and when changing one. */}
-          {!username.data || editingUsername ? (
+          {/* Open while there is no username yet — nobody can find you
+              without one. Changing it later is in Edit profile. */}
+          {username.isSuccess && !username.data ? (
             <Card>
-              <Body>{username.data ? 'Change your username' : 'Pick a username'}</Body>
+              <Body>Pick a username</Body>
               <Field
                 label="Username"
-                value={draft ?? username.data ?? ''}
+                value={draft ?? ''}
                 onChangeText={(v) => {
                   setDraft(v);
                   setUsernameSaved(false);
@@ -225,181 +241,245 @@ export default function Profile() {
                 }}
                 placeholder={suggestion ?? 'yourname'}
                 maxLength={USERNAME_MAX + 1}
-                onSubmitEditing={() => saveName.mutate(draft ?? username.data ?? '')}
+                onSubmitEditing={() => saveName.mutate(draft ?? '')}
               />
-              <Body muted>
-                Friends find you by this. Letters, numbers and _, starting with a letter.
-              </Body>
+              <Body muted>Friends find you by this. Letters, numbers and _, starting with a letter.</Body>
               <Button
                 label="Save username"
-                onPress={() => saveName.mutate(draft ?? username.data ?? '')}
+                onPress={() => saveName.mutate(draft ?? '')}
                 busy={saveName.isPending}
-                disabled={draft === null || draft.trim() === (username.data ?? '')}
+                disabled={!draft?.trim()}
               />
               {saveName.isError ? <Notice tone="error">{(saveName.error as Error).message}</Notice> : null}
-              {editingUsername ? (
-                <Button
-                  label="Keep it"
-                  variant="secondary"
-                  onPress={() => {
-                    setEditingUsername(false);
-                    setDraft(null);
-                    saveName.reset();
-                  }}
-                  disabled={saveName.isPending}
-                />
-              ) : null}
             </Card>
           ) : null}
+          {usernameSaved ? <Notice tone="ok">Saved.</Notice> : null}
 
+          {/* The requests waiting for you, as one line to open — the picture. */}
+          {groups.received.length > 0 ? (
+            <RequestsBanner
+              count={groups.received.length}
+              first={groups.received.slice(0, 2)}
+              onPress={() => setRequestsOpen(true)}
+            />
+          ) : null}
           {actionError ? <Notice tone="error">{actionError.message}</Notice> : null}
 
-          {/* -------------------------------------------------- requests -- */}
-          {groups.received.length > 0 ? (
-            <View style={{ gap: space.sm }}>
-              <SectionRow title={`Friend requests (${groups.received.length})`} />
-              {groups.received.map((link) => (
-                <PersonRow
-                  key={link.id}
-                  id={link.person_id}
-                  name={link.name}
-                  username={link.username}
-                  avatar={link.avatar}
-                  // No "Wants to be friends" here: the heading says it, and
-                  // beside two buttons it only cut the @username short.
-                  onPress={() => open(link.person_id)}
-                >
-                  <RowButton
-                    label="Accept"
-                    primary
-                    busy={accept.isPending && accept.variables === link.person_id}
-                    onPress={() => accept.mutate(link.person_id)}
-                  />
-                  <RowButton
-                    label="Decline"
-                    busy={remove.isPending && remove.variables === link.id}
-                    onPress={() => remove.mutate(link.id)}
-                  />
-                </PersonRow>
-              ))}
+          <UnderlineTabs value={tab} options={TABS} onChange={setTab} />
+
+          {tab === 'posts' ? (
+            <View style={{ gap: space.md }}>
+              {posts.isLoading ? <LoadingState /> : null}
+              {posts.data && myPosts.length === 0 ? (
+                <EmptyState title="You haven't posted yet" detail="Share a win, a photo or a set from Community." />
+              ) : null}
+              <PostGrid posts={myPosts} />
+              {posts.hasNextPage ? (
+                <Button
+                  label="Show older posts"
+                  variant="secondary"
+                  onPress={() => void posts.fetchNextPage()}
+                  busy={posts.isFetchingNextPage}
+                />
+              ) : null}
             </View>
-          ) : null}
-
-          {/* ---------------------------------------------- find people -- */}
-          <View style={{ gap: space.sm }}>
-            <SectionRow title="Find people" />
-            <Field
-              label="Search"
-              value={query}
-              onChangeText={setQuery}
-              placeholder="A name or @username"
+          ) : tab === 'sets' ? (
+            <View style={{ gap: space.sm }}>
+              <Body muted>The sets you share — everyone signed in can find and study them.</Body>
+              {sets.isLoading ? <LoadingState /> : null}
+              {sets.data && mySets.length === 0 ? (
+                <EmptyState
+                  title="You haven't shared a set yet"
+                  detail={`Open one of your sets and choose Share with everyone from its ${GLYPH.more}.`}
+                />
+              ) : null}
+              <Rows>
+                {mySets.map((s) => (
+                  <SetRow key={s.id} title={s.title} cards={s.cards} stars={s.stars} onPress={() => router.push(`/set/${s.id}`)} />
+                ))}
+              </Rows>
+            </View>
+          ) : tab === 'friends' ? (
+            <FriendsTab
+              friends={groups.friends}
+              sent={groups.sent}
+              blocked={blocked.data ?? []}
+              loading={links.isLoading}
+              removing={remove.isPending ? (remove.variables ?? null) : null}
+              unblocking={unblock.isPending ? (unblock.variables ?? null) : null}
+              onOpen={open}
+              onCancel={(linkId) => remove.mutate(linkId)}
+              onUnblock={(personId) => unblock.mutate(personId)}
+              onRules={() => router.push('/rules')}
             />
-            {query.trim().length > 0 && searchTerm(query) === null ? (
-              <Body muted>Type at least two letters.</Body>
-            ) : null}
-            {term !== null && results.isLoading ? <LoadingState what="Looking…" /> : null}
-            {term !== null && results.isError ? (
-              <Notice tone="error">Couldn&apos;t search just now. Try again in a moment.</Notice>
-            ) : null}
-            {term !== null && results.data && results.data.length === 0 ? (
-              <Body muted>Nobody found by that name.</Body>
-            ) : null}
-            {(term !== null ? results.data ?? [] : []).map((person) => (
-              <PersonRow
-                key={person.id}
-                id={person.id}
-                name={person.display_name}
-                username={person.username}
-                avatar={person.avatar}
-                detail={stateLabel(friendState(userId, person.id, links.data ?? [], blockedIds))}
-                onPress={() => open(person.id)}
-              />
-            ))}
-          </View>
+          ) : (
+            <SavedPosts myId={userId} />
+          )}
+        </>
+      )}
 
-          {/* -------------------------------------------------- friends -- */}
-          <View style={{ gap: space.sm }}>
-            <SectionRow title={groups.friends.length > 0 ? `Friends (${groups.friends.length})` : 'Friends'} />
-            {links.isLoading ? <LoadingState /> : null}
-            {links.data && groups.friends.length === 0 ? (
-              <EmptyState
-                title="No friends yet"
-                detail="Search for someone above, or tap a name in the chat to see their profile."
-              />
-            ) : null}
-            {groups.friends.map((link) => (
+      {requestsOpen ? (
+        <Sheet onClose={() => setRequestsOpen(false)}>
+          <SheetTitle>Friend requests</SheetTitle>
+          {groups.received.length === 0 ? <Body muted>Nobody is waiting for an answer.</Body> : null}
+          <Rows card>
+            {groups.received.map((link) => (
               <PersonRow
                 key={link.id}
                 id={link.person_id}
                 name={link.name}
                 username={link.username}
                 avatar={link.avatar}
-                onPress={() => open(link.person_id)}
-              />
+                inset
+                onPress={() => {
+                  setRequestsOpen(false);
+                  open(link.person_id);
+                }}
+              >
+                <RowButton
+                  label="Accept"
+                  primary
+                  busy={accept.isPending && accept.variables === link.person_id}
+                  onPress={() => accept.mutate(link.person_id)}
+                />
+                <RowButton
+                  label="Decline"
+                  busy={remove.isPending && remove.variables === link.id}
+                  onPress={() => remove.mutate(link.id)}
+                />
+              </PersonRow>
             ))}
-          </View>
-
-          {/* --------------------------------------------- sent requests -- */}
-          {groups.sent.length > 0 ? (
-            <View style={{ gap: space.sm }}>
-              <SectionRow title="Requests you sent" />
-              {groups.sent.map((link) => (
-                <PersonRow
-                  key={link.id}
-                  id={link.person_id}
-                  name={link.name}
-                  username={link.username}
-                  avatar={link.avatar}
-                  detail="Waiting for them"
-                  onPress={() => open(link.person_id)}
-                >
-                  <RowButton
-                    label="Cancel"
-                    busy={remove.isPending && remove.variables === link.id}
-                    onPress={() => remove.mutate(link.id)}
-                  />
-                </PersonRow>
-              ))}
-            </View>
-          ) : null}
-
-          <TextLink label="Community rules" onPress={() => router.push('/rules')} />
-
-          {/* -------------------------------------------------- blocked -- */}
-          {(blocked.data ?? []).length > 0 ? (
-            <View style={{ gap: space.sm }}>
-              <SectionRow title="Blocked" />
-              {(blocked.data ?? []).map((b) => (
-                <PersonRow key={b.person_id} id={b.person_id} name={b.name} username={b.username} avatar={b.avatar}>
-                  <RowButton
-                    label="Unblock"
-                    busy={unblock.isPending && unblock.variables === b.person_id}
-                    onPress={() => unblock.mutate(b.person_id)}
-                  />
-                </PersonRow>
-              ))}
-            </View>
-          ) : null}
-        </>
-      )}
+          </Rows>
+        </Sheet>
+      ) : null}
     </Screen>
   );
 }
 
-/** What to say under a name in the search results. */
-function stateLabel(state: FriendState): string | undefined {
-  switch (state) {
-    case 'friends':
-      return 'Friends';
-    case 'sent':
-      return 'Request sent';
-    case 'received':
-      return 'Wants to be friends';
-    case 'blocked':
-      return 'Blocked';
-    default:
-      return undefined;
-  }
+/** "2 friend requests", with the first two faces overlapping, and a chevron. */
+function RequestsBanner({
+  count,
+  first,
+  onPress,
+}: {
+  count: number;
+  first: readonly { person_id: string; name: string | null; username: string | null; avatar: string | null }[];
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  const label = `${count} friend request${count === 1 ? '' : 's'}`;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label}. ${first.map((p) => personName(p)).join(', ')}`}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.md,
+        minHeight: TOUCH_TARGET + space.sm,
+        paddingHorizontal: space.md,
+        borderRadius: 14,
+        backgroundColor: t.card,
+        borderWidth: 1,
+        borderColor: t.border,
+        opacity: pressed ? 0.75 : 1,
+      })}
+    >
+      <View style={{ flexDirection: 'row' }}>
+        {first.map((p, i) => (
+          <View key={p.person_id} style={{ marginLeft: i === 0 ? 0 : -10, borderRadius: 16, borderWidth: 2, borderColor: t.card }}>
+            <PersonAvatar avatar={p.avatar} userId={p.person_id} name={personName(p)} size={28} />
+          </View>
+        ))}
+      </View>
+      <Text style={[type.body, { color: t.text, flex: 1 }]}>{label}</Text>
+      <Icon name="forward" color={t.textMuted} size={20} />
+    </Pressable>
+  );
+}
+
+/** Your friends; the requests you sent; the people you blocked; the rules. */
+function FriendsTab({
+  friends,
+  sent,
+  blocked,
+  loading,
+  removing,
+  unblocking,
+  onOpen,
+  onCancel,
+  onUnblock,
+  onRules,
+}: {
+  friends: readonly { id: string; person_id: string; name: string | null; username: string | null; avatar: string | null }[];
+  sent: readonly { id: string; person_id: string; name: string | null; username: string | null; avatar: string | null }[];
+  blocked: readonly { person_id: string; name: string | null; username: string | null; avatar: string | null }[];
+  loading: boolean;
+  removing: string | null;
+  unblocking: string | null;
+  onOpen: (personId: string) => void;
+  onCancel: (linkId: string) => void;
+  onUnblock: (personId: string) => void;
+  onRules: () => void;
+}) {
+  return (
+    <View style={{ gap: space.md }}>
+      <Body muted>Only you can see who your friends are.</Body>
+      {loading ? <LoadingState /> : null}
+      {!loading && friends.length === 0 ? (
+        <EmptyState title="No friends yet" detail="Search for someone at the top, or tap a name in the chat to see their profile." />
+      ) : null}
+      <Rows>
+        {friends.map((link) => (
+          <PersonRow
+            key={link.id}
+            id={link.person_id}
+            name={link.name}
+            username={link.username}
+            avatar={link.avatar}
+            onPress={() => onOpen(link.person_id)}
+          />
+        ))}
+      </Rows>
+
+      {sent.length > 0 ? (
+        <View style={{ gap: space.xs }}>
+          <Label>Requests you sent</Label>
+          <Rows>
+            {sent.map((link) => (
+              <PersonRow
+                key={link.id}
+                id={link.person_id}
+                name={link.name}
+                username={link.username}
+                avatar={link.avatar}
+                detail="Waiting for them"
+                onPress={() => onOpen(link.person_id)}
+              >
+                <RowButton label="Cancel" busy={removing === link.id} onPress={() => onCancel(link.id)} />
+              </PersonRow>
+            ))}
+          </Rows>
+        </View>
+      ) : null}
+
+      {blocked.length > 0 ? (
+        <View style={{ gap: space.xs }}>
+          <Label>Blocked</Label>
+          <Rows>
+            {blocked.map((b) => (
+              <PersonRow key={b.person_id} id={b.person_id} name={b.name} username={b.username} avatar={b.avatar}>
+                <RowButton label="Unblock" busy={unblocking === b.person_id} onPress={() => onUnblock(b.person_id)} />
+              </PersonRow>
+            ))}
+          </Rows>
+        </View>
+      ) : null}
+
+      <TextLink label="Community rules" onPress={onRules} />
+    </View>
+  );
 }
 
 /**

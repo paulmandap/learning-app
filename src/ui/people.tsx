@@ -46,6 +46,7 @@ export function PersonRow({
   detail,
   onPress,
   children,
+  inset,
 }: {
   id: string;
   name: string | null;
@@ -56,23 +57,25 @@ export function PersonRow({
   onPress?: () => void;
   /** Controls at the far end of the row. */
   children?: ReactNode;
+  /** Padded at the sides, for a row on a card (`Rows card`) or in a sheet. */
+  inset?: boolean;
 }) {
   const t = useTheme();
   const shown = personName({ name, username });
   const handle = atUsername(username);
   const line = [handle !== shown ? handle : null, detail].filter(Boolean).join(' · ');
 
+  // A row among rows since the redesign (NOTES §59): no box of its own — the
+  // list around it draws the hairlines (`Rows`), the way the owner's picture
+  // lists people.
   return (
     <View
       style={{
         flexDirection: 'row',
         alignItems: 'center',
         gap: space.sm,
-        padding: space.md,
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: t.border,
-        backgroundColor: t.card,
+        paddingVertical: space.sm,
+        paddingHorizontal: inset ? space.lg : 0,
       }}
     >
       <Pressable
@@ -89,7 +92,7 @@ export function PersonRow({
           opacity: pressed ? 0.7 : 1,
         })}
       >
-        <PersonAvatar avatar={avatar} userId={id} name={shown} size={40} />
+        <PersonAvatar avatar={avatar} userId={id} name={shown} size={44} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={[type.bodyStrong, { color: t.text }]} numberOfLines={1}>
             {shown}

@@ -181,14 +181,14 @@ function ReportCard({ reports, onDone }: { reports: QueuedReport[]; onDone: () =
 
       {mode === 'idle' ? (
         <View style={{ gap: space.sm }}>
-          {kind !== 'person' ? (
-            <Button
-              label={kind === 'set' ? 'Unshare the set' : 'Remove it'}
-              variant="danger"
-              onPress={() => act.mutate(() => removeReported(kind, target))}
-              busy={act.isPending}
-            />
-          ) : null}
+          {/* A person has one thing to take down since 0033: their bio
+              (NOTES §59). Their name and picture are for a warning. */}
+          <Button
+            label={kind === 'set' ? 'Unshare the set' : kind === 'person' ? 'Clear their bio' : 'Remove it'}
+            variant="danger"
+            onPress={() => act.mutate(() => removeReported(kind, target))}
+            busy={act.isPending}
+          />
           {user ? <Button label={`Warn ${who}`} variant="secondary" onPress={() => setMode('warn')} /> : null}
           {user ? <Button label={`Restrict ${who}`} variant="secondary" onPress={() => setMode('restrict')} /> : null}
           {user && restricted ? (

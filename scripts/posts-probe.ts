@@ -296,7 +296,10 @@ async function main() {
         `[...document.querySelectorAll('[role="button"]')].some((b) => b.getAttribute('aria-label') === 'Remove from saved') ? 'y' : ''`,
         'the bookmark to fill',
       );
-      await page.goto('/saved');
+      // Saved is a tab on Profile since §59.
+      await page.goto('/profile');
+      await page.click('Saved');
+      await showing(page, 'Only you can see what you save.');
       await showing(page, B_TEXT);
       const savedRow = await A.client.from('post_saves').select('post_id').eq('user_id', A.userId).eq('post_id', bTextId);
       if ((savedRow.data ?? []).length === 1) ok('save', 'in Saved, and in the database');
