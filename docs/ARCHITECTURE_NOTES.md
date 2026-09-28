@@ -8122,18 +8122,40 @@ typecheck clean with and without `.expo/` · **1431 tests**, 3 skipped · built
 · `friends-probe` **18/18** (its rules step waiting on 0030) · `messages-probe`
 **8/8** · `/rules` and `/moderation` (as a non-moderator) photographed.
 
-### 55.4 Not verified yet — needs 0030
+### 55.4 Deployed, then 0030 applied, and verified (2026-09-28)
 
-The isolation test agrees to the rules for both test accounts first (every
-social probe now does), then checks the gate refuses a message and a shared set
-before agreeing and lets them through after; that nobody can write a
-restriction, a warning or themselves into `app_admins`; and that every moderator
-function and the queue are shut to a test account. `friends-probe` meets the
-rules sheet at a first message, agrees, and sends. **The test accounts are not
-moderators and must never be** — their password is in HANDOFF — so the queue
-itself can only be tried by the owner, on the probe reports the test runs leave.
+The owner committed and deployed first, as §55.1 requires — `deploy-status.ts`:
+*production is exactly HEAD*, bundle matching — then pasted 0030.
 
-**Not deployed; not committed.**
+- **`isolation-test.ts`: 177/177**, 14 of them new: the gate refuses a message
+  and a shared set before the rules are agreed and lets them through after;
+  nobody can write a restriction, a warning or themselves into `app_admins`; the
+  test account is not a moderator, the queue is empty to it, and all five
+  moderator functions refuse it (42501).
+- **`friends-probe.ts`: 21/21** — a first message in the Everyone room opens the
+  rules sheet, "I agree" is recorded, and the same message then goes.
+- **The test accounts are not moderators and must never be** — their password
+  is in HANDOFF. The queue itself is the owner's to try, on the probe reports
+  the test runs leave (marked `… probe - not a real report`).
+
+**Every step of §51's five is now live.**
+
+## 56. Next: a cleaner look for everything social (planned 2026-09-28)
+
+The owner, once the five steps were in: *"everything we did so far looks messy
+... all over the place. make it at least the user will only focus there, like
+there is a background blur when clicked ... professional like social media ...
+following ui ux best practices. for example, the search in profile is at the
+bottom."* He asked for a prompt to send to Gemini for a picture of the updated
+UI, to send back — and chose to do it after all five steps, so it is done once.
+
+**`docs/REDESIGN_PROMPT.md`** holds the two prompts (Community; Profile, search,
+Progress, posting), the UI/UX rules they encode, and the plan for building to
+the image when it arrives — starting with a decision to put to the owner: the
+redesign needs ~15 icons and the app has no icon set (HANDOFF: no dependency
+without a measured reason).
+
+Not started. Nothing in the app has changed for it yet.
 
 
 ## Sources

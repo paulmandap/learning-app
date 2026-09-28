@@ -1,5 +1,9 @@
 # AI Study App — session handoff
 
+> **Latest (2026-09-28): the five social steps are live (NOTES §51–§55); the
+> next job is the redesign. Read "▶ START HERE" below and
+> `docs/REDESIGN_PROMPT.md` before anything else.**
+
 Written 2026-09-06, at commit `f38671a`. Hand this to the next session as its
 opening prompt. Everything below is either verifiable in the repo or recorded in
 `docs/ARCHITECTURE_NOTES.md` with the date it was measured.
@@ -58,15 +62,28 @@ pushed screen at /settings, reached from Profile's top right and Home's picture.
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### Migrations — 30; **0030 waiting — DEPLOY FIRST**, the rest applied
+### ▶ START HERE (2026-09-28): the social side is done; the redesign is next
 
-**0030 (community rules and moderation — NOTES §55) is written and waiting, and
-the order is not optional:** deploy the code, confirm `deploy-status.ts` says
-*production is exactly HEAD*, THEN apply 0030. Applied first, every post or
-message by somebody who has not agreed to the rules is refused, and the old
-build has no rules sheet to agree with. After applying: `isolation-test.ts`,
-then `friends-probe.ts`; the owner tries `/moderation` himself (the test
-accounts must never be moderators).
+The owner asked for friends, a feed, messages, a leaderboard and moderation
+(NOTES §51–§55). **All five steps are built, applied and live** (`c71e515` and
+after; `deploy-status.ts` said *production is exactly HEAD*). Then he asked for
+everything social to look cleaner and more professional — **read
+`docs/REDESIGN_PROMPT.md`**: it holds the Gemini prompts he is sending, and the
+plan for when he sends the images back. **Expect the next message to be those
+images.** First decision to put to him: icons (see that file, step 3).
+
+Still his to do: try `/moderation` (a button on his Profile) on the probe
+reports. Not built, and worth knowing if asked: push notifications for new
+messages (there is no server to send them on insert); searching posts (search
+finds people only); realtime instead of polling (§46.5's reasoning stands);
+end-to-end encryption of messages (the Privacy Policy says they are not).
+
+### Migrations — 30, all applied
+
+**0030 (community rules and moderation — NOTES §55) was applied by the owner on
+2026-09-28, after deploying first,** and verified the same day: isolation
+**177/177**, `friends-probe` **21/21**. **The test accounts are not moderators
+and must never be** (their password is below).
 
 **0029 (friends' streaks — NOTES §54) was applied by the owner on 2026-09-28**
 and verified the same day: isolation **163/163**, `friends-probe` **18/18**.
