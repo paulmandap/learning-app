@@ -165,7 +165,8 @@ async function main() {
     await page.goto('/community');
     await showing(page, 'Share something');
     await page.click('Chat');
-    await showing(page, 'Search messages');
+    // A placeholder is not page text (HANDOFF) — the box itself is looked for.
+    await page.waitFor(`document.querySelector('[placeholder="Search messages"]') ? 'y' : ''`, 'the inbox');
     await page.click('New message');
     await showing(page, 'New group');
     await page.click('New group');
@@ -183,7 +184,7 @@ async function main() {
     } else fail('make a group', `B sees ${JSON.stringify(bSees.data)}`);
 
     // ---- send ----
-    await typeInto(page, `Message ${TITLE}`, FROM_A);
+    await typeInto(page, 'Message the group', FROM_A);
     await page.click('Send');
     await showing(page, FROM_A);
     const sent = await A.client.from('group_messages').select('id').eq('group_id', groupId).eq('body', FROM_A);
@@ -200,7 +201,7 @@ async function main() {
     await showing(page, 'Hide this from my screen');
     await page.click('Reply');
     await showing(page, 'Replying to Probe B');
-    await typeInto(page, `Message ${TITLE}`, REPLY);
+    await typeInto(page, 'Message the group', REPLY);
     await page.click('Send');
     await showing(page, REPLY);
     const replied = await A.client.from('group_messages').select('reply_to').eq('group_id', groupId).eq('body', REPLY).maybeSingle();
@@ -215,7 +216,10 @@ async function main() {
     await showing(page, 'Made the group');
     await typeInto(page, 'A name for the group', RENAMED);
     await page.click('Save the name');
-    await page.waitFor(`document.body.innerText.includes(${JSON.stringify('Save the name')}) ? '' : 'y'`, 'the name to save');
+    // The heading, which shows the group's name as the database has it — the
+    // field's own value is not page text, and a Save button that has gone
+    // could be one that was never pressed (NOTES §19.7).
+    await showing(page, RENAMED);
     const renamed = await B.client.from('my_groups').select('title').eq('id', groupId).maybeSingle();
     if ((renamed.data as { title?: string } | null)?.title === RENAMED) ok('rename', 'saved, and B sees the new name');
     else fail('rename', `B sees ${JSON.stringify(renamed.data)}`);

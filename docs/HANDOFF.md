@@ -81,12 +81,14 @@ recent searches, bookmarks, share profile — with the defaults in NOTES §56.2.
 temporary, `SheetActions`, `TopBar`, `UnderlineTabs`, `Rows`, and icons
 everywhere — deployed as `95f1018`. **Step two is live** (NOTES §57): the feed
 and a post's page to the picture, replies, hearts on comments, saved posts —
-`6a82ffb` and migration 0031, verified. **Step three is built** (NOTES §58):
+`6a82ffb` and migration 0031, verified. **Step three is live** (NOTES §58):
 the inbox and a conversation to the picture, reply on messages everywhere,
-group chats — **migration 0032, written and not applied**; additive, either
-order. After it: clear the probe reports (test account B hit the 20-a-day
-report limit, §58.4), then `isolation-test.ts` and `scripts/groups-probe.ts`.
-**Next: step four — Profile, a person's page, bio, share profile, search.** `/icons`
+group chats — `26ad6e4` and migration 0032, verified (isolation 212/212,
+`groups-probe` 7/7). One small change since, not deployed: the group box's
+placeholder. **Probe reports pile up:** each run of `friends-probe` and the
+isolation test leaves marked reports, and at 20 in a day test account B hits
+the report limit (§58.4) — clear them with the SQL the probes print. **Next:
+step four — Profile, a person's page, bio, share profile, search.** `/icons`
 is a check page; delete it when the redesign is done.
 
 Still his to do: try `/moderation` (a button on his Profile) on the probe
@@ -95,12 +97,11 @@ messages (there is no server to send them on insert); searching posts (search
 finds people only); realtime instead of polling (§46.5's reasoning stands);
 end-to-end encryption of messages (the Privacy Policy says they are not).
 
-### Migrations — 32; 0032 written and waiting
+### Migrations — 32, all applied
 
-**0032 (reply on messages, group chats — NOTES §58) is written and waiting.**
-Additive: recreates two sends with a reply argument (old signatures dropped in
-the same file), two views with the quote, and adds the group tables,
-functions and views. Safe before or after the code deploys.
+**0032 (reply on messages, group chats — NOTES §58) was applied by the owner on
+2026-09-28, after deploying `26ad6e4`,** and verified the same day: isolation
+**212/212**, `groups-probe` **7/7** three runs.
 
 **0031 (replies, hearts on comments, saved posts — NOTES §57) was applied by
 the owner on 2026-09-28, after deploying `6a82ffb`,** and verified the same

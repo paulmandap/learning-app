@@ -182,7 +182,9 @@ export default function GroupRoom() {
         myId={myId}
         reactions={reactions.data ?? []}
         empty={{ title: 'Say hello to the group', detail: 'Only the people in this group can see it.' }}
-        placeholder={`Message ${g.title}`}
+        // Not the group's name: a name can run to sixty characters, and in
+        // the box it wrapped half out of sight (photographed, NOTES §58.5).
+        placeholder="Message the group"
         reportKind="group_message"
         showNames
         hideDetail="It stays for everyone else in the group — only the person who sent it can take it back."

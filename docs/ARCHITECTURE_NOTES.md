@@ -8488,10 +8488,38 @@ the defaults he took. Migration 0032.
   message) — Too many reports today`. Measured: test account B had made **20
   reports in the last day, all marked probe reports** — the daily limit doing
   its job. The owner's cleanup SQL (`… like '%probe%not a real report'`)
-  clears it. `checkRepliesAndGroups` (22 checks) says "not present" until 0032.
+  clears it. `checkRepliesAndGroups` (19 checks) says "not present" until 0032.
 - `scripts/groups-probe.ts` (new) stops with "is migration 0032 applied?".
 
-**Not deployed; not committed. 0032 not applied.**
+### 58.5 Deployed, then 0032 applied, and verified (2026-09-28)
+
+Committed and deployed by the owner as `26ad6e4` — *production is exactly
+HEAD*, bundle `a97ed71273f5` matching — then 0032 pasted and the probe reports
+cleared (*"done"*).
+
+- **`isolation-test.ts`: 212/212**, all 19 of 0032's: a reply quoted back
+  through the Everyone room's view, refused for a message that does not exist,
+  and kept — saying what it answered is gone — once that is unsent; a group
+  refused with a non-friend in it, and straight into any of its tables; B in
+  A's group and not its owner, refused rename and removing A; B reading A's
+  message; a group reply to a message in another room refused; taken out, B
+  reads and sends nothing; added again, B sees what is said from then on and
+  not before; a member reporting a message they can see, and refused for one
+  from before they joined; after a block, A seeing neither B's messages nor B
+  among the members; and A leaving, B taking the group over, A reading nothing.
+- **`groups-probe`: 7/7, three runs** — a group from Chat's pencil with B
+  ticked, a message from the box, B's arriving, a reply to it from the sheet
+  saved as a reply, a rename B sees, leaving it to B.
+- `messages-probe` **8/8**, `scroll-probe` **10/10**.
+- **Two probe mistakes, found on the first run**, neither in the app: it waited
+  for the words "Search messages", which are a placeholder, not page text (the
+  HANDOFF gotcha); and it took a Save button disappearing as proof of a save —
+  the rename step failed once that way while the same step, repeated alone,
+  worked and B saw the name. It now waits for the group's heading to show the
+  new name, which can only be true afterwards (§19.7).
+- **Seen and changed:** the room's box said "Message groups probe study group",
+  which wrapped half out of sight; a name can be sixty characters. It says
+  "Message the group". Not yet deployed.
 
 
 ## Sources
