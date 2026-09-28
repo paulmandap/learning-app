@@ -202,10 +202,15 @@ async function main() {
       // aria-selected here timed out against a control that was working
       // perfectly — and the reason it is absent is worth its own look, because
       // it means nothing using a screen reader can tell which tab is current.
+      //
+      // Since the redesign (NOTES §56.3) Community's tabs are underlined, not
+      // filled, and pass `aria-selected` themselves — so that is read first,
+      // and the background stays for any pill picker still using it.
       await page.waitFor(
         `(() => {
            const el = document.querySelector('[aria-label="${pane}"][role="tab"]');
            if (!el) return '';
+           if (el.getAttribute('aria-selected') === 'true') return 'y';
            const bg = getComputedStyle(el).backgroundColor;
            return /rgba\\(0, 0, 0, 0\\)|transparent/.test(bg) ? '' : 'y';
          })()`,

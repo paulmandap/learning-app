@@ -1,182 +1,154 @@
+import { memo } from 'react';
 import { View } from 'react-native';
+import { iconFill, iconPieces } from '../core/icon-geometry';
+import type { IconName } from '../core/icon-shapes';
+
+export type { IconName };
 
 /**
  * Every symbol the app draws, in one place.
  *
- * ## Text glyphs
+ * ## Icons, and the few text glyphs left
  *
- * The app has no icon set — `@expo/vector-icons` is not installed, and a
- * handful of chevrons is not a reason to add it. So symbols are Unicode, and
- * they used to be typed inline wherever they were needed: ›, ‹, ⋯, ✕, ✓, ✗ and
+ * A control's symbol is an `Icon` (below). The characters here are for marks
+ * INSIDE text — "✓ Cat", "Open it ›", the ⋯ named in a sentence — where a
+ * drawn icon would sit off the line.
+ *
+ * They used to be typed inline wherever they were needed: ›, ‹, ⋯, ✕, ✓, ✗ and
  * ✦ across six files. That is how two chevrons end up being two different
  * characters. Now each has a name, and `tests/screens.test.ts` fails a screen
- * that types one in directly.
+ * that types one in directly. The ones that were controls — back, close, send,
+ * history, new chat, edit, react — became icons in NOTES §56.3.
  */
 export const GLYPH = {
-  /** U+203A. Goes somewhere — a list row. */
+  /** U+203A. Goes somewhere, said in words — "Open it ›". */
   forward: '›',
-  /** U+2039. The header back control. */
-  back: '‹',
   /** U+22EF. Renders as text everywhere, unlike an emoji ellipsis. */
   more: '⋯',
-  close: '✕',
   /** Right and wrong carry a mark as well as a colour — never hue alone. */
   right: '✓',
   wrong: '✗',
   /** Nomi's mark: the floating ask button. */
   nomi: '✦',
-  /** Send a message. */
-  send: '↑',
-  /** Past conversations. */
-  history: '☰',
-  /** Start a new conversation. */
-  newChat: '✎',
-  /**
-   * Change what a message says (NOTES §48).
-   *
-   * The same pencil as `newChat`, and named separately on purpose: a character
-   * shared by two meanings is fine, a NAME shared by two meanings is how one of
-   * them silently changes when the other is restyled.
-   */
-  edit: '✎',
-  /** Leave a reaction on a message. */
-  react: '☺',
 } as const;
 
 /**
- * `settings` is no longer a tab (NOTES §51) and is still drawn: it is the
- * control at the top right of Profile that opens Settings, so the sliders
- * somebody knew from the bar are the thing they look for.
+ * One icon, drawn with Views (NOTES §56.2).
+ *
+ * The owner chose this over an icon package or SVG: *"try harder. draw
+ * boxes."* The shapes are Lucide's (src/core/icon-shapes.ts, generated), and
+ * src/core/icon-geometry.ts breaks each into what a View can be — a ring, a
+ * rounded frame, or a bar with round ends turned to its angle. Curves are runs
+ * of short bars whose round ends overlap into round joins, which is how Lucide
+ * strokes them anyway.
+ *
+ * The stroke is 1.75 at 24 and never thinner than 1.5, so a 16 px icon beside
+ * a time stamp does not turn to hairlines. `filled` fills a closed shape — a
+ * liked heart, a saved bookmark — and still draws the outline over the fill,
+ * which is what hides the bands' stepped edges.
+ *
+ * Always decorative: the control it sits in carries the words.
  */
-export type TabIconName = 'study' | 'notes' | 'community' | 'progress' | 'profile' | 'settings';
-
-const BOX = 22;
-const STROKE = 1.75;
-
-/**
- * The four tab icons, drawn rather than typed.
- *
- * ## Why these are Views and not characters
- *
- * The tabs were ✎ ❏ ◕ ⚙︎ — four characters from four corners of Unicode, which
- * a font draws at four unrelated weights and optical sizes: a heavy pencil, a
- * hairline square, a solid pie, a thin gear (NOTES §35). They also look
- * different on every platform, because each one comes from whatever font the
- * device falls back to — the gear becomes an emoji on some.
- *
- * Built from Views, all four share one 22pt box and one stroke, and look the
- * same on an iPhone as in the screenshot harness. No SVG, which this project
- * does not have, and no icon font, which would be a dependency.
- *
- * `ground` is the colour behind the icon. Two of them overlap a shape on top
- * of a line — the front card, the slider knobs — and the overlapping shape is
- * filled with the ground so the line behind it is hidden.
- */
-export function TabIcon({
+export const Icon = memo(function Icon({
   name,
   color,
-  ground,
+  size = 24,
+  filled = false,
 }: {
-  name: TabIconName;
+  name: IconName;
   color: string;
-  ground: string;
+  size?: number;
+  filled?: boolean;
 }) {
-  const outline = { position: 'absolute' as const, borderWidth: STROKE, borderColor: color };
-  const solid = { position: 'absolute' as const, backgroundColor: color, borderRadius: 1 };
+  const k = size / 24;
+  const sw = Math.max(1.5, STROKE * k);
+  const { segments, rings, frames } = iconPieces(name);
+  let key = 0;
 
   return (
     <View
-      style={{ width: BOX, height: BOX }}
+      style={{ width: size, height: size }}
+      pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      {name === 'study' ? (
-        // Two cards, one behind the other: what a set is.
-        <>
-          <View style={[outline, { left: 8, top: 2, width: 12, height: 15, borderRadius: 3 }]} />
+      {filled
+        ? iconFill(name).map(([x, y, w, h]) => (
+            <View
+              key={key++}
+              style={{ position: 'absolute', left: x * k, top: y * k, width: w * k, height: h * k, backgroundColor: color }}
+            />
+          ))
+        : null}
+      {frames.map((f) => (
+        <View
+          key={key++}
+          style={{
+            position: 'absolute',
+            left: f.x * k - sw / 2,
+            top: f.y * k - sw / 2,
+            width: f.w * k + sw,
+            height: f.h * k + sw,
+            borderRadius: f.r * k + sw / 2,
+            borderWidth: sw,
+            borderColor: color,
+            backgroundColor: filled ? color : undefined,
+          }}
+        />
+      ))}
+      {rings.map((c) => {
+        const d = 2 * c.r * k + sw;
+        // A circle not much wider than its own line — the three dots of ⋯ —
+        // is a solid dot in SVG, where the stroke covers the middle. As a
+        // border it left a pin-prick hole, and ⋯ read as ∘∘∘ in the first
+        // photograph of the feed.
+        const dot = 2 * c.r * k <= sw * 1.5;
+        return (
           <View
-            style={[
-              outline,
-              { left: 3, top: 5, width: 12, height: 15, borderRadius: 3, backgroundColor: ground },
-            ]}
+            key={key++}
+            style={{
+              position: 'absolute',
+              left: c.cx * k - d / 2,
+              top: c.cy * k - d / 2,
+              width: d,
+              height: d,
+              borderRadius: d / 2,
+              borderWidth: dot ? 0 : sw,
+              borderColor: color,
+              backgroundColor: dot ? color : undefined,
+            }}
           />
-        </>
-      ) : name === 'notes' ? (
-        // A page with writing on it.
-        <>
-          <View style={[outline, { left: 4, top: 2, width: 14, height: 18, borderRadius: 3 }]} />
-          <View style={[solid, { left: 7.5, top: 7, width: 7, height: STROKE }]} />
-          <View style={[solid, { left: 7.5, top: 10.5, width: 7, height: STROKE }]} />
-          <View style={[solid, { left: 7.5, top: 14, width: 4.5, height: STROKE }]} />
-        </>
-      ) : name === 'community' ? (
-        // Two people. Shoulders drawn first as one bar, then two heads filled
-        // with the ground on top of it — the same trick as the sliders below,
-        // which is how a shape overlaps a line without an icon set to do it.
-        //
-        // The heads OVERLAP the bar by a point rather than sitting above it.
-        // Photographed at 393px with a 2pt gap first, where they read as two
-        // circles floating over an unrelated line instead of as two people.
-        <>
-          <View style={[solid, { left: 2, top: 12, width: 18, height: 7, borderRadius: 3.5 }]} />
+        );
+      })}
+      {segments.map(([x1, y1, x2, y2]) => {
+        const length = Math.hypot(x2 - x1, y2 - y1) * k + sw;
+        return (
           <View
-            style={[
-              outline,
-              { left: 2.5, top: 4, width: 9, height: 9, borderRadius: 4.5, backgroundColor: ground },
-            ]}
+            key={key++}
+            style={{
+              position: 'absolute',
+              left: ((x1 + x2) / 2) * k - length / 2,
+              top: ((y1 + y2) / 2) * k - sw / 2,
+              width: length,
+              height: sw,
+              borderRadius: sw / 2,
+              backgroundColor: color,
+              transform: [{ rotate: `${(Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI}deg` }],
+            }}
           />
-          <View
-            style={[
-              outline,
-              { left: 10.5, top: 4, width: 9, height: 9, borderRadius: 4.5, backgroundColor: ground },
-            ]}
-          />
-        </>
-      ) : name === 'progress' ? (
-        // Three rising bars. Thin enough to carry the same ink as a stroke.
-        <>
-          <View style={[solid, { left: 3, bottom: 3, width: 4, height: 7 }]} />
-          <View style={[solid, { left: 9, bottom: 3, width: 4, height: 11 }]} />
-          <View style={[solid, { left: 15, bottom: 3, width: 4, height: 16 }]} />
-        </>
-      ) : name === 'profile' ? (
-        // One person — Community's two, alone. Same construction: the
-        // shoulders as a solid shape, the head an outline filled with the
-        // ground and overlapping them by a point, which §46.4 photographed as
-        // the difference between a person and a circle floating over a line.
-        <>
-          <View
-            style={[
-              solid,
-              { left: 3.5, top: 12, width: 15, height: 8, borderTopLeftRadius: 7.5, borderTopRightRadius: 7.5 },
-            ]}
-          />
-          <View
-            style={[
-              outline,
-              { left: 6, top: 2.5, width: 10, height: 10, borderRadius: 5, backgroundColor: ground },
-            ]}
-          />
-        </>
-      ) : (
-        // Two sliders — settings you adjust, which a gear only implies.
-        <>
-          <View style={[solid, { left: 2, top: 6, width: 18, height: STROKE }]} />
-          <View style={[solid, { left: 2, top: 15, width: 18, height: STROKE }]} />
-          <View
-            style={[
-              outline,
-              { left: 11, top: 3, width: 7.5, height: 7.5, borderRadius: 4, backgroundColor: ground },
-            ]}
-          />
-          <View
-            style={[
-              outline,
-              { left: 4, top: 12, width: 7.5, height: 7.5, borderRadius: 4, backgroundColor: ground },
-            ]}
-          />
-        </>
-      )}
+        );
+      })}
     </View>
   );
-}
+});
+
+/**
+ * Lucide's stroke at 24, a touch lighter than its default 2 — the owner's
+ * picture asked for 1.75, and so did the tab icons this set replaced.
+ *
+ * Those were `TabIcon`: four hand-placed drawings (two cards, a page, two
+ * people, three bars) that replaced four unrelated Unicode characters (NOTES
+ * §35). `Icon` does the same job for every icon from one set of shapes, so the
+ * tab bar, the headers and the sheets now share one hand (NOTES §56.3).
+ */
+const STROKE = 1.75;

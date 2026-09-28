@@ -8157,6 +8157,151 @@ without a measured reason).
 
 Not started. Nothing in the app has changed for it yet.
 
+### 56.1 The images came back, and what an icon set costs (2026-09-28)
+
+The owner's two pictures are `design-reference/prompt-A.png` (Feed, Post, Chat,
+Conversation) and `design-reference/prompt-b.png` (Profile, Search, Progress,
+New post). Close to the prompts. What Gemini added that the app does not have:
+a bio on Profile, group chats, Reply on a message, Reply and Like on a comment,
+search finding sets and posts with recent searches, a bookmark, Share profile,
+and made-up "What you know" numbers. The Profile's streak is fine on your own
+profile only — the Privacy Policy says a profile does not show it (§52.3).
+
+**Measured**, `expo export --platform web` at `e45b256`, 25 icons (search, send,
+pencil, heart, comment, share, more, both chevrons, close, photo, people,
+person, settings, reply, trash, warning, flame, layers, page, chart, globe,
+lock, ban, check), each build imported from the tab bar so it lands in the
+entry bundle. Sizes are brotli q11, which is close to what Cloudflare serves:
+
+```
+                                        entry raw    entry brotli   vs today
+today (Views, no icon set)              2,563,796    505,562        —
+lucide-react-native, barrel import      4,807,606    665,985        +160 KB (3094 modules: every icon)
+lucide-react-native, one file per icon  2,643,581    519,918        +14 KB  (react-native-svg is most of it)
+plain <svg> via createElement, Lucide's
+  shapes copied in (3.7 KB of paths)    2,567,897    506,595        +1 KB
+```
+
+Metro does not tree-shake by default, so the usual `import { Heart } from
+'lucide-react-native'` pulls in all of them. Plain `<svg>` drew sharp in the
+built app (four tab icons swapped, photographed at 393 px dark) — react-native-web
+renders to the DOM, so no package is needed. The catch: it is web-only, so a
+native build would need that one file changed. The app ships only as a PWA.
+
+Measured in a scratch install (`npm install --no-save`) and a temporary file,
+then all of it removed: `npm prune`, tree clean, and the rebuild came back to
+the same entry hash (`eff0db16…`). Put to the owner with a recommendation of
+plain SVG.
+
+### 56.2 Icons drawn with Views, and every extra built (2026-09-28)
+
+The owner, on both questions: *"i'd want you to try harder. draw boxes."* and
+*"i'd want everything added that the app currently doesn't have."* So: no
+package and no SVG, and the extras in 56.1 are all in scope.
+
+**How the icons are drawn.** A View can be a ring, a rounded frame, or a bar
+with round ends turned to any angle — enough for any outline icon, because a
+curve is a run of short round-ended bars whose ends overlap into round joins,
+which is how Lucide strokes anyway.
+
+- `scripts/make-icon-shapes.ts --from <lucide-static>/package/icons` writes
+  `src/core/icon-shapes.ts`: 40 icons, Lucide 1.48.0's shapes under its ISC
+  notice (and Feather's MIT notice, for the ones derived from it), plus Nomi's
+  owl, drawn for the app. Lucide is not a dependency; the script reads a
+  downloaded folder.
+- `src/core/icon-geometry.ts` reads the paths (by hand — Lucide writes arc
+  flags run together, `a6 6 0 01-8.943 0`) and flattens curves to within
+  `TOLERANCE` 0.06 units of the true line; circles and rectangles stay whole.
+  A filled heart, bookmark or star is horizontal bands under the outline.
+- `Icon` in `src/ui/glyphs.tsx`: 1.75 stroke at 24, never under 1.5.
+- **Cost:** 2–73 Views per icon (the gear is the most); a post's action row is
+  ~112. The shapes file is ~10 KB raw. `tests/icons.test.ts` (11) holds every
+  icon inside its box, the curve error to `TOLERANCE`, the path reader to what
+  Lucide writes, the View budget, and the licence notice.
+- **Caught by the first photograph:** the generator skipped attribute names
+  with digits, so every `<line>`'s x1/y1/x2/y2 was 0 and user-plus lost its
+  plus to a dot in the corner. Fixed; the generator now refuses a shape
+  missing a number, and a test refuses any piece at 0,0.
+- `/icons` shows all of them, for photographing while the redesign is built.
+  Linked from nowhere; **remove it when the redesign is done.**
+
+Photographed at 393 px in dark and light: smooth at 24, and the filled heart,
+bookmark and star clean. The gear and the owl are crowded at 16, as Lucide's
+gear is. **1442 tests**, 3 skipped · typecheck clean · built and booted.
+Nothing in the app uses `Icon` yet.
+
+The owner then took every default put to him for the extras (*"ok"*): a bio
+of 150 characters, reportable; group chats of friends only, up to 30, the
+maker renames and removes, anyone leaves, a block hides their messages there;
+reply on messages everywhere; one level of comment replies and a heart on
+comments; search for people, shared sets and posts you may see, recent
+searches on the device only; bookmarks in a private Saved tab; Share profile
+as a link that needs sign-in; other people's pages show bio and post count,
+never friends count or streak. Built in five steps, 56.3 onwards.
+
+### 56.3 Step one: the shared pieces, and icons everywhere (2026-09-28)
+
+No database change. Screen layouts are the later steps; this is what every
+one of them is built from.
+
+- **One `Sheet`** (`src/ui/sheet.tsx`, moved out of people.tsx): the page
+  dimmed and blurred (`WebkitBackdropFilter` too — the owner's iPhone is
+  Safari), a grab handle, rounded top, the column's width on a desktop, and a
+  48 pt rise over 220 ms that reduce-motion turns off. **The backdrop is now a
+  sibling of the panel, not a button around it**, which had put every control
+  of every sheet inside one "Close" button for a screen reader.
+- **`SheetActions`**: one grouped list, an icon on each row, Report and Block
+  in the danger colour. The message sheet, a post's sheet, a comment's sheet
+  and the header ⋯ all use it. **The ⋯ is a sheet now, not a corner panel** —
+  the set screen's too — with the thumb-reach reason in `menu.tsx`. Action
+  sheets lost their Cancel buttons: tapping outside closes, as before. Delete
+  post still asks once, in place; `posts-probe` presses "Delete post" twice.
+- **`ReactionRow`**: the six reactions on one rounded strip, shared by the
+  message and post sheets, "+" on messages only as before.
+- **`TopBar`** (large title left, `IconButton`s right, Nomi's owl above on
+  Community), **`IconButton`/`IconBadge`**, **`Rows`** (hairlines at 60% of
+  the border colour — the sheets use it; lists move to it in steps 2–4), and
+  **`UnderlineTabs`** for Feed · Sets · Chat. `Segment` stays for choices.
+- **Icons everywhere**: the tab bar (the owl for Nomi — it was two cards,
+  from when the tab was Study), header back and ⋯ and Nomi's two actions (in
+  the text colour now, as the pictures have them, not the accent), every
+  chevron, close, the send button (the paper plane), the star (filled when
+  it is yours), Home's folder (was 📁), the ticks in report reasons and on
+  /moderation. `TabIcon` is gone, and `GLYPH` keeps only marks inside text.
+  Profile's settings is a gear, as in the picture (it was sliders).
+- **⋯ read as ∘∘∘** in the first photograph of the feed: Lucide's dots are
+  circles narrower than their own line, solid in SVG, a ring with a pin-prick
+  hole as a border. `Icon` draws such a circle filled.
+- **`aria-selected` on the tabs.** react-native-web drops
+  `accessibilityState.selected` (measured in §46, recorded in
+  `scroll-probe.ts`), so nothing told a screen reader which tab was current.
+  `UnderlineTabs` and the tab bar pass `aria-selected` themselves, and
+  `scroll-probe` reads it first — it had timed out waiting for a filled
+  background the underline tabs do not have.
+
+**A trap on this machine, which cost a restore:** four files were changed with
+PowerShell's `Get-Content -Raw … -replace … | Set-Content -Encoding utf8`.
+Windows PowerShell 5.1 read the BOM-less UTF-8 as the ANSI code page and wrote
+a BOM back, so every "§" became "Â§" and every "—" garbage. Caught by the size
+of `git diff --stat`; restored with `git checkout`, the edits redone with the
+editor, and a scan of the tree found nothing else touched. **Never rewrite a
+source file through PowerShell text replacement here.**
+
+`tests/redesign.test.ts` (new, 7) holds the rules: no panel over the page but
+the Sheet (the privacy notice, Nomi's history and the folder sheet excepted,
+the last two next in line), the blur, the handle and the sibling backdrop, the
+⋯ as a sheet, the tab bar's icons, no control glyphs left, Community's
+underline tabs under a top bar, and the chosen tab marked by more than colour.
+
+**Measured:** typecheck clean with and without `.expo/` · **1449 tests**, 3
+skipped · built and booted · `scroll-probe` **9/9** · `friends-probe`
+**21/21** (it left its usual marked report) · `posts-probe` **10/10** ·
+`messages-probe` **8/8** · `community-probe` **11/11**. Photographed at 393
+px: Community and Profile's tops, the post sheet (dark and light), the message
+sheet, a shared set's ⋯, the report and block sheets.
+
+**Not deployed; not committed.**
+
 
 ## Sources
 

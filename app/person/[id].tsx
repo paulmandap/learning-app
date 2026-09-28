@@ -156,10 +156,10 @@ export default function PersonPage() {
                   <OverflowMenu
                     accessibilityLabel={`More about ${name}`}
                     items={[
-                      { label: `Report ${name}`, onPress: () => setReporting(true) },
+                      { icon: 'report', label: `Report ${name}`, destructive: true, onPress: () => setReporting(true) },
                       state === 'blocked'
-                        ? { label: `Unblock ${name}`, onPress: () => unblock.mutate() }
-                        : { label: `Block ${name}`, destructive: true, onPress: () => setBlocking(true) },
+                        ? { icon: 'block', label: `Unblock ${name}`, onPress: () => unblock.mutate() }
+                        : { icon: 'block', label: `Block ${name}`, destructive: true, onPress: () => setBlocking(true) },
                     ]}
                   />
                 ),

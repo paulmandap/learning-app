@@ -72,6 +72,17 @@ everything social to look cleaner and more professional — **read
 plan for when he sends the images back. **Expect the next message to be those
 images.** First decision to put to him: icons (see that file, step 3).
 
+**Update, same day:** the images came back (`design-reference/prompt-A.png`,
+`prompt-b.png`). He chose **icons drawn with Views** (`Icon` in
+`src/ui/glyphs.tsx`) and **every extra the pictures show**: bio, group chats,
+reply on messages, reply and like on comments, search for sets and posts with
+recent searches, bookmarks, share profile — with the defaults in NOTES §56.2.
+**Step one of five is built** (NOTES §56.3): one `Sheet` for everything
+temporary, `SheetActions`, `TopBar`, `UnderlineTabs`, `Rows`, and icons
+everywhere. Not deployed or committed. **Next: step two — Feed, a post,
+comments and bookmarks** (a migration). `/icons` is a check page; delete it
+when the redesign is done.
+
 Still his to do: try `/moderation` (a button on his Profile) on the probe
 reports. Not built, and worth knowing if asked: push notifications for new
 messages (there is no server to send them on insert); searching posts (search
@@ -574,6 +585,10 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   Postgres will accept, not only for what it means. When a paste fails, check
   what actually landed before re-pasting — the editor usually rolls back, but
   "usually" is not evidence.
+- **Never rewrite a source file with PowerShell text replacement.** Windows
+  PowerShell 5.1's `Get-Content -Raw` reads BOM-less UTF-8 as ANSI and
+  `Set-Content -Encoding utf8` writes a BOM: every "§" became "Â§" in four files
+  (NOTES §56.3). Use the editor; a large `git diff --stat` is the tell.
 - **Git Bash rewrites a lone `/` argument into a Windows path.** Run
   `scripts/screenshot.ts /` from PowerShell, or set `MSYS_NO_PATHCONV=1`.
 - **`npx` on Windows runs through a `.cmd` shim, and cmd.exe eats `>`.** Any

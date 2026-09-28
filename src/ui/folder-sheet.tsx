@@ -3,7 +3,7 @@ import { Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Body, Button, Field, ListRow, Notice } from './components';
 import { CONTENT_MAX_WIDTH, elevation, radius, space, type, useTheme } from './theme';
-import { GLYPH } from './glyphs';
+import { Icon } from './glyphs';
 import {
   canHoldFolders,
   childrenOf,
@@ -172,7 +172,7 @@ export function FolderSheet({
               hitSlop={8}
               style={{ padding: space.sm }}
             >
-              <Text style={{ color: t.textMuted, fontSize: 20 }}>{GLYPH.close}</Text>
+              <Icon name="close" color={t.textMuted} size={22} />
             </Pressable>
           </View>
 

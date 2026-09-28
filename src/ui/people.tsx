@@ -1,12 +1,13 @@
 import { useState, type ReactNode } from 'react';
-import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { TextLink } from './legal';
 import { Body, Button, Notice } from './components';
 import { PersonAvatar } from './avatar';
-import { elevation, INPUT_FONT_SIZE, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
-import { GLYPH } from './glyphs';
+import { Sheet, SheetTitle } from './sheet';
+import { INPUT_FONT_SIZE, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
+import { Icon } from './glyphs';
 import {
   atUsername,
   blockFacts,
@@ -99,9 +100,7 @@ export function PersonRow({
             </Text>
           ) : null}
         </View>
-        {onPress && !children ? (
-          <Text style={{ color: t.textMuted, fontSize: 22 }}>{GLYPH.forward}</Text>
-        ) : null}
+        {onPress && !children ? <Icon name="forward" color={t.textMuted} size={20} /> : null}
       </Pressable>
       {children ? <View style={{ flexDirection: 'row', gap: space.xs }}>{children}</View> : null}
     </View>
@@ -150,65 +149,6 @@ export function RowButton({
     >
       <Text style={[type.label, { color: primary ? t.accentText : t.text, fontWeight: '600' }]}>{label}</Text>
     </Pressable>
-  );
-}
-
-/**
- * A sheet's heading. A title, not a `Label`: photographed at 393px, "Report
- * Probe B" in small grey type read as a caption over the list rather than as
- * what the whole sheet was for.
- */
-export function SheetTitle({ children }: { children: string }) {
-  const t = useTheme();
-  return (
-    <Text style={[type.title, { color: t.text }]} accessibilityRole="header">
-      {children}
-    </Text>
-  );
-}
-
-/**
- * The sheet both of the below sit in — the same one the chat's message menu
- * uses — and a post's menu too (src/ui/post.tsx, NOTES §52).
- */
-export function Sheet({ children, onClose }: { children: ReactNode; onClose: () => void }) {
-  const t = useTheme();
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Close"
-        onPress={onClose}
-        style={[
-          {
-            flex: 1,
-            backgroundColor: 'rgba(0, 0, 0, 0.55)',
-            justifyContent: 'flex-end',
-            zIndex: elevation.float + 1,
-          },
-          Platform.OS === 'web' ? ({ backdropFilter: 'blur(6px)' } as object) : null,
-        ]}
-      >
-        <Pressable
-          onPress={() => {}}
-          style={{
-            backgroundColor: t.bg,
-            borderTopLeftRadius: radius.lg,
-            borderTopRightRadius: radius.lg,
-            borderTopWidth: 1,
-            borderColor: t.border,
-            maxHeight: '90%',
-          }}
-        >
-          <ScrollView
-            contentContainerStyle={{ padding: space.lg, gap: space.md }}
-            keyboardShouldPersistTaps="handled"
-          >
-            {children}
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
   );
 }
 
@@ -284,7 +224,7 @@ export function ReportSheet({
 
       <View
         accessibilityRole="radiogroup"
-        style={{ borderWidth: 1, borderColor: t.border, borderRadius: radius.md, overflow: 'hidden' }}
+        style={{ backgroundColor: t.card, borderRadius: radius.md, overflow: 'hidden' }}
       >
         {reasonsFor(kind).map((r, i) => {
           const chosen = reason === r.key;
@@ -307,11 +247,11 @@ export function ReportSheet({
                 paddingVertical: space.sm,
                 borderTopWidth: i === 0 ? 0 : 1,
                 borderTopColor: t.border,
-                backgroundColor: chosen ? t.card : pressed ? t.card : 'transparent',
+                backgroundColor: pressed ? t.bg : 'transparent',
               })}
             >
               {/* A mark as well as a colour — never hue alone. */}
-              <Text style={{ width: 18, color: t.accent, fontSize: 16 }}>{chosen ? GLYPH.right : ''}</Text>
+              <View style={{ width: 20 }}>{chosen ? <Icon name="check" color={t.accent} size={20} /> : null}</View>
               <Text style={[chosen ? type.bodyStrong : type.body, { color: t.text, flex: 1 }]}>{r.label}</Text>
             </Pressable>
           );

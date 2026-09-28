@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from 'react';
-import { Modal, Pressable, Text, useWindowDimensions, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, useWindowDimensions, View } from 'react-native';
 import { useNavigation, useRouter } from 'expo-router';
-import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
-import { GLYPH } from './glyphs';
+import { CONTENT_MAX_WIDTH, space, TOUCH_TARGET, useTheme } from './theme';
+import { Icon, type IconName } from './glyphs';
+import { Sheet, SheetActions } from './sheet';
 
 /**
  * Where the content column's left edge sits, in px from the window edge.
@@ -26,32 +27,29 @@ function useColumnEdge(): number {
 }
 
 /**
- * The header's own padding, which differs by slot and has to be subtracted.
- *
- * Measured from rendered screenshots rather than assumed: at 1440px wide with a
- * 560px column the content's left edge is 440, and a header TITLE given a
- * 424px margin rendered at 440 while a header LEFT control given the same 424
- * rendered at 424. So the title slot contributes space.lg of padding and the
- * left and right slots contribute none.
+ * The header's own padding for its left and right slots, which has to be
+ * subtracted. Measured from rendered screenshots rather than assumed: at 1440px
+ * wide with a 560px column the content's left edge is 440, and a header LEFT
+ * control given a 424px margin rendered at 424 — so those slots contribute none.
  */
-const TITLE_SLOT_PADDING = space.lg;
 const CONTROL_SLOT_PADDING = 0;
 
 /**
  * A header overflow menu (⋯).
  *
- * React Native has no menu primitive and no popover, so this is a `Modal` with a
- * full-screen transparent backdrop and a panel pinned under the header's
- * top-right corner. A Modal rather than an absolutely-positioned View because
- * only a Modal reliably paints above the navigation header on both web and
- * native, and it captures the outside tap that dismisses the menu.
- *
  * This exists so that set-level actions — and Delete in particular — stop being
  * full-width buttons stacked in the scroll view directly under the navigation
  * controls, where a mis-tap reached a destructive action.
+ *
+ * It was a small panel pinned under the header's top-right corner. It is a
+ * `Sheet` now, like every other temporary thing (NOTES §56.3): the page dims
+ * and blurs, and the choices rise from the bottom, each with its icon, where a
+ * thumb reaches them — the top right corner of a phone is the hardest place on
+ * it to reach.
  */
 
 export interface MenuItem {
+  icon: IconName;
   label: string;
   onPress: () => void;
   /** Renders in the danger colour. Does NOT remove the caller's confirm step. */
@@ -81,71 +79,25 @@ export function OverflowMenu({ items, accessibilityLabel = 'More actions' }: {
           marginRight: gutter,
         }}
       >
-        <Text style={{ color: t.accent, fontSize: 24, lineHeight: 28 }}>{GLYPH.more}</Text>
+        <Icon name="more" color={t.text} />
       </Pressable>
 
-      <Modal
-        visible={open}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
-      >
-        {/* The backdrop is the dismiss target, so the menu closes the way every
-            other menu on the platform does. */}
-        <Pressable
-          onPress={() => setOpen(false)}
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}
-        >
-          <View
-            style={{
-              position: 'absolute',
-              top: 56,
-              right: space.md,
-              minWidth: 200,
-              backgroundColor: t.card,
-              borderColor: t.border,
-              borderWidth: 1,
-              borderRadius: radius.md,
-              overflow: 'hidden',
-              // Enough lift to read as floating above the page on both themes.
-              shadowColor: '#000',
-              shadowOpacity: 0.3,
-              shadowRadius: 16,
-              shadowOffset: { width: 0, height: 8 },
-              elevation: 8,
-            }}
-          >
-            {items.map((item, i) => (
-              <Pressable
-                key={item.label}
-                accessibilityRole="button"
-                onPress={() => {
-                  // Close FIRST: leaving the menu open while a confirm or a
-                  // navigation happens underneath it strands the user behind a
-                  // backdrop they then have to dismiss.
-                  setOpen(false);
-                  item.onPress();
-                }}
-                style={({ pressed }) => ({
-                  paddingHorizontal: space.lg,
-                  paddingVertical: space.md,
-                  minHeight: TOUCH_TARGET,
-                  justifyContent: 'center',
-                  backgroundColor: pressed ? t.bg : 'transparent',
-                  borderTopWidth: i === 0 ? 0 : 1,
-                  borderTopColor: t.border,
-                })}
-              >
-                <Text
-                  style={[type.body, { color: item.destructive ? t.danger : t.text }]}
-                >
-                  {item.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </Pressable>
-      </Modal>
+      {open ? (
+        <Sheet onClose={() => setOpen(false)}>
+          <SheetActions
+            actions={items.map((item) => ({
+              ...item,
+              onPress: () => {
+                // Close FIRST: leaving the menu open while a confirm or a
+                // navigation happens underneath it strands the user behind a
+                // backdrop they then have to dismiss.
+                setOpen(false);
+                item.onPress();
+              },
+            }))}
+          />
+        </Sheet>
+      ) : null}
     </>
   );
 }
@@ -204,42 +156,22 @@ export function HeaderBackButton({
         marginLeft: gutter,
       }}
     >
-      {/* Sized to read as a chevron rather than a stray character. */}
-      <Text style={{ color: t.accent, fontSize: 32, lineHeight: 36, marginTop: -4 }}>{GLYPH.back}</Text>
+      {/* The text colour, as the owner's picture has it: the header's
+          controls are quiet, and the accent is kept for what is chosen. */}
+      <Icon name="back" color={t.text} size={26} />
     </Pressable>
   );
 }
 
 /**
- * A header title inset to the content column.
- *
- * Only needed on screens with NO back control. Where a chevron is present the
- * title is laid out after it, and since the chevron is already inset the title
- * follows automatically.
- *
- * Without this the header was aligned on one side only — the gear pulled in to
- * the column's right edge while "Study" stayed hard against the window's left —
- * which looked worse than leaving both at the window edges.
- */
-export function HeaderTitle({ children }: { children: string }) {
-  const t = useTheme();
-  const gutter = Math.max(0, useColumnEdge() - TITLE_SLOT_PADDING);
-  return (
-    <Text style={[type.title, { color: t.text, marginLeft: gutter }]} numberOfLines={1}>
-      {children}
-    </Text>
-  );
-}
-
-/**
- * Several glyph buttons at the right of a header — Nomi's "your chats" and
+ * Several icon buttons at the right of a header — Nomi's "your chats" and
  * "new chat". One gutter for the row, not one per button, so the last button
  * lines up with the content column like every other header control.
  */
 export function HeaderActions({
   actions,
 }: {
-  actions: { glyph: string; label: string; onPress: () => void }[];
+  actions: { icon: IconName; label: string; onPress: () => void }[];
 }) {
   const t = useTheme();
   const gutter = useColumnEdge() - CONTROL_SLOT_PADDING;
@@ -254,42 +186,9 @@ export function HeaderActions({
           hitSlop={6}
           style={{ width: TOUCH_TARGET, height: TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' }}
         >
-          <Text style={{ color: t.accent, fontSize: 22, lineHeight: 26 }}>{action.glyph}</Text>
+          <Icon name={action.icon} color={t.text} />
         </Pressable>
       ))}
     </View>
-  );
-}
-
-/** A header button that is just a glyph — the Settings gear on Home. */
-export function HeaderGlyphButton({
-  glyph,
-  onPress,
-  accessibilityLabel,
-}: {
-  glyph: ReactNode;
-  onPress: () => void;
-  accessibilityLabel: string;
-}) {
-  const t = useTheme();
-  const gutter = useColumnEdge() - CONTROL_SLOT_PADDING;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      onPress={onPress}
-      hitSlop={12}
-      // A full 44px target, centred: the gear was both small to hit and sitting
-      // visually high against the title's cap height.
-      style={{
-        width: TOUCH_TARGET,
-        height: TOUCH_TARGET,
-        alignItems: 'flex-end',
-        justifyContent: 'center',
-        marginRight: gutter,
-      }}
-    >
-      <Text style={{ color: t.accent, fontSize: 24, lineHeight: 28 }}>{glyph}</Text>
-    </Pressable>
   );
 }

@@ -150,9 +150,9 @@ export default function Conversation() {
             <OverflowMenu
               accessibilityLabel={`More about ${name}`}
               items={[
-                { label: `See ${name}'s profile`, onPress: () => router.push(`/person/${who.person_id}`) },
-                { label: `Report ${name}`, onPress: () => setReporting(true) },
-                { label: `Block ${name}`, destructive: true, onPress: () => setBlocking(true) },
+                { icon: 'person', label: `See ${name}'s profile`, onPress: () => router.push(`/person/${who.person_id}`) },
+                { icon: 'report', label: `Report ${name}`, destructive: true, onPress: () => setReporting(true) },
+                { icon: 'block', label: `Block ${name}`, destructive: true, onPress: () => setBlocking(true) },
               ]}
             />
           ),

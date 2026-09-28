@@ -4,13 +4,14 @@ import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Body, Button, Notice } from './components';
 import { PersonAvatar } from './avatar';
-import { BlockSheet, ReportSheet, Sheet, SheetTitle } from './people';
-import { ReactionChips } from './message-actions';
+import { BlockSheet, ReportSheet } from './people';
+import { Sheet, SheetActions, SheetTitle } from './sheet';
+import { ReactionChips, ReactionRow } from './message-actions';
 import { petFrame } from './pet';
-import { GLYPH } from './glyphs';
+import { Icon, type IconName } from './glyphs';
 import { radius, space, TOUCH_TARGET, type, useTheme } from './theme';
 import { describeWhen } from '../core/chat';
-import { REACTIONS, tallyReactions, type Reaction } from '../core/emoji';
+import { tallyReactions, type Reaction } from '../core/emoji';
 import { audienceLabel, commentLabel, POST_IMAGE_LINK_SECONDS, streakLine, type FeedPost } from '../core/posts';
 import { petStage, toPetSpecies } from '../core/pet';
 import { atUsername, personName } from '../core/social';
@@ -250,7 +251,7 @@ function PostCard({
           hitSlop={8}
           style={{ width: TOUCH_TARGET, height: TOUCH_TARGET, alignItems: 'flex-end', justifyContent: 'center' }}
         >
-          <Text style={{ color: t.textMuted, fontSize: 22 }}>{GLYPH.more}</Text>
+          <Icon name="more" color={t.textMuted} size={22} />
         </Pressable>
       </View>
 
@@ -265,14 +266,14 @@ function PostCard({
       <ReactionChips tallies={tallies} alignEnd={false} onToggle={onToggleReaction} />
 
       <View style={{ flexDirection: 'row', gap: space.lg }}>
-        <FooterButton label="React" glyph={GLYPH.react} onPress={onMore} />
+        <FooterButton label="React" icon="emoji" onPress={onMore} />
         {onOpen ? <FooterButton label={commentLabel(post.comments)} onPress={onOpen} /> : null}
       </View>
     </View>
   );
 }
 
-function FooterButton({ label, glyph, onPress }: { label: string; glyph?: string; onPress: () => void }) {
+function FooterButton({ label, icon, onPress }: { label: string; icon?: IconName; onPress: () => void }) {
   const t = useTheme();
   return (
     <Pressable
@@ -280,12 +281,16 @@ function FooterButton({ label, glyph, onPress }: { label: string; glyph?: string
       accessibilityLabel={label}
       onPress={onPress}
       hitSlop={6}
-      style={({ pressed }) => ({ minHeight: 32, justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}
+      style={({ pressed }) => ({
+        minHeight: 32,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.tight,
+        opacity: pressed ? 0.6 : 1,
+      })}
     >
-      <Text style={[type.label, { color: t.textMuted, fontWeight: '600' }]}>
-        {glyph ? `${glyph} ` : ''}
-        {label}
-      </Text>
+      {icon ? <Icon name={icon} color={t.textMuted} size={18} /> : null}
+      <Text style={[type.label, { color: t.textMuted, fontWeight: '600' }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -365,7 +370,7 @@ function SetPeek({ setId, title, cards }: { setId: string; title: string | null;
             {cards} card{cards === 1 ? '' : 's'} · Open to study
           </Text>
         </View>
-        <Text style={{ color: t.textMuted, fontSize: 22 }}>{GLYPH.forward}</Text>
+        <Icon name="forward" color={t.textMuted} size={20} />
       </Pressable>
 
       {isLoading ? null : card ? (
@@ -468,60 +473,41 @@ function PostSheet({
   onBlock: () => void;
   onClose: () => void;
 }) {
-  const t = useTheme();
   const [confirming, setConfirming] = useState(false);
   const name = nameOf(post);
 
+  // Delete asks once, in place — it takes the photo and every comment with
+  // it — and the confirmation is the one filled button, in the danger colour.
+  if (confirming) {
+    return (
+      <Sheet onClose={onClose}>
+        <SheetTitle>Delete this post?</SheetTitle>
+        <Body muted>Its comments and reactions go with it.</Body>
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        <Button label="Delete post" variant="danger" onPress={onDelete} busy={busy} />
+        <Button label="Keep it" variant="secondary" onPress={() => setConfirming(false)} disabled={busy} />
+      </Sheet>
+    );
+  }
+
   return (
     <Sheet onClose={onClose}>
-      <SheetTitle>{mine ? 'Your post' : `${name}'s post`}</SheetTitle>
       {error ? <Notice tone="error">{error}</Notice> : null}
-
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-        {REACTIONS.map((r) => (
-          <Pressable
-            key={r.emoji}
-            accessibilityRole="button"
-            accessibilityLabel={r.label}
-            onPress={() => onReact(r.emoji)}
-            disabled={busy}
-            style={({ pressed }) => ({
-              width: 46,
-              height: 46,
-              borderRadius: 23,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderWidth: 1,
-              borderColor: t.border,
-              backgroundColor: pressed ? t.card : 'transparent',
-            })}
-          >
-            <Text style={{ fontSize: 24 }}>{r.emoji}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      {mine ? (
-        confirming ? (
-          <>
-            <Body>Delete this post? Its comments and reactions go with it.</Body>
-            <Button label="Delete post" variant="danger" onPress={onDelete} busy={busy} />
-            <Button label="Keep it" variant="secondary" onPress={() => setConfirming(false)} disabled={busy} />
-          </>
-        ) : (
-          <>
-            <Button label="Edit post" variant="secondary" onPress={onEdit} disabled={busy} />
-            <Button label="Delete post" variant="secondary" onPress={() => setConfirming(true)} disabled={busy} />
-          </>
-        )
-      ) : (
-        <>
-          <Button label={`See ${name}'s profile`} variant="secondary" onPress={onViewProfile} disabled={busy} />
-          <Button label="Report this post" variant="secondary" onPress={onReport} disabled={busy} />
-          <Button label={`Block ${name}`} variant="secondary" onPress={onBlock} disabled={busy} />
-        </>
-      )}
-      <Button label="Cancel" variant="secondary" onPress={onClose} disabled={busy} />
+      <ReactionRow onReact={onReact} disabled={busy} />
+      <SheetActions
+        actions={
+          mine
+            ? [
+                { icon: 'edit', label: 'Edit post', onPress: onEdit, disabled: busy },
+                { icon: 'trash', label: 'Delete post', onPress: () => setConfirming(true), destructive: true, disabled: busy },
+              ]
+            : [
+                { icon: 'person', label: `See ${name}'s profile`, onPress: onViewProfile, disabled: busy },
+                { icon: 'report', label: 'Report this post', onPress: onReport, destructive: true, disabled: busy },
+                { icon: 'block', label: `Block ${name}`, onPress: onBlock, destructive: true, disabled: busy },
+              ]
+        }
+      />
     </Sheet>
   );
 }

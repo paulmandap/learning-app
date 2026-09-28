@@ -14,7 +14,7 @@ import {
   Screen,
   SectionRow,
 } from '../../src/ui/components';
-import { GLYPH } from '../../src/ui/glyphs';
+import { Icon } from '../../src/ui/glyphs';
 import { radius, space, type, useTheme } from '../../src/ui/theme';
 import {
   folderMeta,
@@ -344,7 +344,7 @@ function FolderRow({
         opacity: pressed ? 0.7 : 1,
       })}
     >
-      <Text style={{ fontSize: 18 }}>📁</Text>
+      <Icon name="folder" color={isOver ? t.accent : t.textMuted} size={22} />
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={[type.bodyStrong, { color: t.text }]} numberOfLines={1}>
           {folder.name}
@@ -353,7 +353,7 @@ function FolderRow({
           {isOver ? 'Drop it in here' : folderMeta(sets.length, due)}
         </Text>
       </View>
-      <Text style={{ color: t.textMuted, fontSize: 22 }}>{GLYPH.forward}</Text>
+      <Icon name="forward" color={t.textMuted} size={20} />
     </Pressable>
   );
 }
@@ -404,17 +404,11 @@ function FolderGroup({
           opacity: pressed ? 0.7 : 1,
         })}
       >
-        {/* The chevron turns rather than swapping character, so open and shut
-            are the same shape in two positions — one glyph, no icon set. */}
-        <Text
-          style={{
-            color: t.textMuted,
-            fontSize: 20,
-            transform: [{ rotate: open ? '90deg' : '0deg' }],
-          }}
-        >
-          {GLYPH.forward}
-        </Text>
+        {/* The chevron turns rather than swapping icon, so open and shut are
+            the same shape in two positions. */}
+        <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}>
+          <Icon name="forward" color={t.textMuted} size={20} />
+        </View>
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={[type.bodyStrong, { color: t.text }]} numberOfLines={1}>
             {folder.name}

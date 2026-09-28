@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useIsFocused } from 'expo-router';
 import { NomiCharacter } from './nomi-character';
-import { GLYPH } from './glyphs';
+import { Icon } from './glyphs';
 import { useReducedMotion } from './motion';
 import { INPUT_FONT_SIZE, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
 import { Button } from './components';
@@ -502,9 +502,7 @@ export function Composer({
           backgroundColor: canSend ? t.accent : t.border,
         }}
       >
-        <Text style={{ color: canSend ? t.accentText : t.textMuted, fontSize: 20, fontWeight: '700' }}>
-          {GLYPH.send}
-        </Text>
+        <Icon name="send" color={canSend ? t.accentText : t.textMuted} size={20} />
       </Pressable>
       </View>
     </View>

@@ -3,7 +3,7 @@ import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Body, Button, Notice } from './components';
-import { Sheet, SheetTitle } from './people';
+import { Sheet, SheetTitle } from './sheet';
 import { TextLink } from './legal';
 import { space, type, useTheme } from './theme';
 import { COMMUNITY_RULES, RULES_CONSEQUENCES, ruleTitle } from '../core/rules';

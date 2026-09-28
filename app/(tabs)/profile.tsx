@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -12,13 +12,12 @@ import {
   Notice,
   Screen,
   SectionRow,
-  TitleRow,
+  TopBar,
 } from '../../src/ui/components';
 import { Avatar } from '../../src/ui/avatar';
 import { TextLink } from '../../src/ui/legal';
 import { PersonRow, RowButton } from '../../src/ui/people';
-import { TabIcon } from '../../src/ui/glyphs';
-import { TOUCH_TARGET, space, type, useTheme } from '../../src/ui/theme';
+import { space, type, useTheme } from '../../src/ui/theme';
 import { fetchProfile } from '../../src/data/profile';
 import {
   acceptFriendRequest,
@@ -153,7 +152,10 @@ export default function Profile() {
 
   return (
     <Screen>
-      <TitleRow title="Profile" action={<SettingsButton onPress={() => router.push('/settings')} />} />
+      {/* Settings at the top right, where the bar's actions go (NOTES §56.3).
+          A gear now, as in the owner's picture — it was the sliders the
+          Settings tab used to wear. */}
+      <TopBar title="Profile" actions={[{ icon: 'settings', label: 'Settings', onPress: () => router.push('/settings') }]} />
 
       {moderator.data ? (
         <Button
@@ -391,35 +393,6 @@ function stateLabel(state: FriendState): string | undefined {
     default:
       return undefined;
   }
-}
-
-/**
- * The way to Settings, top right.
- *
- * The same two sliders the Settings tab used to wear, so the thing somebody
- * looked for at the bottom of the screen yesterday is recognisable at the top
- * today. Drawn, not typed — the gear character is an emoji on some phones
- * (src/ui/glyphs.tsx).
- */
-function SettingsButton({ onPress }: { onPress: () => void }) {
-  const t = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Settings"
-      onPress={onPress}
-      hitSlop={8}
-      style={({ pressed }) => ({
-        width: TOUCH_TARGET,
-        height: TOUCH_TARGET,
-        alignItems: 'flex-end',
-        justifyContent: 'center',
-        opacity: pressed ? 0.6 : 1,
-      })}
-    >
-      <TabIcon name="settings" color={t.accent} ground={t.bg} />
-    </Pressable>
-  );
 }
 
 /**

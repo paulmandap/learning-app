@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { Children, Fragment, useEffect, useRef, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -19,7 +19,7 @@ import {
   type,
   useTheme,
 } from './theme';
-import { GLYPH } from './glyphs';
+import { Icon, type IconName } from './glyphs';
 
 /**
  * Centred CONTENT_MAX_WIDTH column on desktop, full width on mobile.
@@ -81,17 +81,162 @@ export function Title({ children }: { children: ReactNode }) {
  *
  * ## No gutter here, deliberately
  *
- * `menu.tsx` has `HeaderTitle` and `HeaderGlyphButton`, which look like exactly
- * this and are not: they carry a `marginLeft`/`marginRight` that compensates for
- * a stack header spanning the whole window. Inside `Screen` the column is
- * already centred at CONTENT_MAX_WIDTH, so reusing them would inset the row a
- * second time and push the control off the column's edge.
+ * The stack header's controls in `menu.tsx` carry a `marginLeft`/`marginRight`
+ * that compensates for a header spanning the whole window. Inside `Screen` the
+ * column is already centred at CONTENT_MAX_WIDTH, so the same inset here would
+ * push the control off the column's edge.
  */
 export function TitleRow({ title, action }: { title: string; action?: ReactNode }) {
   return (
     <View style={styles.titleRow}>
       <Title>{title}</Title>
       {action ?? null}
+    </View>
+  );
+}
+
+export interface TopBarAction {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  /** A count on the icon's corner — unread messages. */
+  badge?: string | null;
+}
+
+/**
+ * The top of a tab: a large title on the left, its actions as icons on the
+ * right (NOTES §56.3, the owner's picture).
+ *
+ * The redesign's rule: the top bar carries the screen's actions — search,
+ * messages, settings, a new message — and the content does not. Search at the
+ * bottom of Profile is the owner's own example of what this fixes.
+ *
+ * `brand` adds Nomi's owl and name above the title, as the pictures do on
+ * Community.
+ */
+export function TopBar({ title, brand, actions = [] }: { title: string; brand?: boolean; actions?: TopBarAction[] }) {
+  const t = useTheme();
+  return (
+    <View style={{ gap: space.hair }}>
+      {brand ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.tight }}>
+          <Icon name="nomi" color={t.accent} size={20} />
+          <Text style={[type.bodyStrong, { color: t.text }]}>Nomi</Text>
+        </View>
+      ) : null}
+      <View style={styles.titleRow}>
+        <Text style={[type.display, { color: t.text, flex: 1 }]} accessibilityRole="header" numberOfLines={1}>
+          {title}
+        </Text>
+        {actions.length > 0 ? (
+          // The last icon's own padding pulled back, so it lines up with the
+          // column's right edge the way the title lines up with its left.
+          <View style={{ flexDirection: 'row', marginRight: -space.sm }}>
+            {actions.map((a) => (
+              <IconButton key={a.label} icon={a.icon} label={a.label} onPress={a.onPress} badge={a.badge} />
+            ))}
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * An icon that is a button: a full 44 pt target, the icon centred in it.
+ *
+ * The label is what a screen reader says and what the probes press — an icon
+ * never stands alone for either. With a badge, the label says the count too.
+ */
+export function IconButton({
+  icon,
+  label,
+  onPress,
+  color,
+  badge,
+  filled,
+  disabled,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  color?: string;
+  badge?: string | null;
+  filled?: boolean;
+  disabled?: boolean;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={badge ? `${label}, ${badge} new` : label}
+      accessibilityState={{ disabled: !!disabled }}
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={4}
+      style={({ pressed }) => ({
+        width: TOUCH_TARGET,
+        height: TOUCH_TARGET,
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: pressed ? 0.6 : disabled ? 0.45 : 1,
+      })}
+    >
+      <View>
+        <Icon name={icon} color={color ?? t.text} filled={filled} />
+        {badge ? <IconBadge label={badge} /> : null}
+      </View>
+    </Pressable>
+  );
+}
+
+/** A count on an icon's corner — the Community tab, the messages icon. */
+export function IconBadge({ label }: { label: string }) {
+  const t = useTheme();
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        top: -5,
+        right: -9,
+        minWidth: 18,
+        height: 18,
+        paddingHorizontal: 4,
+        borderRadius: 9,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: t.accent,
+        borderWidth: 2,
+        borderColor: t.bg,
+      }}
+    >
+      <Text style={{ color: t.accentText, fontSize: 10, fontWeight: '700' }}>{label}</Text>
+    </View>
+  );
+}
+
+/**
+ * Rows with a hairline between them — how a list looks now (NOTES §56.3).
+ *
+ * The redesign's rule: lists are rows with dividers, not a stack of bordered
+ * boxes; a card is for something that is a distinct object. `card` puts the
+ * rows on one rounded surface instead, as a sheet's choices are.
+ *
+ * The line is its own View at reduced strength, not a border on each row: the
+ * border colour at full strength between every row is the "heavy boxes" look
+ * this replaces, and the owner's picture uses a faint one.
+ */
+export function Rows({ children, card }: { children: ReactNode; card?: boolean }) {
+  const t = useTheme();
+  const items = Children.toArray(children);
+  return (
+    <View style={card ? { backgroundColor: t.card, borderRadius: radius.md, overflow: 'hidden' } : undefined}>
+      {items.map((child, i) => (
+        <Fragment key={i}>
+          {i > 0 ? <View style={{ height: 1, backgroundColor: t.border, opacity: 0.6 }} /> : null}
+          {child}
+        </Fragment>
+      ))}
     </View>
   );
 }
@@ -257,7 +402,7 @@ export function OptionList({ options }: { options: Option[] }) {
             </View>
             <Text style={[type.caption, { color: t.textMuted }]}>{o.detail}</Text>
           </View>
-          <Text style={{ color: t.textMuted, fontSize: 22 }}>{GLYPH.forward}</Text>
+          <Icon name="forward" color={t.textMuted} size={20} />
         </Pressable>
       ))}
     </View>
@@ -395,8 +540,9 @@ export function ListRow({
           </View>
         ) : null}
       </View>
-      {/* A glyph rather than an icon set — see src/ui/glyphs.tsx. */}
-      <Text style={{ color: t.textMuted, fontSize: 22, marginLeft: space.md }}>{GLYPH.forward}</Text>
+      <View style={{ marginLeft: space.md }}>
+        <Icon name="forward" color={t.textMuted} size={20} />
+      </View>
     </Pressable>
   );
 }

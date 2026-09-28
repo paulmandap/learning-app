@@ -10,14 +10,15 @@ import {
   Notice,
   PillButton,
   SectionRow,
-  Title,
+  TopBar,
 } from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
-import { Segment } from '../../src/ui/segment';
+import { Segment, UnderlineTabs } from '../../src/ui/segment';
 import { PersonAvatar } from '../../src/ui/avatar';
-import { PersonRow, Sheet, SheetTitle } from '../../src/ui/people';
+import { PersonRow } from '../../src/ui/people';
+import { Sheet, SheetTitle } from '../../src/ui/sheet';
 import { PostList } from '../../src/ui/post';
-import { GLYPH, TabIcon } from '../../src/ui/glyphs';
+import { Icon } from '../../src/ui/glyphs';
 import { PostsUnavailableError, listFeed } from '../../src/data/posts';
 import { joinPages, nextCursor, type FeedCursor } from '../../src/core/posts';
 import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
@@ -99,9 +100,9 @@ export default function Community() {
     // which is what bounds the pane below (NOTES §33).
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <View style={{ alignItems: 'center', paddingHorizontal: space.lg, paddingTop: space.lg }}>
-        <View style={{ width: '100%', maxWidth: CONTENT_MAX_WIDTH, gap: space.md }}>
-          <Title>Community</Title>
-          <Segment value={pane} options={PANES} onChange={setPane} />
+        <View style={{ width: '100%', maxWidth: CONTENT_MAX_WIDTH, gap: space.sm }}>
+          <TopBar title="Community" brand />
+          <UnderlineTabs value={pane} options={PANES} onChange={setPane} />
         </View>
       </View>
 
@@ -450,7 +451,7 @@ function StarButton({
     >
       {/* Filled or hollow as well as coloured — never hue alone, the same rule
           the quiz options follow. */}
-      <Text style={{ fontSize: 19, color: on ? t.accent : t.textMuted }}>{on ? '★' : '☆'}</Text>
+      <Icon name="star" color={on ? t.accent : t.textMuted} size={20} filled={on} />
       <Text style={[type.caption, { color: on ? t.accent : t.textMuted }]}>{count}</Text>
     </Pressable>
   );
@@ -532,13 +533,13 @@ function InboxPane() {
             backgroundColor: t.bg,
           }}
         >
-          <TabIcon name="community" color={t.accent} ground={t.bg} />
+          <Icon name="people" color={t.accent} size={22} />
         </View>
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={[type.bodyStrong, { color: t.text }]}>Everyone</Text>
           <Text style={[type.caption, { color: t.textMuted }]}>The room everyone signed in shares</Text>
         </View>
-        <Text style={{ color: t.textMuted, fontSize: 22 }}>{GLYPH.forward}</Text>
+        <Icon name="forward" color={t.textMuted} size={20} />
       </Pressable>
 
       {off ? (

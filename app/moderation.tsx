@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Body, Button, Card, Chip, LoadingState, Notice, Screen, Title } from '../src/ui/components';
 import { StatePanel } from '../src/ui/states';
 import { PersonAvatar } from '../src/ui/avatar';
-import { GLYPH } from '../src/ui/glyphs';
+import { GLYPH, Icon } from '../src/ui/glyphs';
 import { INPUT_FONT_SIZE, radius, space, TOUCH_TARGET, type, useTheme } from '../src/ui/theme';
 import {
   dismissReports,
@@ -234,7 +234,7 @@ function ReportCard({ reports, onDone }: { reports: QueuedReport[]; onDone: () =
                   backgroundColor: rule === r.key ? t.bg : 'transparent',
                 }}
               >
-                <Text style={{ width: 16, color: t.accent }}>{rule === r.key ? GLYPH.right : ''}</Text>
+                <View style={{ width: 20 }}>{rule === r.key ? <Icon name="check" color={t.accent} size={20} /> : null}</View>
                 <Text style={[rule === r.key ? type.bodyStrong : type.body, { color: t.text }]}>{r.title}</Text>
               </Pressable>
             ))}

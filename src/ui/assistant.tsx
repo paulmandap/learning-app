@@ -8,7 +8,7 @@ import { useNomiConversation } from '../data/nomi-session';
 import type { NomiState } from '../core/nomi-motion';
 import { NomiCharacter } from './nomi-character';
 import { ActionCard, ChatBubble, Composer } from './nomi';
-import { GLYPH } from './glyphs';
+import { GLYPH, Icon } from './glyphs';
 
 /**
  * Nomi, in context — the floating ✦ (Phase 9c; a chat since NOTES §36).
@@ -200,7 +200,7 @@ export function StudyAssistant() {
             <Text style={[type.label, { color: t.accent }]}>Open chat</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={() => setOpen(false)} hitSlop={10}>
-            <Text style={{ fontSize: 20, color: t.textMuted }}>{GLYPH.close}</Text>
+            <Icon name="close" color={t.textMuted} size={22} />
           </Pressable>
         </View>
 

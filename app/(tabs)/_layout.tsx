@@ -7,7 +7,7 @@ import { unreadMessages } from '../../src/data/messages';
 import { badgeLabel, INBOX_POLL_MS } from '../../src/core/messages';
 import { useSessionStore } from '../../src/data/session';
 import { radius, space, useTheme } from '../../src/ui/theme';
-import { TabIcon, type TabIconName } from '../../src/ui/glyphs';
+import { Icon, type IconName } from '../../src/ui/glyphs';
 
 /**
  * Global navigation (spec §2).
@@ -55,11 +55,13 @@ const SIDEBAR_MIN_WIDTH = 800;
  * from your picture on Home, as a pushed screen (app/settings.tsx).
  */
 const TABS = [
-  { name: 'index', href: '/', label: 'Nomi', icon: 'study' },
+  // Nomi's owl, since the tab is Nomi's (NOTES §40) — it was two cards, from
+  // when the tab was called Study.
+  { name: 'index', href: '/', label: 'Nomi', icon: 'nomi' },
   { name: 'notes', href: '/notes', label: 'Notes', icon: 'notes' },
-  { name: 'community', href: '/community', label: 'Community', icon: 'community' },
+  { name: 'community', href: '/community', label: 'Community', icon: 'people' },
   { name: 'progress', href: '/progress', label: 'Progress', icon: 'progress' },
-  { name: 'profile', href: '/profile', label: 'Profile', icon: 'profile' },
+  { name: 'profile', href: '/profile', label: 'Profile', icon: 'person' },
 ] as const;
 
 /**
@@ -68,12 +70,13 @@ const TABS = [
  * `TabTrigger asChild` hands us `isFocused` and the press handling, so this is
  * only appearance. A ref is required because the trigger forwards one.
  *
- * Label AND icon, always. The icons are decorative — two cards, a page, three
- * bars and two sliders are not self-evident, and an icon-only bar would be a
+ * Label AND icon, always. The icons are decorative — an owl, a page, three
+ * bars and a person are not self-evident, and an icon-only bar would be a
  * guessing game. The words are what makes it navigable. The icons are drawn
- * in `src/ui/glyphs.tsx`; they used to be four unrelated Unicode characters.
+ * with Views in `src/ui/glyphs.tsx` (NOTES §56.2); they used to be four
+ * unrelated Unicode characters.
  */
-const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; icon: TabIconName; badge?: string | null }>(
+const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; icon: IconName; badge?: string | null }>(
   ({ label, icon, badge, isFocused, children, ...props }, ref) => {
     const t = useTheme();
     const { width } = useWindowDimensions();
@@ -86,6 +89,9 @@ const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; icon: 
         {...props}
         accessibilityRole="tab"
         accessibilityState={{ selected: !!isFocused }}
+        // What react-native-web actually puts in the page; it drops the
+        // state above (NOTES §56.3).
+        aria-selected={!!isFocused}
         accessibilityLabel={badge ? `${label}, ${badge} new` : label}
         style={{
           flex: sidebar ? undefined : 1,
@@ -104,7 +110,7 @@ const TabButton = forwardRef<View, TabTriggerSlotProps & { label: string; icon: 
         }}
       >
         <View>
-          <TabIcon name={icon} color={tint} ground={sidebar && isFocused ? t.bg : t.card} />
+          <Icon name={icon} color={tint} />
           {/* Unread messages, on Community (NOTES §53, the owner's choice). On
               the icon's corner, where every phone puts one, so the label below
               stays whole. */}

@@ -415,13 +415,14 @@ export default function SetScreen() {
                 <OverflowMenu
                   items={[
                     {
+                      icon: 'person',
                       label: `See ${authorName(readable.owner?.owner_name)}'s profile`,
                       onPress: () => router.push(`/person/${readable.owner?.owner_id}`),
                     },
                     // Pass a good set on (NOTES §52): it arrives in the feed with
                     // its cards flippable, and its owner's name on it.
-                    { label: 'Post about this set', onPress: () => router.push(`/post/new?set=${setId}`) },
-                    { label: 'Report this set', onPress: () => setReportingSet(true) },
+                    { icon: 'compose', label: 'Post about this set', onPress: () => router.push(`/post/new?set=${setId}`) },
+                    { icon: 'report', label: 'Report this set', destructive: true, onPress: () => setReportingSet(true) },
                   ]}
                 />
               )
@@ -429,13 +430,13 @@ export default function SetScreen() {
             ? () => (
                 <OverflowMenu
                   items={[
-                    { label: 'Add notes', onPress: () => router.push(`/new?setId=${setId}`) },
-                    { label: 'Rename set', onPress: () => setRenaming(set.title) },
+                    { icon: 'plus', label: 'Add notes', onPress: () => router.push(`/new?setId=${setId}`) },
+                    { icon: 'edit', label: 'Rename set', onPress: () => setRenaming(set.title) },
                     // Only once there is somewhere to move it to. A menu item
                     // that opens a list of no folders is a dead end; the way to
                     // make one is on Home, beside the list it groups.
                     ...(folders.length > 0
-                      ? [{ label: 'Move to folder', onPress: () => setMoving(true) }]
+                      ? [{ icon: 'folder' as const, label: 'Move to folder', onPress: () => setMoving(true) }]
                       : []),
                     // Only once there are cards to share. `public_sets` filters
                     // on status = 'ready', so sharing a set still being made
@@ -443,19 +444,19 @@ export default function SetScreen() {
                     ...(set.status === 'ready'
                       ? [
                           visibility === 'public'
-                            ? { label: 'Stop sharing', onPress: () => setConfirmShare('private') }
-                            : { label: 'Share with everyone', onPress: () => setConfirmShare('public') },
+                            ? { icon: 'lock' as const, label: 'Stop sharing', onPress: () => setConfirmShare('private') }
+                            : { icon: 'everyone' as const, label: 'Share with everyone', onPress: () => setConfirmShare('public') },
                         ]
                       : []),
                     // Only a shared set can go in a post — 0027 refuses a
                     // private one, since nobody reading the post could open it.
                     ...(set.status === 'ready' && visibility === 'public'
-                      ? [{ label: 'Post about this set', onPress: () => router.push(`/post/new?set=${setId}`) }]
+                      ? [{ icon: 'compose' as const, label: 'Post about this set', onPress: () => router.push(`/post/new?set=${setId}`) }]
                       : []),
                     ...(hasFiles
-                      ? [{ label: 'Free up space', onPress: () => setConfirmFree(true) }]
+                      ? [{ icon: 'notes' as const, label: 'Free up space', onPress: () => setConfirmFree(true) }]
                       : []),
-                    { label: 'Delete set', destructive: true, onPress: () => setConfirmDelete(true) },
+                    { icon: 'trash', label: 'Delete set', destructive: true, onPress: () => setConfirmDelete(true) },
                   ]}
                 />
               )

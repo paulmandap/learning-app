@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActionCard, ChatBubble, Composer, NomiWelcome, ThinkingBubble } from '../src/ui/nomi';
 import { LoadingState } from '../src/ui/components';
 import { HeaderActions } from '../src/ui/menu';
-import { GLYPH } from '../src/ui/glyphs';
+import { Icon } from '../src/ui/glyphs';
 import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from '../src/ui/theme';
 import { useNomiConversation } from '../src/data/nomi-session';
 import { useAssistantContext } from '../src/data/assistant-context';
@@ -57,8 +57,8 @@ export default function Nomi() {
           headerRight: () => (
             <HeaderActions
               actions={[
-                { glyph: GLYPH.history, label: 'Your chats', onPress: () => setHistoryOpen(true) },
-                { glyph: GLYPH.newChat, label: 'New chat', onPress: chat.startNew },
+                { icon: 'recent', label: 'Your chats', onPress: () => setHistoryOpen(true) },
+                { icon: 'compose', label: 'New chat', onPress: chat.startNew },
               ]}
             />
           ),
@@ -219,7 +219,7 @@ function ChatHistory({
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Text style={[type.title, { color: t.text, flex: 1 }]}>Your chats</Text>
             <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={10}>
-              <Text style={{ fontSize: 20, color: t.textMuted }}>{GLYPH.close}</Text>
+              <Icon name="close" color={t.textMuted} size={22} />
             </Pressable>
           </View>
 

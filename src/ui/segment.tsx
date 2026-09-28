@@ -100,9 +100,10 @@ export function LevelSegment({
  * that is always absent here or an optional one that is easy to forget there.
  * The appearance is shared; the promise is not.
  *
- * Used by the Community tab for Sets / Top sets / Chat — and, as `role="radio"`,
- * by Add notes for keeping the student's own questions as written or not (NOTES
- * §49), which is a choice of how, not of where, and is announced as one.
+ * Used as `role="radio"` by Add notes for keeping the student's own questions as
+ * written or not (NOTES §49), which is a choice of how, not of where, and is
+ * announced as one — and for Newest / Top and Friends / Everyone. Community's
+ * Feed / Sets / Chat moved to `UnderlineTabs` below (NOTES §56.3).
  */
 export function Segment<T extends string>({
   value,
@@ -155,6 +156,82 @@ export function Segment<T extends string>({
             >
               {o.label}
             </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * Views inside one screen, switched by a slim row of words with a line under
+ * the chosen one — Feed · Sets · Chat on Community (NOTES §56.3, the owner's
+ * picture).
+ *
+ * The redesign's rule: switching what a screen shows is an underline, not big
+ * pill buttons. `Segment` stays for a CHOICE — Newest or Top, Friends or
+ * Everyone — which is a setting, not a place.
+ *
+ * The chosen tab is marked three ways — the accent, a heavier weight, and the
+ * line — so it never rests on colour alone.
+ */
+export function UnderlineTabs<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: readonly { key: T; label: string }[];
+  onChange: (key: T) => void;
+}) {
+  const t = useTheme();
+  return (
+    <View
+      accessibilityRole="tablist"
+      style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: t.border }}
+    >
+      {options.map((o) => {
+        const selected = value === o.key;
+        return (
+          <Pressable
+            key={o.key}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            // react-native-web drops `accessibilityState.selected` — measured
+            // in NOTES §46 (scripts/scroll-probe.ts), so a screen reader could
+            // not tell which tab was current. The aria prop it does pass on.
+            aria-selected={selected}
+            accessibilityLabel={o.label}
+            onPress={() => onChange(o.key)}
+            style={({ pressed }) => ({
+              flex: 1,
+              minHeight: TOUCH_TARGET,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <Text
+              style={[type.body, { color: selected ? t.accent : t.textMuted, fontWeight: selected ? '600' : '400' }]}
+              numberOfLines={1}
+            >
+              {o.label}
+            </Text>
+            {selected ? (
+              <View
+                style={{
+                  position: 'absolute',
+                  left: space.lg,
+                  right: space.lg,
+                  // Over the row's hairline, so the two read as one line that
+                  // thickens under the chosen tab.
+                  bottom: -1,
+                  height: 3,
+                  borderRadius: 2,
+                  backgroundColor: t.accent,
+                }}
+              />
+            ) : null}
           </Pressable>
         );
       })}

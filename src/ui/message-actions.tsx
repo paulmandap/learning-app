@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { Body, Button, Notice } from './components';
-import { elevation, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
-import { GLYPH } from './glyphs';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Notice } from './components';
+import { Sheet, SheetActions } from './sheet';
+import { radius, space, TOUCH_TARGET, type, useTheme } from './theme';
+import { Icon, type IconName } from './glyphs';
 import { EMOJI_GROUPS, REACTIONS, type ReactionTally } from '../core/emoji';
 
 /**
@@ -68,15 +69,9 @@ export function HoverActions({
         pointerEvents: visible ? 'auto' : 'none',
       }}
     >
-      <ActionButton label="React" glyph={GLYPH.react} onPress={() => onPick('react')} />
-      {mine && canEdit ? (
-        <ActionButton label="Edit" glyph={GLYPH.edit} onPress={() => onPick('edit')} />
-      ) : null}
-      <ActionButton
-        label="More"
-        glyph={GLYPH.more}
-        onPress={() => onPick(mine ? 'unsend-everyone' : 'unsend-me')}
-      />
+      <ActionButton label="React" icon="emoji" onPress={() => onPick('react')} />
+      {mine && canEdit ? <ActionButton label="Edit" icon="edit" onPress={() => onPick('edit')} /> : null}
+      <ActionButton label="More" icon="more" onPress={() => onPick(mine ? 'unsend-everyone' : 'unsend-me')} />
       <View style={{ width: 0, borderColor: t.border }} />
     </View>
   );
@@ -84,11 +79,11 @@ export function HoverActions({
 
 function ActionButton({
   label,
-  glyph,
+  icon,
   onPress,
 }: {
   label: string;
-  glyph: string;
+  icon: IconName;
   onPress: () => void;
 }) {
   const t = useTheme();
@@ -107,7 +102,7 @@ function ActionButton({
         backgroundColor: pressed ? t.card : 'transparent',
       })}
     >
-      <Text style={{ color: t.textMuted, fontSize: 15 }}>{glyph}</Text>
+      <Icon name={icon} color={t.textMuted} size={18} />
     </Pressable>
   );
 }
@@ -154,143 +149,134 @@ export function MessageSheet({
   onClose: () => void;
 }) {
   const t = useTheme();
+
+  // The owner's picture: the reactions in a row of their own, then one list of
+  // what can be done, each with its icon — no stack of full-width buttons.
+  // Report and Block in the danger colour; Hide first among somebody else's,
+  // the gentle option and the one most people want (NOTES §51).
+  return (
+    <Sheet onClose={onClose}>
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      <ReactionRow onReact={onReact} disabled={busy} more />
+      <SheetActions
+        actions={
+          mine
+            ? [
+                canEdit ? { icon: 'edit', label: 'Edit message', onPress: onEdit, disabled: busy } : null,
+                { icon: 'trash', label: 'Unsend for everyone', onPress: onUnsendEveryone, disabled: busy },
+                { icon: 'hide', label: 'Unsend for me only', onPress: onUnsendMe, disabled: busy },
+              ]
+            : [
+                { icon: 'hide', label: 'Hide this from my screen', detail: hideDetail, onPress: onUnsendMe, disabled: busy },
+                onViewProfile && name
+                  ? { icon: 'person', label: `See ${name}'s profile`, onPress: onViewProfile, disabled: busy }
+                  : null,
+                onReport
+                  ? { icon: 'report', label: 'Report this message', onPress: onReport, destructive: true, disabled: busy }
+                  : null,
+                onBlock && name
+                  ? { icon: 'block', label: `Block ${name}`, onPress: onBlock, destructive: true, disabled: busy }
+                  : null,
+              ]
+        }
+      />
+      {mine && !canEdit ? (
+        <Text style={[type.caption, { color: t.textMuted }]}>
+          A message can only be edited for {editWindowMinutes} minutes after it is sent.
+        </Text>
+      ) : null}
+    </Sheet>
+  );
+}
+
+/**
+ * The six reactions in a row of their own — a message's sheet and a post's —
+ * and with `more`, a "+" that opens every emoji the app knows.
+ *
+ * Each takes an equal share of the row rather than a fixed 46 pt, so all seven
+ * fit a 320 pt phone without wrapping to a second line.
+ */
+export function ReactionRow({
+  onReact,
+  disabled,
+  more,
+}: {
+  onReact: (emoji: string) => void;
+  disabled?: boolean;
+  more?: boolean;
+}) {
+  const t = useTheme();
   const [picking, setPicking] = useState(false);
+  const cell = ({ pressed }: { pressed: boolean }) => ({
+    flex: 1,
+    height: TOUCH_TARGET,
+    borderRadius: TOUCH_TARGET / 2,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: pressed ? t.bg : 'transparent',
+  });
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Close"
-        onPress={onClose}
-        style={[
-          {
-            flex: 1,
-            backgroundColor: 'rgba(0, 0, 0, 0.55)',
-            justifyContent: 'flex-end',
-            zIndex: elevation.float + 1,
-          },
-          Platform.OS === 'web' ? ({ backdropFilter: 'blur(6px)' } as object) : null,
-        ]}
+    <View style={{ gap: space.sm }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: space.xs,
+          paddingVertical: space.xs,
+          borderRadius: radius.pill,
+          backgroundColor: t.card,
+        }}
       >
-        <Pressable
-          onPress={() => {}}
-          style={{
-            backgroundColor: t.bg,
-            borderTopLeftRadius: radius.lg,
-            borderTopRightRadius: radius.lg,
-            borderTopWidth: 1,
-            borderColor: t.border,
-            padding: space.lg,
-            gap: space.md,
-          }}
-        >
-          {error ? <Notice tone="error">{error}</Notice> : null}
+        {REACTIONS.map((r) => (
+          <Pressable
+            key={r.emoji}
+            accessibilityRole="button"
+            accessibilityLabel={r.label}
+            onPress={() => onReact(r.emoji)}
+            disabled={disabled}
+            style={cell}
+          >
+            <Text style={{ fontSize: 26 }}>{r.emoji}</Text>
+          </Pressable>
+        ))}
+        {more ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Another emoji"
+            accessibilityState={{ expanded: picking }}
+            onPress={() => setPicking((p) => !p)}
+            style={(state) => [cell(state), picking ? { backgroundColor: t.bg } : null]}
+          >
+            <Icon name="plus" color={picking ? t.accent : t.textMuted} size={22} />
+          </Pressable>
+        ) : null}
+      </View>
 
-          {/* The six, then "+". */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-            {REACTIONS.map((r) => (
-              <Pressable
-                key={r.emoji}
-                accessibilityRole="button"
-                accessibilityLabel={r.label}
-                onPress={() => onReact(r.emoji)}
-                style={({ pressed }) => ({
-                  width: 46,
-                  height: 46,
-                  borderRadius: 23,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: pressed ? t.card : 'transparent',
-                  borderWidth: 1,
-                  borderColor: t.border,
-                })}
-              >
-                <Text style={{ fontSize: 24 }}>{r.emoji}</Text>
-              </Pressable>
-            ))}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Another emoji"
-              accessibilityState={{ expanded: picking }}
-              onPress={() => setPicking((p) => !p)}
-              style={({ pressed }) => ({
-                width: 46,
-                height: 46,
-                borderRadius: 23,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: pressed || picking ? t.card : 'transparent',
-                borderWidth: 1,
-                borderColor: picking ? t.accent : t.border,
-              })}
-            >
-              <Text style={{ color: t.text, fontSize: 22 }}>+</Text>
-            </Pressable>
-          </View>
-
-          {picking ? (
-            <ScrollView style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled">
-              {EMOJI_GROUPS.map((group) => (
-                <View key={group.label} style={{ gap: space.hair, marginBottom: space.sm }}>
-                  <Text style={[type.caption, { color: t.textMuted }]}>{group.label}</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                    {group.emoji.map((e) => (
-                      <Pressable
-                        key={e}
-                        accessibilityRole="button"
-                        accessibilityLabel={e}
-                        onPress={() => onReact(e)}
-                        style={{
-                          width: TOUCH_TARGET,
-                          height: TOUCH_TARGET,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <Text style={{ fontSize: 22 }}>{e}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-          ) : null}
-
-          {mine && canEdit ? <Button label="Edit message" variant="secondary" onPress={onEdit} disabled={busy} /> : null}
-          {mine && !canEdit ? (
-            <Body muted>
-              A message can only be edited for {editWindowMinutes} minutes after it is sent.
-            </Body>
-          ) : null}
-
-          {mine ? (
-            <>
-              <Button label="Unsend for everyone" onPress={onUnsendEveryone} busy={busy} />
-              <Button label="Unsend for me only" variant="secondary" onPress={onUnsendMe} disabled={busy} />
-            </>
-          ) : (
-            <>
-              <Button label="Hide this from my screen" onPress={onUnsendMe} busy={busy} />
-              <Body muted>{hideDetail}</Body>
-              {/* Somebody else's message: who they are, and the two ways to
-                  stop them (NOTES §51). Below "Hide", which is the gentle
-                  option and the one most people want. */}
-              {onViewProfile && name ? (
-                <Button label={`See ${name}'s profile`} variant="secondary" onPress={onViewProfile} disabled={busy} />
-              ) : null}
-              {onReport ? (
-                <Button label="Report this message" variant="secondary" onPress={onReport} disabled={busy} />
-              ) : null}
-              {onBlock && name ? (
-                <Button label={`Block ${name}`} variant="secondary" onPress={onBlock} disabled={busy} />
-              ) : null}
-            </>
-          )}
-
-          <Button label="Cancel" variant="secondary" onPress={onClose} disabled={busy} />
-        </Pressable>
-      </Pressable>
-    </Modal>
+      {picking ? (
+        <ScrollView style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled">
+          {EMOJI_GROUPS.map((group) => (
+            <View key={group.label} style={{ gap: space.hair, marginBottom: space.sm }}>
+              <Text style={[type.caption, { color: t.textMuted }]}>{group.label}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                {group.emoji.map((e) => (
+                  <Pressable
+                    key={e}
+                    accessibilityRole="button"
+                    accessibilityLabel={e}
+                    onPress={() => onReact(e)}
+                    disabled={disabled}
+                    style={{ width: TOUCH_TARGET, height: TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <Text style={{ fontSize: 22 }}>{e}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
+    </View>
   );
 }
 

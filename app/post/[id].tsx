@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, LoadingState, Notice, Screen, SectionRow } from '../../src/ui/components';
+import { Body, LoadingState, Notice, Screen, SectionRow } from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
 import { PersonAvatar } from '../../src/ui/avatar';
-import { BlockSheet, ReportSheet, Sheet, SheetTitle } from '../../src/ui/people';
+import { BlockSheet, ReportSheet } from '../../src/ui/people';
+import { Sheet, SheetActions, SheetTitle } from '../../src/ui/sheet';
 import { PostList } from '../../src/ui/post';
 import { Composer } from '../../src/ui/nomi';
-import { GLYPH } from '../../src/ui/glyphs';
+import { Icon } from '../../src/ui/glyphs';
 import { space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
 import { addComment, deleteComment, getPost, listComments } from '../../src/data/posts';
 import { COMMENT_MAX_LENGTH, type PostComment } from '../../src/core/posts';
@@ -127,37 +128,41 @@ export default function PostPage() {
         <Sheet onClose={() => setActing(null)}>
           <SheetTitle>{acting.author_id === myId ? 'Your comment' : `${nameOf(acting)}'s comment`}</SheetTitle>
           {remove.isError ? <Notice tone="error">{(remove.error as Error).message}</Notice> : null}
-          {acting.author_id === myId || mineToModerate ? (
-            <>
-              <Button
-                label={acting.author_id === myId ? 'Delete comment' : 'Remove it from your post'}
-                variant="secondary"
-                onPress={() => remove.mutate(acting.id)}
-                busy={remove.isPending}
-              />
-            </>
-          ) : null}
-          {acting.author_id !== myId ? (
-            <>
-              <Button
-                label="Report this comment"
-                variant="secondary"
-                onPress={() => {
-                  setReporting(acting);
-                  setActing(null);
-                }}
-              />
-              <Button
-                label={`Block ${nameOf(acting)}`}
-                variant="secondary"
-                onPress={() => {
-                  setBlocking({ id: acting.author_id, name: nameOf(acting) });
-                  setActing(null);
-                }}
-              />
-            </>
-          ) : null}
-          <Button label="Cancel" variant="secondary" onPress={() => setActing(null)} />
+          <SheetActions
+            actions={[
+              acting.author_id === myId || mineToModerate
+                ? {
+                    icon: 'trash',
+                    label: acting.author_id === myId ? 'Delete comment' : 'Remove it from your post',
+                    onPress: () => remove.mutate(acting.id),
+                    destructive: true,
+                    disabled: remove.isPending,
+                  }
+                : null,
+              acting.author_id !== myId
+                ? {
+                    icon: 'report',
+                    label: 'Report this comment',
+                    destructive: true,
+                    onPress: () => {
+                      setReporting(acting);
+                      setActing(null);
+                    },
+                  }
+                : null,
+              acting.author_id !== myId
+                ? {
+                    icon: 'block',
+                    label: `Block ${nameOf(acting)}`,
+                    destructive: true,
+                    onPress: () => {
+                      setBlocking({ id: acting.author_id, name: nameOf(acting) });
+                      setActing(null);
+                    },
+                  }
+                : null,
+            ]}
+          />
         </Sheet>
       ) : null}
 
@@ -224,7 +229,7 @@ function CommentRow({
         hitSlop={8}
         style={{ width: TOUCH_TARGET, height: 32, alignItems: 'flex-end', justifyContent: 'center' }}
       >
-        <Text style={{ color: t.textMuted, fontSize: 18 }}>{GLYPH.more}</Text>
+        <Icon name="more" color={t.textMuted} size={20} />
       </Pressable>
     </View>
   );
