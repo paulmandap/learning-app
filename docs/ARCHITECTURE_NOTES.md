@@ -8795,6 +8795,154 @@ probe ever saw this.
   restricted"). The warning was acknowledged as A, as a person would; lifting
   the restriction is the owner's (SQL, below in HANDOFF).
 
+### 61.4 Confirmed on the phone (2026-09-29)
+
+Deployed by the owner, who lifted A's restriction; then, on the iPhone: *"the
+upload photo finally worked."* Asked whether it works for everyone: yes — one
+app, and the picker is the same code for every account and device.
+
+## 62. Sharing inside Nomi, a reported post folded away, and What's new as a sheet (2026-09-29)
+
+The owner, with a screenshot of the Windows share dialog over a post: *"share
+button doesn't work. i don't want it to share outside the app. i want to share
+it inside the app, just like how facebook does it!"* Asked which ways and what
+people who may not see a shared post should see, he chose **Share to your
+feed** and **Send to a friend or group**, and: *"they should not be able to
+see it, just like facebook, there's no 'This post isn't available' it will
+just look messy."* Then, mid-build: a reported post *"should be automatically
+hidden but not so hidden — hidden in a way the user will see that This post
+has been hidden"*; and the Home announcement *"would be better if that will
+appear in the background blur."* Migration 0034, applied by the owner the same
+day (*"i just ran right now the 0034. done. success"*).
+
+### 62.1 Migration 0034 — a repost, and the second half of the rule
+
+- `posts.shared_post_id` → `posts(id)` **on delete cascade**: a repost of a
+  deleted post would be a hole, so it goes. `posts_one_attachment` and
+  `posts_not_empty` widened **by name** to count it.
+- **`shared_post_visible(p_shared)`**: true for a post that shares nothing;
+  otherwise the original must exist and pass `post_visible` for the caller.
+  Everything that reads a post asks it beside `post_visible`: `can_see_post`
+  (so reacting, saving and commenting), `can_see_comment` (hearts and
+  replies), `feed_posts` (the feed, a page, a post, Saved, search),
+  `post_comment_people`, `post_reaction_people`, and `report_content`. **A
+  repost of something the reader may not see is simply not in any row they
+  get** — no hole to draw.
+- `create_post` gains `p_shared_post` (old signature dropped first, as 0032
+  did): only a post the caller may see (so ids cannot be probed), following a
+  repost to its original, never with a photo, set or streak of its own; the
+  rules first, as for any post. `feed_posts` gains the original's author,
+  words and attachment at the end, every old column as it was (`create or
+  replace`, no drop).
+- `tests/reposts.test.ts` (26) holds each recreated function and view to its
+  previous version with only that condition allowed to differ — 0027's
+  `can_see_post` and two views, 0031's `can_see_comment` and comment view,
+  0030's `create_post`, 0033's `report_content`. `destructiveDrops` finds
+  nothing.
+
+### 62.2 Sharing, on screen
+
+- **Share opens a sheet inside Nomi** (`src/ui/share-sheet.tsx`); the phone's
+  share menu is gone from posts (`shareLink` stays for Share profile).
+  **Share to your feed** opens the composer as "Share post" with the original
+  in the box and your words optional, no toolbar. **Send to**: groups and
+  friends with a search box and a Send beside each, "Sent" once gone.
+- **Sending is a message holding the post's link**, which the chat draws as
+  the post (`SentPostCard`), read through `feed_posts` as the reader. No new
+  column. **Only a post everyone can see can be sent** — a friends-only post
+  sent to somebody who is not the author's friend would arrive as a hole, the
+  thing the owner ruled out — so for those the sheet says so instead of
+  listing people. A message whose post the reader may not see (a block, the
+  post since deleted) **is not shown to them at all**; the inbox and a reply's
+  quote read "Sent a post", never a link.
+- **A repost** draws its original in a frame under the reposter's words; the
+  author and words open it. The original's photo is fetched with the feed's.
+- Before 0034, `readPosts` asks for the repost columns and falls back without
+  them, and Share to your feed says it is not switched on yet.
+
+### 62.3 A reported post, folded away for the reporter
+
+"Post hidden — You reported this post, so it's hidden for you." with **Show**,
+wherever a list of posts is drawn. Read from the reporter's own reports (0026's
+policy shows them nothing else) — **no database change, and nobody else's view
+changes**. Folds the moment the report is sent.
+
+### 62.4 What's new, as a sheet
+
+`WhatsNewSheet` rises over Home, "Got it" in the footer, a tap outside is "Got
+it" too. It announces this release — shared posts, bios, search — with a new
+id (`sharing-2026-09-29`) so everybody sees it once, and the **Privacy Policy
+and Terms now say September 29, 2026**: a repost is seen only by people who
+can see both posts and goes with the original; an everyone post can be sent in
+a message; a reported post is folded away for the reporter only.
+`friends-probe`'s "not shown again" check read `#root`, which a sheet is
+outside — it could never have failed; it reads the whole page now.
+
+## 63. The profile photo editor (2026-09-29)
+
+The owner: *"when user picked a photo, they should be able to edit it (just
+like facebook), there's a circle where you could adjust which part of the
+picture you wanna see, and have opacity outside the circle so users won't get
+lost. they should be able to zoom in and zoom out."*
+
+- `PhotoCropSheet` (`src/ui/photo-cropper.tsx`): Cancel · Edit photo · Save;
+  the photo in a square, a circle at 84% of it with **everything outside
+  dimmed** (a ring as thick as the square) and a white edge; **drag** to move,
+  **pinch** or the **mouse wheel** to zoom (a non-passive wheel listener, so
+  the page does not scroll), and a **slider with − and +** — the − drawn with a
+  View, like every icon. `touch-action: none` on both, so the phone does not
+  scroll or zoom the page under a finger.
+- The numbers are `src/core/crop.ts`, pure and tested (`tests/crop.test.ts`,
+  8): the photo always covers the circle — it can never be dragged or zoomed
+  out so far that an empty corner is saved — zoom 1× to 4×, zooming about a
+  point keeps it under the fingers, and what is saved is exactly the circle's
+  square, 256 px JPEG, as the old automatic middle-crop saved.
+- Settings opens it the moment a photo is chosen; Save uploads. The old
+  `squareProfilePhoto` is gone.
+- **react-native-web drops `accessibilityValue`** (measured: the slider had
+  its role and name and no value) the way it drops `accessibilityState` — so
+  the slider passes `aria-valuenow`/`min`/`max`/`valuetext` itself.
+- `photo-probe` now goes through it: the editor, the slider found, Zoom in
+  twice (144%), Save, a 10 KB picture stored.
+
+## 64. The heart pops; a post has no other reactions (2026-09-29)
+
+The owner: *"add animations when liked (heart). remove the reactions for
+post."*
+
+- **`HeartButton`**: fills and counts **the moment it is tapped** — a heart
+  that waits half a second for the database reads as a missed tap — keeping
+  what the tap said until `mine` changes or the heart is refused. On giving
+  (never on taking back) it springs up from small while a red ring spreads and
+  fades behind it; nothing moves for somebody whose phone asks for less
+  motion.
+- **The six reactions are gone from posts**: no reaction row in a post's ⋯
+  sheet, no chips under it. Messages keep all six. Reactions already given
+  stay in the database, unshown; the heart is still the ❤️ reaction.
+- `posts-probe`'s heart step took the filled heart as proof the database had
+  it, which is no longer true the instant it fills; it asks the database until
+  it does.
+
+### 64.1 Measured (with 0034 applied)
+
+- typecheck clean with and without `.expo/` · **1608 tests**, 3 skipped.
+- **isolation 227/227**, the 8 of `checkReposts`: a friend's repost read with
+  the original inside; a repost with a streak refused; a repost of a repost
+  shares the original; unfriended, the repost gone for the one who can no
+  longer see the original and still there for the one who can; reacting,
+  commenting and reposting it refused for them; the original deleted and every
+  repost with it.
+- `posts-probe` **21/21** (share sheet, friends-only not sendable, sent to B
+  and drawn in the chat as a post, shared to the feed with the original
+  inside, the heart, a reported post folded and shown again, nothing changed
+  for its author), `friends-probe` **24/24**, `photo-probe` **7/7**,
+  `messages-probe` **8/8**, `groups-probe` **7/7**, `community-probe`
+  **11/11**, `scroll-probe` **10/10**.
+- `friends-probe`'s report step read "the database has null" once: the owner
+  had dealt with probe reports on `/moderation`, so the next identical report
+  was a second row and `maybeSingle` read two rows as none. It reads the
+  newest now.
+
 
 ## Sources
 

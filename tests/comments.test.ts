@@ -298,7 +298,8 @@ describe('on screen', () => {
     expect(readFileSync('app/_layout.tsx', 'utf8')).not.toContain('name="saved"');
     const data = readFileSync('src/data/posts.ts', 'utf8');
     const body = data.slice(data.indexOf('export async function listSaved'));
-    expect(body).toContain(".from('feed_posts').select(POST_COLUMNS).in('id', order)");
+    // Through `readPosts` since 0034, which asks for a repost's original too.
+    expect(body).toContain("readPosts((columns) => db.from('feed_posts').select(columns).in('id', order))");
   });
 
   it('a heart, a save and a reply are never passed to a mutation by reference (HANDOFF rule 52)', () => {

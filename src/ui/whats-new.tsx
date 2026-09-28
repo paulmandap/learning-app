@@ -1,13 +1,15 @@
 import { useState } from 'react';
-import { Text } from 'react-native';
+import { View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Body, Button, Card } from './components';
+import { Body, Button } from './components';
+import { Sheet, SheetTitle } from './sheet';
+import { Icon } from './glyphs';
 import { TextLink } from './legal';
-import { type, useTheme } from './theme';
+import { radius, space, useTheme } from './theme';
 import { WHATS_NEW, whatsNewKey } from '../core/whats-new';
 
 /**
- * "New: friends", once per person per device (NOTES §51).
+ * What is new, once per person per device (NOTES §51).
  *
  * On this device rather than on the account, unlike the privacy notice (NOTES
  * §37): that one gates what is SENT to Google and has to be recorded; this one
@@ -15,10 +17,12 @@ import { WHATS_NEW, whatsNewKey } from '../core/whats-new';
  * tap. Storage that throws — a private window, cleared site data — means it
  * shows, which is the safe way round for a notice.
  *
- * A card among the others rather than a sheet over them: nothing is blocked
- * until it is read, and Continue keeps the screen's one filled button.
+ * A sheet over Home since §62 — the owner: *"it would be better if that will
+ * appear in the background blur so that users will immediately see it. it's
+ * cleaner that way."* It was a card among the others, which pushed Continue
+ * down and was easy to scroll past. Tapping outside is "Got it" too.
  */
-export function WhatsNewCard({ userId }: { userId: string }) {
+export function WhatsNewSheet({ userId }: { userId: string }) {
   const t = useTheme();
   const router = useRouter();
   // Read on every render rather than once: Home renders before the session has
@@ -32,10 +36,35 @@ export function WhatsNewCard({ userId }: { userId: string }) {
   };
 
   return (
-    <Card>
-      <Text style={[type.bodyStrong, { color: t.text }]} accessibilityRole="header">
-        {WHATS_NEW.title}
-      </Text>
+    <Sheet
+      onClose={dismiss}
+      footer={
+        <>
+          <Button label="Got it" onPress={dismiss} />
+          <Button
+            label="Find friends"
+            variant="secondary"
+            onPress={() => {
+              dismiss();
+              router.push('/search');
+            }}
+          />
+        </>
+      }
+    >
+      <View
+        style={{
+          width: 48,
+          height: 48,
+          borderRadius: radius.md,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: t.card,
+        }}
+      >
+        <Icon name="share" color={t.accent} size={26} />
+      </View>
+      <SheetTitle>{WHATS_NEW.title}</SheetTitle>
       <Body>{WHATS_NEW.body}</Body>
       <Body muted>{WHATS_NEW.policy}</Body>
       <TextLink
@@ -45,16 +74,7 @@ export function WhatsNewCard({ userId }: { userId: string }) {
           router.push('/privacy');
         }}
       />
-      <Button
-        label="Find friends"
-        variant="outline"
-        onPress={() => {
-          dismiss();
-          router.push('/profile');
-        }}
-      />
-      <Button label="Got it" variant="secondary" onPress={dismiss} />
-    </Card>
+    </Sheet>
   );
 }
 

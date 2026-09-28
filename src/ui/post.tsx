@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, Image, Pressable, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Body, Button, Notice, Rows } from './components';
@@ -7,23 +7,24 @@ import { HeaderIconButton } from './menu';
 import { PersonAvatar } from './avatar';
 import { BlockSheet, ReportSheet } from './people';
 import { Sheet, SheetActions, SheetTitle } from './sheet';
-import { ReactionChips, ReactionRow } from './message-actions';
+import { useReducedMotion } from './motion';
 import { petFrame } from './pet';
 import { Icon, type IconName } from './glyphs';
-import { shareLink } from './share';
+import { ShareSheet } from './share-sheet';
 import { radius, space, TOUCH_TARGET, type, useTheme } from './theme';
-import { tallyReactions, type Reaction } from '../core/emoji';
+import type { Reaction } from '../core/emoji';
 import {
   agoShort,
   audienceLabel,
   commentLabel,
   HEART,
   heartsOf,
-  otherReactions,
   POST_IMAGE_LINK_SECONDS,
+  sharedOf,
   streakLine,
   type FeedPost,
 } from '../core/posts';
+import { myReportedPosts } from '../data/social';
 import { petStage, toPetSpecies } from '../core/pet';
 import { atUsername, personName } from '../core/social';
 import {
@@ -58,8 +59,6 @@ import {
 const PHOTO_RATIO_MIN = 0.8;
 const PHOTO_RATIO_MAX = 1.91;
 
-/** How long "Link copied" stays beside the share button. */
-const COPIED_MS = 2500;
 
 export function PostList({
   posts,
@@ -80,7 +79,11 @@ export function PostList({
   const router = useRouter();
   const queryClient = useQueryClient();
   const ids = useMemo(() => posts.map((p) => p.id), [posts]);
-  const paths = useMemo(() => posts.map((p) => p.image_path).filter((p): p is string => !!p), [posts]);
+  // A repost's original photo too (NOTES §62) — it is drawn inside the repost.
+  const paths = useMemo(
+    () => posts.flatMap((p) => [p.image_path, p.shared_image_path]).filter((p): p is string => !!p),
+    [posts],
+  );
 
   const { data: reactions = [] } = useQuery({
     queryKey: ['post-reactions', ids],
@@ -102,6 +105,12 @@ export function PostList({
     queryFn: () => savedAmong(ids),
     enabled: ids.length > 0,
   });
+  // Posts I reported fold away for me, with a way to look again (NOTES §62).
+  const { data: reported = new Set<string>() } = useQuery({
+    queryKey: ['reported-posts'],
+    queryFn: () => myReportedPosts(),
+  });
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
 
   const byPost = useMemo(() => {
     const map = new Map<string, Reaction[]>();
@@ -112,14 +121,8 @@ export function PostList({
   const [acting, setActing] = useState<FeedPost | null>(null);
   const [reporting, setReporting] = useState<FeedPost | null>(null);
   const [blocking, setBlocking] = useState<{ id: string; name: string } | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
+  const [sharing, setSharing] = useState<FeedPost | null>(null);
   const [failed, setFailed] = useState<{ id: string; message: string } | null>(null);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(null), COPIED_MS);
-    return () => clearTimeout(timer);
-  }, [copied]);
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['post-reactions'] });
@@ -167,9 +170,13 @@ export function PostList({
 
       <Rows>
         {posts.map((post) => {
+          if (reported.has(post.id) && !revealed.has(post.id)) {
+            return <HiddenPost key={post.id} onShow={() => setRevealed((r) => new Set(r).add(post.id))} />;
+          }
           const list = byPost.get(post.id) ?? [];
           const hearts = heartsOf(list, myId);
           const isSaved = saved.has(post.id);
+          const original = sharedOf(post);
           return (
             <PostCard
               key={post.id}
@@ -177,10 +184,12 @@ export function PostList({
               full={full}
               when={agoShort(Date.parse(post.created_at), now)}
               imageUrl={post.image_path ? links[post.image_path] ?? null : null}
+              original={original}
+              originalWhen={original ? agoShort(Date.parse(original.created_at), now) : ''}
+              originalImageUrl={original?.image_path ? links[original.image_path] ?? null : null}
+              onOpenOriginal={original ? () => router.push(`/post/${original.id}`) : undefined}
               hearts={hearts}
-              others={tallyReactions(otherReactions(list), myId)}
               saved={isSaved}
-              copied={copied === post.id}
               failed={failed?.id === post.id ? failed.message : null}
               onOpenPerson={() => router.push(`/person/${post.author_id}`)}
               onComment={full ? onComment : () => router.push(`/post/${post.id}`)}
@@ -193,13 +202,11 @@ export function PostList({
                 setFailed(null);
                 save.mutate({ id: post.id, on: !isSaved });
               }}
-              onShare={async () => {
+              // Inside Nomi, never the phone's share menu (NOTES §62, the owner).
+              onShare={() => {
                 setFailed(null);
-                const outcome = await shareLink(`${nameOf(post)} on Nomi`, `/post/${post.id}`);
-                if (outcome === 'copied') setCopied(post.id);
-                if (outcome === 'failed') setFailed({ id: post.id, message: "Couldn't share that just now." });
+                setSharing(post);
               }}
-              onToggleReaction={(emoji, on) => toggle.mutate({ id: post.id, emoji, on })}
             />
           );
         })}
@@ -209,12 +216,8 @@ export function PostList({
         <PostSheet
           post={acting}
           mine={acting.author_id === myId}
-          busy={toggle.isPending || remove.isPending}
-          error={(toggle.error as Error | null)?.message ?? (remove.error as Error | null)?.message ?? null}
-          onReact={(emoji) => {
-            const already = (byPost.get(acting.id) ?? []).some((r) => r.user_id === myId && r.emoji === emoji);
-            toggle.mutate({ id: acting.id, emoji, on: !already });
-          }}
+          busy={remove.isPending}
+          error={(remove.error as Error | null)?.message ?? null}
           onEdit={() => {
             setActing(null);
             router.push(`/post/new?edit=${acting.id}`);
@@ -245,9 +248,18 @@ export function PostList({
             setBlocking({ id: reporting.author_id, name: nameOf(reporting) });
             setReporting(null);
           }}
+          onSent={() => {
+            setRevealed((r) => {
+              const next = new Set(r);
+              next.delete(reporting.id);
+              return next;
+            });
+            void queryClient.invalidateQueries({ queryKey: ['reported-posts'] });
+          }}
           onClose={() => setReporting(null)}
         />
       ) : null}
+      {sharing ? <ShareSheet post={sharing} onClose={() => setSharing(null)} /> : null}
       {blocking ? (
         <BlockSheet
           personId={blocking.id}
@@ -277,10 +289,12 @@ function PostCard({
   full,
   when,
   imageUrl,
+  original,
+  originalWhen,
+  originalImageUrl,
+  onOpenOriginal,
   hearts,
-  others,
   saved,
-  copied,
   failed,
   onOpenPerson,
   onComment,
@@ -288,16 +302,18 @@ function PostCard({
   onHeart,
   onSave,
   onShare,
-  onToggleReaction,
 }: {
   post: FeedPost;
   full: boolean;
   when: string;
   imageUrl: string | null;
+  /** The post this one shares, drawn inside it (NOTES §62). */
+  original: FeedPost | null;
+  originalWhen: string;
+  originalImageUrl: string | null;
+  onOpenOriginal?: () => void;
   hearts: { count: number; mine: boolean };
-  others: ReturnType<typeof tallyReactions>;
   saved: boolean;
-  copied: boolean;
   failed: string | null;
   onOpenPerson: () => void;
   onComment?: () => void;
@@ -305,7 +321,6 @@ function PostCard({
   onHeart: () => void;
   onSave: () => void;
   onShare: () => void;
-  onToggleReaction: (emoji: string, on: boolean) => void;
 }) {
   const t = useTheme();
   const name = nameOf(post);
@@ -368,25 +383,20 @@ function PostCard({
       ) : null}
 
       <PostAttachment post={post} imageUrl={imageUrl} />
-
-      <ReactionChips tallies={others} alignEnd={false} onToggle={onToggleReaction} />
+      {original ? (
+        <EmbeddedPost post={original} when={originalWhen} imageUrl={originalImageUrl} onOpen={onOpenOriginal} />
+      ) : null}
 
       {/* The actions: heart, comments and share together, save at the far end
-          — the owner's picture, and every feed he named. */}
+          — the owner's picture, and every feed he named. The heart is the one
+          reaction a post has since §64 (the owner: "remove the reactions for
+          post"); messages keep all six. */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.lg, marginLeft: -space.sm }}>
-        <ActionIcon
-          icon="heart"
-          label={hearts.mine ? 'Remove heart' : 'Heart'}
-          count={hearts.count}
-          on={hearts.mine}
-          onColor={t.danger}
-          onPress={onHeart}
-        />
+        <HeartButton mine={hearts.mine} count={hearts.count} failed={failed} onPress={onHeart} />
         {onComment ? (
           <ActionIcon icon="comment" label={commentLabel(post.comments)} count={post.comments} onPress={onComment} />
         ) : null}
         <ActionIcon icon="share" label="Share" onPress={onShare} />
-        {copied ? <Text style={[type.caption, { color: t.textMuted }]}>Link copied</Text> : null}
         <View style={{ flex: 1 }} />
         <ActionIcon
           icon="bookmark"
@@ -398,6 +408,96 @@ function PostCard({
       </View>
       {failed ? <Notice tone="error">{failed}</Notice> : null}
     </View>
+  );
+}
+
+/**
+ * The heart under a post, with a pop when it is given (NOTES §64 — the owner:
+ * *"add animations when liked (heart)"*).
+ *
+ * It fills and counts the moment it is tapped, not when the database answers:
+ * a heart that waits half a second to fill reads as a tap that missed. What
+ * the tap said is kept until the answer arrives (`mine` changes) or the heart
+ * is refused (`failed`), and then the real state shows.
+ *
+ * The pop: the heart springs up from small, and a ring in the same red
+ * spreads and fades behind it — once, on giving, never on taking back. Not at
+ * all for somebody whose phone asks for less motion.
+ */
+function HeartButton({
+  mine,
+  count,
+  failed,
+  onPress,
+}: {
+  mine: boolean;
+  count: number;
+  failed: string | null;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  const reduce = useReducedMotion();
+  const scale = useRef(new Animated.Value(1)).current;
+  const ring = useRef(new Animated.Value(1)).current;
+  const [pending, setPending] = useState<boolean | null>(null);
+  useEffect(() => setPending(null), [mine, failed]);
+
+  const on = pending ?? mine;
+  const shown = Math.max(0, count + (pending === null || pending === mine ? 0 : pending ? 1 : -1));
+
+  const press = () => {
+    const next = !on;
+    setPending(next);
+    if (next && !reduce) {
+      scale.setValue(0.55);
+      ring.setValue(0);
+      Animated.parallel([
+        Animated.spring(scale, { toValue: 1, friction: 3, tension: 170, useNativeDriver: false }),
+        Animated.timing(ring, { toValue: 1, duration: 480, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+      ]).start();
+    }
+    onPress();
+  };
+
+  const color = on ? t.danger : t.textMuted;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={on ? 'Remove heart' : 'Heart'}
+      accessibilityState={{ selected: on }}
+      onPress={press}
+      hitSlop={4}
+      style={({ pressed }) => ({
+        minWidth: TOUCH_TARGET,
+        minHeight: TOUCH_TARGET,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: shown ? 'flex-start' : 'center',
+        gap: space.tight,
+        paddingHorizontal: space.sm,
+        opacity: pressed ? 0.7 : 1,
+      })}
+    >
+      <View style={{ width: 22, height: 22, alignItems: 'center', justifyContent: 'center' }}>
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            borderWidth: 2,
+            borderColor: t.danger,
+            opacity: ring.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 0.7, 0] }),
+            transform: [{ scale: ring.interpolate({ inputRange: [0, 1], outputRange: [0.6, 2.1] }) }],
+          }}
+        />
+        <Animated.View style={{ transform: [{ scale }] }}>
+          <Icon name="heart" color={color} size={22} filled={on} />
+        </Animated.View>
+      </View>
+      {shown ? <Text style={[type.label, { color: t.textMuted }]}>{shown}</Text> : null}
+    </Pressable>
   );
 }
 
@@ -443,6 +543,79 @@ function ActionIcon({
       <Icon name={icon} color={color} size={22} filled={on} />
       {count ? <Text style={[type.label, { color: t.textMuted }]}>{count}</Text> : null}
     </Pressable>
+  );
+}
+
+/**
+ * The post a repost shares, inside it, in a frame (NOTES §62) — its author,
+ * its words and what it carries, as Facebook draws a share. Its author and
+ * words open it on its own page; its set still flips where it is.
+ *
+ * Only ever drawn for an original the reader may see: 0034 leaves a repost of
+ * anything else out of every list, so there is no "not available" to draw.
+ */
+function EmbeddedPost({
+  post,
+  when,
+  imageUrl,
+  onOpen,
+}: {
+  post: FeedPost;
+  when: string;
+  imageUrl: string | null;
+  onOpen?: () => void;
+}) {
+  const t = useTheme();
+  const name = nameOf(post);
+  const handle = atUsername(post.author_username);
+  return (
+    <View style={{ gap: space.sm, padding: space.md, borderRadius: radius.md, borderWidth: 1, borderColor: t.border }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`The post ${name} shared${post.body ? `: ${post.body.slice(0, 100)}` : ''}. Open it.`}
+        onPress={onOpen}
+        disabled={!onOpen}
+        style={({ pressed }) => ({ gap: space.sm, opacity: pressed ? 0.7 : 1 })}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <PersonAvatar avatar={post.author_avatar} userId={post.author_id} name={name} size={28} />
+          <View style={{ flex: 1 }}>
+            <Text style={[type.label, { color: t.text, fontWeight: '700' }]} numberOfLines={1}>
+              {name}
+            </Text>
+            <Text style={[type.caption, { color: t.textMuted }]} numberOfLines={1}>
+              {[handle && handle !== name ? handle : null, when].filter(Boolean).join(' · ')}
+            </Text>
+          </View>
+        </View>
+        {post.body ? (
+          <Text style={[type.body, { color: t.text }]} numberOfLines={6}>
+            {post.body}
+          </Text>
+        ) : null}
+      </Pressable>
+      <PostAttachment post={post} imageUrl={imageUrl} />
+    </View>
+  );
+}
+
+/**
+ * A post the reader reported, folded to one line for them (NOTES §62) — the
+ * owner: hidden, *"but not so hidden — hidden in a way the user will see that
+ * This post has been hidden"*. Show brings it back for now; it folds again
+ * next time. Nobody else's view changes.
+ */
+function HiddenPost({ onShow }: { onShow: () => void }) {
+  const t = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.lg }}>
+      <Icon name="hide" color={t.textMuted} size={20} />
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={[type.bodyStrong, { color: t.text }]}>Post hidden</Text>
+        <Text style={[type.caption, { color: t.textMuted }]}>You reported this post, so it&apos;s hidden for you.</Text>
+      </View>
+      <TextButton label="Show the hidden post" shown="Show" onPress={onShow} />
+    </View>
   );
 }
 
@@ -648,17 +821,17 @@ function StreakBrag({ days, pet }: { days: number; pet: string | null }) {
 }
 
 /**
- * What you can do to a post: react first, where a thumb lands, then the rest.
+ * What you can do to a post.
  *
  * Yours: edit, delete — delete asking once, in place, since it takes the photo
  * and every comment with it. Somebody else's: their profile, report, block.
+ * No reactions here since §64: a post has the heart under it and nothing else.
  */
 function PostSheet({
   post,
   mine,
   busy,
   error,
-  onReact,
   onEdit,
   onDelete,
   onViewProfile,
@@ -670,7 +843,6 @@ function PostSheet({
   mine: boolean;
   busy: boolean;
   error: string | null;
-  onReact: (emoji: string) => void;
   onEdit: () => void;
   onDelete: () => void;
   onViewProfile: () => void;
@@ -687,7 +859,7 @@ function PostSheet({
     return (
       <Sheet onClose={onClose}>
         <SheetTitle>Delete this post?</SheetTitle>
-        <Body muted>Its comments and reactions go with it.</Body>
+        <Body muted>Its comments and hearts go with it.</Body>
         {error ? <Notice tone="error">{error}</Notice> : null}
         <Button label="Delete post" variant="danger" onPress={onDelete} busy={busy} />
         <Button label="Keep it" variant="secondary" onPress={() => setConfirming(false)} disabled={busy} />
@@ -698,7 +870,6 @@ function PostSheet({
   return (
     <Sheet onClose={onClose}>
       {error ? <Notice tone="error">{error}</Notice> : null}
-      <ReactionRow onReact={onReact} disabled={busy} />
       <SheetActions
         actions={
           mine

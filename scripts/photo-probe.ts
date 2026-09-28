@@ -110,6 +110,20 @@ async function main() {
     ok('the box is in the page', 'while the photo library would be open');
     await choose(page, photo);
 
+    // The editor (NOTES §63): the photo in the circle, zoomed in twice, saved.
+    await page.waitFor(`document.body.innerText.includes('Edit photo') ? 'y' : ''`, 'the photo editor');
+    const slider = `document.querySelector('[aria-label="Zoom"]')`;
+    await page.waitFor(`${slider} ? 'y' : ''`, 'the zoom slider');
+    await page.waitFor(`document.body.innerText.includes('Opening your photo') ? '' : 'y'`, 'the photo to open');
+    console.log(`  (the slider says: ${await page.evaluate<string>(`[...${slider}.attributes].map((a) => a.name + '=' + a.value).join(' ')`)})`);
+    await page.click('Zoom in');
+    await page.click('Zoom in');
+    const zoom = await page.evaluate<string>(`${slider}.getAttribute('aria-valuenow') ?? ''`);
+    if (Number(zoom) > 100) ok('editor', `the photo in a circle, zoomed to ${zoom}%`);
+    else fail('editor', `the zoom says ${zoom}`);
+    if (outDir) await page.screenshot(join(outDir, '00-editor.png'));
+    await page.click('Save');
+
     let saved: string | null = null;
     for (let i = 0; i < 60 && !saved; i++) {
       await new Promise((r) => setTimeout(r, 500));

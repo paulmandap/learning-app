@@ -1,4 +1,5 @@
 import type { Conversation } from './messages';
+import { messagePreview } from './posts';
 
 /**
  * Group chats — the parts decidable without a database or a screen (NOTES
@@ -90,9 +91,10 @@ export function roomLeft(memberCount: number): number {
 /** The line under a group's name in the inbox — who said the last thing. */
 export function groupLastLine(group: Group, myId: string): string {
   if (!group.last_body) return `${group.member_count} people`;
-  if (group.last_sender === myId) return `You: ${group.last_body}`;
+  const line = messagePreview(group.last_body);
+  if (group.last_sender === myId) return `You: ${line}`;
   const first = (group.last_sender_name ?? '').trim().split(/\s+/)[0];
-  return first ? `${first}: ${group.last_body}` : group.last_body;
+  return first ? `${first}: ${line}` : line;
 }
 
 /** "4 people", under a group's name at the top of its room. */

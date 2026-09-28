@@ -7,7 +7,7 @@ import { avatarPhotoUrl, fetchProfile } from '../data/profile';
 import { useSessionStore } from '../data/session';
 import { cachedAvatar, rememberAvatarPhoto, rememberAvatarValue } from '../data/avatar-cache';
 import { space, TOUCH_TARGET, useTheme } from './theme';
-import { openPicture, pickFiles, UnreadablePictureError } from './pick-files';
+import { pickFiles } from './pick-files';
 
 /**
  * A profile picture: an uploaded photo, or one of the built-in faces.
@@ -326,51 +326,12 @@ function choiceTile(selected: boolean, disabled: boolean | undefined, accent: st
  * file input is how an iPhone offers the photo library to one — through
  * `pickFiles`, which keeps it in the page until it answers (NOTES §61).
  *
- * Only the choosing: the caller shows it is busy, THEN makes it small
- * (`squareProfilePhoto`), so a large photo being read is never a screen doing
- * nothing.
+ * Only the choosing: the photo then goes to the editor
+ * (`src/ui/photo-cropper.tsx`, NOTES §63), where its owner picks the part in
+ * the circle and it is drawn to 256 px before it leaves the phone.
  */
 export async function pickProfilePhoto(): Promise<File | null> {
   if (Platform.OS !== 'web') return null;
   const [file] = await pickFiles({ accept: 'image/*' });
   return file ?? null;
-}
-
-/**
- * The picture centre-cropped square and drawn to 256px as JPEG before it
- * leaves the phone — a profile picture shown at 44 points does not need the
- * 4 MB the camera took.
- */
-export function squareProfilePhoto(file: Blob): Promise<Blob> {
-  return squareJpeg(file, 256);
-}
-
-async function squareJpeg(file: Blob, side: number): Promise<Blob> {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await openPicture(url);
-    const crop = Math.min(img.naturalWidth, img.naturalHeight);
-    const canvas = document.createElement('canvas');
-    canvas.width = side;
-    canvas.height = side;
-    const g = canvas.getContext('2d');
-    if (!g) throw new Error('This browser cannot resize pictures.');
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(
-      img,
-      (img.naturalWidth - crop) / 2,
-      (img.naturalHeight - crop) / 2,
-      crop,
-      crop,
-      0,
-      0,
-      side,
-      side,
-    );
-    return await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new UnreadablePictureError())), 'image/jpeg', 0.85),
-    );
-  } finally {
-    URL.revokeObjectURL(url);
-  }
 }

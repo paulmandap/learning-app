@@ -167,7 +167,11 @@ async function main() {
     await gone(page, WHATS_NEW.title);
     await page.goto('/');
     await showing(page, 'Your sets');
-    if ((await page.text()).includes(WHATS_NEW.title)) fail("what's new", 'came back after "Got it"');
+    // The whole body, not #root: it is a sheet since §62, drawn outside #root,
+    // so `page.text()` could never see it come back.
+    if ((await page.evaluate<string>('document.body.innerText')).includes(WHATS_NEW.title)) {
+      fail("what's new", 'came back after "Got it"');
+    }
     else ok("what's new", 'shown once, and gone after "Got it" — across a reload');
 
     // --- a username, saved from the screen --------------------------------
@@ -368,6 +372,11 @@ async function main() {
       .select('target_kind, reason, details, snapshot')
       .eq('target_id', B.userId)
       .eq('details', PROBE_REPORT)
+      // The newest: once the owner has dealt with one on /moderation, the next
+      // report is a second row with the same words (§62), and maybeSingle
+      // alone read two rows as none.
+      .order('created_at', { ascending: false })
+      .limit(1)
       .maybeSingle();
     const row = report.data as { target_kind?: string; reason?: string; snapshot?: string } | null;
     if (row?.target_kind === 'person' && row.reason === 'spam' && row.snapshot?.includes(`@${B_USERNAME}`)) {

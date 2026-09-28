@@ -90,7 +90,8 @@ describe('what a post may be', () => {
   it('one photo, set or streak per post, as the database allows', () => {
     const two = validateDraft({ body: 'x', audience: 'friends', photo: true, streak: true });
     expect(two.ok).toBe(false);
-    if (!two.ok) expect(two.reason).toBe('One photo, set or streak per post.');
+    // A shared post counts as one more thing a post can hold since 0034.
+    if (!two.ok) expect(two.reason).toBe('One photo, set, streak or shared post per post.');
     expect(SQL).toContain('num_nonnulls(image_path, set_id, streak_days) <= 1');
     expect(SQL).toContain('length(btrim(body)) > 0 or num_nonnulls(image_path, set_id, streak_days) = 1');
   });

@@ -306,6 +306,22 @@ export async function unblockPerson(personId: string, db: Db = supabase): Promis
 // -------------------------------------------------------------- reporting --
 
 /**
+ * The posts I have reported — folded away for me in any list of posts, with
+ * a way to look again (NOTES §62, the owner: hidden *"in a way the user will
+ * see that This post has been hidden"*).
+ *
+ * Read from `reports`, whose policy (0026) shows a reporter their own rows
+ * and nothing else, so this is exactly mine. Nothing new in the database, and
+ * nothing anybody else can see: the post is not hidden for its author or for
+ * anyone who did not report it. Empty when reports cannot be read.
+ */
+export async function myReportedPosts(db: Db = supabase): Promise<Set<string>> {
+  const { data, error } = await db.from('reports').select('target_id').eq('target_kind', 'post');
+  if (error) return new Set();
+  return new Set(((data ?? []) as { target_id: string }[]).map((r) => r.target_id));
+}
+
+/**
  * Report a person, a message or a shared set.
  *
  * The copy of what was reported is taken by `report_content`, never sent from

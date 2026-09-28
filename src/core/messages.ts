@@ -8,6 +8,8 @@
  * `src/core/community.ts` is the one check for all of them.
  */
 
+import { messagePreview } from './posts';
+
 /**
  * How often an open room asks for new messages — the Everyone room and a
  * conversation alike.
@@ -85,7 +87,7 @@ export function quoteOf(
 ): Quote | null {
   if (!replyTo) return null;
   if (replyBody == null) return { who: '', text: 'Message removed', removed: true };
-  const flat = replyBody.replace(/\s+/g, ' ').trim();
+  const flat = messagePreview(replyBody).replace(/\s+/g, ' ').trim();
   const text = flat.length > QUOTE_MAX ? `${flat.slice(0, QUOTE_MAX - 1).trimEnd()}…` : flat;
   return { who, text, removed: false };
 }
@@ -119,7 +121,8 @@ export function badgeLabel(count: number): string | null {
 /** The line under a name in the inbox. */
 export function lastLine(conversation: Conversation, myId: string): string {
   if (!conversation.last_body) return 'Say hello';
-  return conversation.last_sender === myId ? `You: ${conversation.last_body}` : conversation.last_body;
+  const line = messagePreview(conversation.last_body);
+  return conversation.last_sender === myId ? `You: ${line}` : line;
 }
 
 /**

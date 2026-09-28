@@ -50,6 +50,31 @@ async function currentUserId(db: Db = supabase): Promise<string> {
 export const POST_COLUMNS =
   'id, author_id, author_name, author_username, author_avatar, body, audience, image_path, image_width, image_height, set_id, set_title, set_cards, streak_days, pet, created_at, edited_at, comments';
 
+/** A repost's original, at the end of `feed_posts` since 0034 (NOTES §62). */
+export const SHARED_COLUMNS =
+  'shared_post_id, shared_author_id, shared_author_name, shared_author_username, shared_author_avatar, shared_body, shared_audience, shared_image_path, shared_image_width, shared_image_height, shared_set_id, shared_set_title, shared_set_cards, shared_streak_days, shared_pet, shared_created_at';
+
+/**
+ * Posts from `feed_posts`, with what a repost shares when 0034 is there and
+ * without it before — the same query both ways, so every reader of posts
+ * (the feed, a page, a post, Saved, search) falls back the same.
+ */
+export async function readPosts<T>(
+  build: (columns: string) => PromiseLike<{ data: T; error: { code?: string | null; message: string } | null }>,
+): Promise<{ data: T; error: { code?: string | null; message: string } | null }> {
+  const full = await build(`${POST_COLUMNS}, ${SHARED_COLUMNS}`);
+  if (!isMissingColumn(full.error)) return full;
+  return build(POST_COLUMNS);
+}
+
+/** Sharing a post to your feed arrives with 0034. */
+export class SharingUnavailableError extends Error {
+  constructor() {
+    super("Sharing posts to your feed isn't switched on yet.");
+    this.name = 'SharingUnavailableError';
+  }
+}
+
 /**
  * PostgREST wants a timestamp inside `or=(…)` quoted: it has colons and a plus
  * sign, which that syntax reads as its own. An id is a uuid and needs nothing.
@@ -71,13 +96,12 @@ export async function listFeed(
   authorId: string | null = null,
   db: Db = supabase,
 ): Promise<FeedPost[]> {
-  let query = db.from('feed_posts').select(POST_COLUMNS);
-  if (authorId) query = query.eq('author_id', authorId);
-  if (cursor) query = query.or(olderThan(cursor));
-  const { data, error } = await query
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
-    .limit(FEED_PAGE);
+  const { data, error } = await readPosts((columns) => {
+    let query = db.from('feed_posts').select(columns);
+    if (authorId) query = query.eq('author_id', authorId);
+    if (cursor) query = query.or(olderThan(cursor));
+    return query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(FEED_PAGE);
+  });
 
   if (unavailable(error)) throw new PostsUnavailableError();
   if (error) throw new Error(error.message);
@@ -101,7 +125,7 @@ export async function countPosts(authorId: string, db: Db = supabase): Promise<n
 
 /** One post — or null for one that is gone or that the caller may not see, alike. */
 export async function getPost(id: string, db: Db = supabase): Promise<FeedPost | null> {
-  const { data, error } = await db.from('feed_posts').select(POST_COLUMNS).eq('id', id).maybeSingle();
+  const { data, error } = await readPosts((columns) => db.from('feed_posts').select(columns).eq('id', id).maybeSingle());
   if (unavailable(error)) throw new PostsUnavailableError();
   if (error) throw new Error(error.message);
   return (data ?? null) as unknown as FeedPost | null;
@@ -152,6 +176,9 @@ export async function createPost(
     p_image_height: photo ? Math.round(photo.height) : null,
     p_set_id: draft.setId ?? null,
     p_streak: !!draft.streak,
+    // Only when there is one, so a plain post still reaches 0030's function
+    // on a database without 0034.
+    ...(draft.sharedPostId ? { p_shared_post: draft.sharedPostId } : {}),
   });
 
   if (error) {
@@ -160,8 +187,10 @@ export async function createPost(
       if (undo.error) console.warn(`[posts] could not remove an unposted photo: ${undo.error.message}`);
     }
     await throwIfGated(error, db);
+    if (draft.sharedPostId && missingFunction(error)) throw new SharingUnavailableError();
     if (unavailable(error)) throw new PostsUnavailableError();
     if (error.code === 'P0001') throw new Error("That's a lot of posts for one day. Try again tomorrow.");
+    if (draft.sharedPostId && error.code === 'P0002') throw new Error("That post can't be shared any more.");
     if (error.code === 'P0002') throw new Error("That set isn't shared, so it can't go in a post.");
     if (error.code === '22023') throw new Error('There is no streak to share yet — study today and it starts.');
     throw new Error(error.message);
@@ -366,7 +395,7 @@ export async function listSaved(db: Db = supabase): Promise<FeedPost[]> {
   const order = ((saves ?? []) as { post_id: string }[]).map((s) => s.post_id);
   if (order.length === 0) return [];
 
-  const { data: posts, error: postsError } = await db.from('feed_posts').select(POST_COLUMNS).in('id', order);
+  const { data: posts, error: postsError } = await readPosts((columns) => db.from('feed_posts').select(columns).in('id', order));
   if (unavailable(postsError)) throw new PostsUnavailableError();
   if (postsError) throw new Error(postsError.message);
   const byId = new Map(((posts ?? []) as unknown as FeedPost[]).map((p) => [p.id, p]));

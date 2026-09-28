@@ -74,6 +74,104 @@ export interface FeedPost {
   created_at: string;
   edited_at: string | null;
   comments: number;
+  /**
+   * The post this one shares, and what it says (0034, NOTES §62). Absent
+   * before 0034; null for a post that shares nothing. A row whose original the
+   * reader may not see never arrives at all — the database leaves it out.
+   */
+  shared_post_id?: string | null;
+  shared_author_id?: string | null;
+  shared_author_name?: string | null;
+  shared_author_username?: string | null;
+  shared_author_avatar?: string | null;
+  shared_body?: string | null;
+  shared_audience?: Audience | null;
+  shared_image_path?: string | null;
+  shared_image_width?: number | null;
+  shared_image_height?: number | null;
+  shared_set_id?: string | null;
+  shared_set_title?: string | null;
+  shared_set_cards?: number | null;
+  shared_streak_days?: number | null;
+  shared_pet?: string | null;
+  shared_created_at?: string | null;
+}
+
+/**
+ * The post a repost shares, as a post of its own — drawn inside the repost,
+ * and opened on its own page. Null for a post that shares nothing.
+ */
+export function sharedOf(post: FeedPost): FeedPost | null {
+  if (!post.shared_post_id || !post.shared_author_id || !post.shared_created_at) return null;
+  return {
+    id: post.shared_post_id,
+    author_id: post.shared_author_id,
+    author_name: post.shared_author_name ?? null,
+    author_username: post.shared_author_username ?? null,
+    author_avatar: post.shared_author_avatar ?? null,
+    body: post.shared_body ?? '',
+    audience: post.shared_audience ?? 'friends',
+    image_path: post.shared_image_path ?? null,
+    image_width: post.shared_image_width ?? null,
+    image_height: post.shared_image_height ?? null,
+    set_id: post.shared_set_id ?? null,
+    set_title: post.shared_set_title ?? null,
+    set_cards: post.shared_set_cards ?? 0,
+    streak_days: post.shared_streak_days ?? null,
+    pet: post.shared_pet ?? null,
+    created_at: post.shared_created_at,
+    edited_at: null,
+    comments: 0,
+  };
+}
+
+/** What sharing a post to your feed shares: the original, for a repost (as 0034 does). */
+export function originalOf(post: FeedPost): string {
+  return post.shared_post_id ?? post.id;
+}
+
+// ------------------------------------------------------- a post, sent --
+
+/**
+ * A post sent to a friend or a group (NOTES §62) is a message holding the
+ * post's link, which the chat draws as the post. No new column: the link is
+ * the message, so it goes wherever a message goes, and the post itself is
+ * read through `feed_posts` by whoever is reading — the one rule decides.
+ */
+export function postLink(origin: string, id: string): string {
+  return `${origin.replace(/\/$/, '')}/post/${id}`;
+}
+
+const POST_LINK = /https?:\/\/\S+?\/post\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![0-9a-z-])/i;
+
+/**
+ * The post a message carries, if it carries one, and whatever else it says.
+ * Any origin: the link says where it was sent from, and the post is looked up
+ * by its id wherever the message is read.
+ */
+export function postInMessage(body: string): { postId: string; rest: string } | null {
+  const found = POST_LINK.exec(body);
+  if (!found) return null;
+  const rest = (body.slice(0, found.index) + body.slice(found.index + found[0].length)).replace(/\s+/g, ' ').trim();
+  return { postId: found[1]!.toLowerCase(), rest };
+}
+
+/**
+ * A message as one line — an inbox's last line, a reply's quote: a post sent
+ * reads as "Sent a post", not as a link nobody wants to read.
+ */
+export function messagePreview(body: string): string {
+  const carried = postInMessage(body);
+  return carried ? carried.rest || 'Sent a post' : body;
+}
+
+/**
+ * May this post be sent in a message? Only one everyone can see — a
+ * friends-only post sent to somebody who is not the author's friend would
+ * arrive as a hole, which the owner ruled out (§62).
+ */
+export function sendable(post: Pick<FeedPost, 'audience'>): boolean {
+  return post.audience === 'everyone';
 }
 
 /**
@@ -176,6 +274,8 @@ export interface Draft {
   photo?: boolean;
   setId?: string | null;
   streak?: boolean;
+  /** A post shared to your feed (0034). */
+  sharedPostId?: string | null;
 }
 
 export type DraftCheck = { ok: true; body: string } | { ok: false; reason: string };
@@ -184,13 +284,13 @@ export type DraftCheck = { ok: true; body: string } | { ok: false; reason: strin
  * Is this postable?
  *
  * The same two rules as `posts_one_attachment` and `posts_not_empty`: at most
- * one of a photo, a set and a streak, and never nothing at all. A photo or a
- * set may go without words; words may go without anything.
+ * one of a photo, a set, a streak and a shared post (0034), and never nothing
+ * at all. Any of those may go without words; words may go without anything.
  */
 export function validateDraft(draft: Draft): DraftCheck {
   const body = draft.body.trim();
-  const attachments = [draft.photo, !!draft.setId, draft.streak].filter(Boolean).length;
-  if (attachments > 1) return { ok: false, reason: 'One photo, set or streak per post.' };
+  const attachments = [draft.photo, !!draft.setId, draft.streak, !!draft.sharedPostId].filter(Boolean).length;
+  if (attachments > 1) return { ok: false, reason: 'One photo, set, streak or shared post per post.' };
   if (body.length === 0 && attachments === 0) return { ok: false, reason: 'Write something first.' };
   if (body.length > POST_MAX_LENGTH) {
     return { ok: false, reason: `That is a long post. Keep it under ${POST_MAX_LENGTH} characters.` };

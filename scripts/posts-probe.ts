@@ -38,6 +38,8 @@ const B_TEXT = `${MARK}: hello from B`;
 const B_PHOTO = `${MARK}: a photo from B`;
 const A_TEXT = `${MARK}: my set`;
 const SET_TITLE = 'Posts probe set';
+/** What the probe's own report says — matched by the cleanup SQL the probes print. */
+const REPORT_NOTE = 'posts probe - not a real report';
 const CARD_Q = 'What does the posts probe card ask?';
 const CARD_A = 'Whether the feed can flip it.';
 
@@ -245,9 +247,17 @@ async function main() {
       `[...document.querySelectorAll('[role="button"]')].some((b) => b.getAttribute('aria-label') === 'Remove heart') ? 'y' : ''`,
       'the heart to fill',
     );
-    const reacted = await A.client.from('post_reactions').select('emoji').eq('post_id', bTextId).eq('user_id', A.userId);
-    if ((reacted.data ?? []).some((r: { emoji: string }) => r.emoji === '❤️')) ok('react', 'on screen and in the database');
-    else fail('react', 'the chip shows and the database has no heart');
+    // The heart fills the moment it is tapped since §64, before the database
+    // answers — so the filled heart proves nothing yet. Ask the database until
+    // it has it (or ten seconds pass).
+    let hearted = false;
+    for (let i = 0; i < 40 && !hearted; i++) {
+      const reacted = await A.client.from('post_reactions').select('emoji').eq('post_id', bTextId).eq('user_id', A.userId);
+      hearted = (reacted.data ?? []).some((r: { emoji: string }) => r.emoji === '❤️');
+      if (!hearted) await new Promise((r) => setTimeout(r, 250));
+    }
+    if (hearted) ok('react', 'filled at once, and in the database');
+    else fail('react', 'the heart shows filled and the database has no heart');
 
     // ---- comment ----
     await clickInCard(page, B_TEXT, 'Comment');
@@ -310,6 +320,76 @@ async function main() {
       const unsaved = await A.client.from('post_saves').select('post_id').eq('user_id', A.userId).eq('post_id', bTextId);
       if ((unsaved.data ?? []).length === 0) ok('unsave', 'gone from Saved and from the database');
       else fail('unsave', 'gone from the screen, still in the database');
+    }
+
+    // ---- Share, inside Nomi (NOTES §62) ----
+    const bPhotoId = bPhoto.data as string;
+    await page.goto('/community');
+    await showing(page, B_PHOTO);
+    await clickInCard(page, B_TEXT, 'Share');
+    await showing(page, 'Only a post everyone can see can be sent in a message.');
+    ok('share (friends-only)', 'a friends-only post is not offered for sending, and says why');
+    await page.click('Close');
+    await clickInCard(page, B_PHOTO, 'Share');
+    await showing(page, 'Share to your feed');
+    await shot(page, '02c-share-sheet.png');
+    await page.click('Send to Probe B');
+    await page.waitFor(
+      `[...document.querySelectorAll('*')].some((n) => n.getAttribute && n.getAttribute('aria-label') === 'Sent to Probe B') ? 'y' : ''`,
+      '"Sent" beside Probe B',
+    );
+    const sentRow = await B.client
+      .from('conversation_messages')
+      .select('conversation_id, body')
+      .like('body', `%/post/${bPhotoId}%`)
+      .maybeSingle();
+    const sentMessage = sentRow.data as { conversation_id: string; body: string } | null;
+    if (sentMessage) ok('send a post', 'B has it, as a message holding the post');
+    else fail('send a post', `B has ${JSON.stringify(sentRow.data)} (${sentRow.error?.message ?? ''})`);
+    await page.click('Close');
+    if (sentMessage) {
+      await page.goto(`/messages/${sentMessage.conversation_id}`);
+      await page.waitFor(
+        `[...document.querySelectorAll('[role="button"]')].some((b) => (b.getAttribute('aria-label') ?? '').startsWith('A post by Probe B')) ? 'y' : ''`,
+        'the post drawn in the chat',
+      );
+      if ((await page.evaluate<string>('document.body.innerText')).includes('/post/')) fail('post in the chat', 'the raw link is on screen');
+      else ok('post in the chat', 'drawn as the post, not as a link');
+      await shot(page, '02d-post-in-chat.png');
+      await A.client.from('direct_messages').delete().eq('conversation_id', sentMessage.conversation_id).like('body', `%/post/${bPhotoId}%`);
+    }
+
+    // ---- Share to your feed (0034) ----
+    const has0034 = (await A.client.from('feed_posts').select('shared_post_id').limit(1)).error?.code !== '42703';
+    await page.goto('/community');
+    await showing(page, B_PHOTO);
+    await clickInCard(page, B_PHOTO, 'Share');
+    await page.click('Share to your feed');
+    await page.waitFor(`location.pathname === '/post/new' ? 'y' : ''`, 'the composer');
+    await showing(page, 'Share post');
+    await page.waitFor(
+      `[...document.querySelectorAll('*')].some((n) => (n.getAttribute && n.getAttribute('aria-label') || '').startsWith('A post by Probe B')) ? 'y' : ''`,
+      'the shared post in the box',
+    );
+    await typeInto(page, 'Say something about it (optional)', `${MARK} shared`);
+    await shot(page, '02e-share-to-feed.png');
+    await page.click('Post');
+    if (has0034) {
+      await page.waitFor(`location.pathname === '/community' ? 'y' : ''`, 'back to the feed');
+      await page.waitFor(
+        `[...document.querySelectorAll('[role="button"]')].some((b) => (b.getAttribute('aria-label') ?? '').startsWith('The post Probe B shared')) ? 'y' : ''`,
+        'the repost, with the original inside',
+      );
+      const repost = await A.client.from('posts').select('shared_post_id').eq('body', `${MARK} shared`).maybeSingle();
+      if ((repost.data as { shared_post_id?: string } | null)?.shared_post_id === bPhotoId) ok('share to feed', 'posted, carrying B’s post');
+      else fail('share to feed', `the database has ${JSON.stringify(repost.data)}`);
+      await shot(page, '02f-repost-in-feed.png');
+      await A.client.from('posts').delete().eq('body', `${MARK} shared`);
+    } else {
+      await showing(page, "Sharing posts to your feed isn't switched on yet.");
+      ok('share to feed (before 0034)', 'says it is not switched on yet, rather than failing blind');
+      await page.click('Cancel');
+      await page.click('Throw away');
     }
 
     // ---- write a post, with a set, for everyone ----
@@ -387,6 +467,30 @@ async function main() {
     await page.goto(`/person/${B.userId}`);
     await showing(page, B_TEXT);
     ok("a person's page", "shows the posts A may see");
+
+    // ---- reported: folded away for the reporter (NOTES §62) ----
+    // Last, because after it B's words are folded in A's feed.
+    await page.goto('/community');
+    await showing(page, B_TEXT);
+    await clickInCard(page, B_TEXT, 'More');
+    await page.click('Report this post');
+    await page.click('Spam');
+    await typeInto(page, 'What happened', REPORT_NOTE);
+    await page.click('Send report');
+    await showing(page, 'Report sent');
+    await page.click('Done');
+    await showing(page, 'Post hidden');
+    const folded = await page.evaluate<string>('document.body.innerText');
+    if (!folded.includes(B_TEXT) && folded.includes("You reported this post, so it's hidden for you.")) {
+      ok('reported post', 'folded to one line for A, saying why');
+    } else fail('reported post', 'the post is still showing, or nothing says it was hidden');
+    await shot(page, '06-reported-hidden.png');
+    await page.click('Show the hidden post');
+    await showing(page, B_TEXT);
+    ok('reported post (show)', 'one tap brings it back for now');
+    const bStill = await B.client.from('feed_posts').select('id').eq('id', bTextId);
+    if ((bStill.data ?? []).length === 1) ok('reported post (others)', 'nothing changed for anybody else');
+    else fail('reported post (others)', 'the post is gone for its author');
 
     const errors = page.logs().filter((l) => /uncaught|TypeError|ReferenceError/i.test(l));
     if (errors.length > 0) fail('browser console', errors.join(' | '));

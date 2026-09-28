@@ -165,10 +165,15 @@ describe('every picker in the app is that one', () => {
     expect(readFileSync('app/new.tsx', 'utf8')).toContain("pickFiles({ accept: '.pdf,.txt,image/*' })");
   });
 
-  it('Settings is busy from the moment a photo is chosen, and says when it cannot read one', () => {
+  it('a chosen photo goes straight to the editor, which says when it cannot read one', () => {
     const settings = readFileSync('app/settings.tsx', 'utf8');
-    const upload = settings.slice(settings.indexOf('async function uploadPhoto'));
-    expect(upload.indexOf('setAvatarBusy(true)')).toBeLessThan(upload.indexOf('await squareProfilePhoto(file)'));
+    const upload = settings.slice(settings.indexOf('async function uploadPhoto'), settings.indexOf('async function savePlaced'));
+    // Nothing between choosing and the editor opening (NOTES §61, §63).
+    expect(upload).toContain('if (file) setCropping(file);');
+    expect(settings).toContain('<PhotoCropSheet file={cropping}');
     expect(settings).toContain('if (err instanceof UnreadablePictureError) return err.message;');
+    const editor = readFileSync('src/ui/photo-cropper.tsx', 'utf8');
+    expect(editor).toContain('openPicture(made)');
+    expect(editor).toContain('err instanceof UnreadablePictureError ? err.message');
   });
 });

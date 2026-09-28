@@ -1014,6 +1014,9 @@ async function main() {
     // ---- a bio (0033, NOTES §59) ----
     await checkBio(A, B);
 
+    // ---- sharing a post to your feed (0034, NOTES §62) ----
+    await checkReposts(A, B);
+
     // ---- unsharing is live ----
     // The filter is one line in each view. Turning it back off must actually
     // take the set away, or "stop sharing" is a button that does nothing.
@@ -2438,6 +2441,112 @@ async function checkBio(
 
   // ---- tidy up ----
   await B.client.from('profiles').update({ bio: null }).eq('id', B.userId);
+}
+
+/**
+ * Sharing a post to your feed (0034, NOTES §62), both directions.
+ *
+ * The owner's rule: a repost of something a reader may not see is simply not
+ * there for them — no hole. So this has B share A's friends-only post, then
+ * unfriends them, and checks the repost is gone for B (who can no longer see
+ * the original) while A (who can) still sees it; that nothing can be done to
+ * it by somebody who cannot see it; that sharing a repost shares the
+ * original; and that deleting the original takes its reposts with it.
+ */
+const REPOST_PROBE = 'repost probe';
+
+async function checkReposts(
+  A: { client: SupabaseClient; userId: string },
+  B: { client: SupabaseClient; userId: string },
+) {
+  const gate = await A.client.from('feed_posts').select('shared_post_id').limit(1);
+  if (gate.error && gate.error.code === '42703') {
+    console.log('\n  ----  reposts — not present (migration 0034), not checked');
+    return;
+  }
+  console.log('\nSharing a post to your feed (0034):');
+
+  const clearPosts = async () => {
+    await A.client.from('posts').delete().like('body', `${REPOST_PROBE}%`);
+    await B.client.from('posts').delete().like('body', `${REPOST_PROBE}%`);
+  };
+  await clearPosts();
+  await A.client.from('blocks').delete().eq('blocker_id', A.userId);
+  await B.client.from('blocks').delete().eq('blocker_id', B.userId);
+  await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
+  await B.client.rpc('send_friend_request', { p_to: A.userId });
+  await A.client.rpc('accept_friend_request', { p_from: B.userId });
+
+  const made = await A.client.rpc('create_post', { p_body: `${REPOST_PROBE} original`, p_audience: 'friends' });
+  const originalId = made.data as string | null;
+  if (!originalId) {
+    fail('0034 seed', made.error?.message ?? 'no post');
+    return;
+  }
+
+  // ---- shared by a friend who can see it ----
+  const shared = await B.client.rpc('create_post', {
+    p_body: `${REPOST_PROBE} look`,
+    p_audience: 'everyone',
+    p_shared_post: originalId,
+  });
+  const repostId = shared.data as string | null;
+  const aSees = repostId
+    ? await A.client.from('feed_posts').select('shared_post_id, shared_body').eq('id', repostId).maybeSingle()
+    : null;
+  if ((aSees?.data as { shared_body?: string } | null)?.shared_body === `${REPOST_PROBE} original`) {
+    ok('repost', 'B shared A’s post; A reads it with the original inside');
+  } else fail('repost', shared.error?.message ?? `A sees ${JSON.stringify(aSees?.data)}`);
+
+  const withPhoto = await B.client.rpc('create_post', {
+    p_body: `${REPOST_PROBE} two things`,
+    p_audience: 'everyone',
+    p_shared_post: originalId,
+    p_streak: true,
+  });
+  if (!withPhoto.error) fail('repost (two things)', 'a repost went with a streak of its own');
+  else ok('repost (two things)', `refused (${withPhoto.error.code ?? 'error'})`);
+
+  // ---- sharing a repost shares the original ----
+  const again = await A.client.rpc('create_post', { p_body: `${REPOST_PROBE} again`, p_audience: 'friends', p_shared_post: repostId });
+  const againRow = again.data
+    ? await A.client.from('posts').select('shared_post_id').eq('id', again.data as string).maybeSingle()
+    : null;
+  if ((againRow?.data as { shared_post_id?: string } | null)?.shared_post_id === originalId) {
+    ok('repost of a repost', 'shares the original, not the repost');
+  } else fail('repost of a repost', again.error?.message ?? JSON.stringify(againRow?.data));
+
+  // ---- unfriended: B may no longer see the original, so not the repost ----
+  await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
+  const bFeed = repostId ? await B.client.from('feed_posts').select('id').eq('id', repostId) : null;
+  const aStill = repostId ? await A.client.from('feed_posts').select('id').eq('id', repostId) : null;
+  if ((bFeed?.data ?? []).length === 0 && (aStill?.data ?? []).length === 1) {
+    ok('repost (original out of sight)', 'gone for B — no hole — and still there for A, who can see both');
+  } else fail('repost (original out of sight)', `B sees ${JSON.stringify(bFeed?.data)}, A sees ${JSON.stringify(aStill?.data)}`);
+
+  const heart = await B.client.from('post_reactions').insert({ post_id: repostId, user_id: B.userId, emoji: '❤️' });
+  if (!heart.error) {
+    fail('repost (reacting)', 'B reacted to a repost whose original B may not see');
+    await B.client.from('post_reactions').delete().eq('post_id', repostId).eq('user_id', B.userId);
+  } else ok('repost (reacting)', `refused (${heart.error.code ?? 'error'})`);
+
+  const comment = await B.client.rpc('add_comment', { p_post: repostId, p_body: `${REPOST_PROBE} comment` });
+  if (!comment.error) fail('repost (commenting)', 'B commented on a repost whose original B may not see');
+  else ok('repost (commenting)', `refused (${comment.error.code ?? 'error'})`);
+
+  const bShares = await B.client.rpc('create_post', { p_body: `${REPOST_PROBE} sneaky`, p_audience: 'everyone', p_shared_post: originalId });
+  if (!bShares.error) fail('repost (not visible)', 'B shared a post B may not see — ids can be probed');
+  else ok('repost (not visible)', `refused (${bShares.error.code ?? 'error'}), same as one that does not exist`);
+
+  // ---- the original goes, and its reposts with it ----
+  await A.client.from('posts').delete().eq('id', originalId);
+  const left = await B.client.from('posts').select('id').eq('id', repostId ?? '');
+  const aLeft = again.data ? await A.client.from('posts').select('id').eq('id', again.data as string) : null;
+  if ((left.data ?? []).length === 0 && (aLeft?.data ?? []).length === 0) ok('repost (original deleted)', 'every repost of it went with it');
+  else fail('repost (original deleted)', `B's still there: ${(left.data ?? []).length}, A's: ${(aLeft?.data ?? []).length}`);
+
+  // ---- tidy up ----
+  await clearPosts();
 }
 
 main().catch((err) => {

@@ -92,10 +92,13 @@ Share profile (`/u/<username>`), and search for people, sets and posts
 (a transparent-modal route), Progress to the picture, the rules and report
 sheets with their button in a fixed footer, Nomi's chats and the folder panel
 as the one Sheet, `/icons` removed — `7ebdf69`, verified (`friends-probe`
-24/24, isolation 219/219). **The redesign is done.** **Since, not deployed**
-(NOTES §61): one file picker for the whole app that stays in the page until it
-answers — the owner's iPhone lost the old detached one, and a profile photo
-chosen there never uploaded. **Probe reports pile up:** each run
+24/24, isolation 219/219). **The redesign is done.** Since (NOTES §61–§64,
+2026-09-29): one file picker that stays in the page until it answers (the
+iPhone lost the old one — confirmed fixed on the owner's phone); sharing inside
+Nomi — to your feed (migration 0034) or to a friend or group as a message; a
+reported post folded away for the reporter; What's new as a sheet; a profile
+photo editor with a circle and zoom; the heart pops, and posts have no other
+reactions. **Probe reports pile up:** each run
 of `friends-probe` and the isolation test leaves marked reports, and at 20 in
 a day test account B hits the report limit (§58.4) — clear them with the SQL
 the probes print. A report left open also makes a later identical report hand
@@ -107,7 +110,11 @@ reports. Not built, and worth knowing if asked: push notifications for new
 messages (there is no server to send them on insert); realtime instead of polling (§46.5's reasoning stands);
 end-to-end encryption of messages (the Privacy Policy says they are not).
 
-### Migrations — 33, all applied
+### Migrations — 34, all applied
+
+**0034 (sharing a post to your feed — NOTES §62) was applied by the owner on
+2026-09-29,** and verified the same day: isolation **227/227**, the 8 of
+`checkReposts` included; `posts-probe` **21/21**.
 
 **0033 (a bio — NOTES §59) was applied by the owner on 2026-09-28, after
 deploying `fde3208`,** and verified the same day: isolation **219/219**, the
@@ -759,7 +766,7 @@ npx tsx --env-file=.env scripts/reviewer-probe.ts [--runs 3] [--only rename] [--
 npx tsx --env-file=.env scripts/nomi-offer-probe.ts --out <dir>   # Nomi's offers in the built app, photographed; checks a refused reviewer saved nothing
 npx tsx --env-file=.env scripts/generation-probe.ts --file notes.txt --count 60   # model output vs dropped vs stored, and which lines
 npx tsx --env-file=.env scripts/avatar-probe.ts       # save faces and photos twice, print the real errors, restore
-npx tsx --env-file=.env scripts/photo-probe.ts [--out <dir>]   # a 4032×3024 photo through Settings' "Use a photo" and a new post's Photo, via the page's own file box (NOTES §61); restores
+npx tsx --env-file=.env scripts/photo-probe.ts [--out <dir>]   # a 4032×3024 photo through Settings' "Use a photo" and the editor (zoom, Save), and a new post's Photo, via the page's own file box (NOTES §61, §63); restores
 npx tsx --env-file=.env scripts/label-cover-probe.ts [--runs=3] [--model=<id>] [--only=alu-block]   # can a model place labels well enough to cover an answer? drawn diagrams, known truth
 npx tsx scripts/palette-check.ts              # contrast + colour-blindness gate, both modes
 npx tsx --env-file=.env scripts/verify-phase2.ts --pdf <file>

@@ -124,6 +124,7 @@ export function RowButton({
   primary,
   busy,
   disabled,
+  shown,
 }: {
   label: string;
   onPress: () => void;
@@ -131,6 +132,8 @@ export function RowButton({
   busy?: boolean;
   /** Nothing to do yet — Post with nothing written. Dimmed further than busy. */
   disabled?: boolean;
+  /** The word on the button, where a list of them needs the label to say which — "Send", "Send to Maria". */
+  shown?: string;
 }) {
   const t = useTheme();
   return (
@@ -154,7 +157,7 @@ export function RowButton({
         opacity: disabled ? 0.45 : pressed || busy ? 0.6 : 1,
       })}
     >
-      <Text style={[type.label, { color: primary ? t.accentText : t.text, fontWeight: '600' }]}>{label}</Text>
+      <Text style={[type.label, { color: primary ? t.accentText : t.text, fontWeight: '600' }]}>{shown ?? label}</Text>
     </Pressable>
   );
 }
@@ -176,6 +179,7 @@ export function ReportSheet({
   targetId,
   name,
   onBlock,
+  onSent,
   onClose,
 }: {
   kind: ReportKind;
@@ -184,6 +188,8 @@ export function ReportSheet({
   name?: string;
   /** Offered after sending, when there is a person to block. */
   onBlock?: () => void;
+  /** Once it has gone — a reported post folds away for the reporter (NOTES §62). */
+  onSent?: () => void;
   onClose: () => void;
 }) {
   const t = useTheme();
@@ -204,6 +210,7 @@ export function ReportSheet({
     try {
       await reportContent(kind, targetId, reason, details);
       setSent(true);
+      onSent?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't send that just now. Try again in a moment.");
     } finally {

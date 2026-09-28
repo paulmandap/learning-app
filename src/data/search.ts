@@ -2,7 +2,7 @@ import { supabase, type Db } from './supabase';
 import { isMissingColumn, isMissingTable } from '../core/db-errors';
 import { escapeLike } from '../core/profile';
 import { searchTerm } from '../core/social';
-import { POST_COLUMNS } from './posts';
+import { readPosts } from './posts';
 import { PUBLIC_SET_COLUMNS } from './community';
 import type { FeedPost } from '../core/posts';
 import type { PublicSet } from '../core/community';
@@ -39,12 +39,14 @@ export async function searchSets(raw: string, db: Db = supabase): Promise<Public
 export async function searchPosts(raw: string, db: Db = supabase): Promise<FeedPost[]> {
   const term = searchTerm(raw);
   if (term === null) return [];
-  const { data, error } = await db
-    .from('feed_posts')
-    .select(POST_COLUMNS)
-    .ilike('body', `%${escapeLike(term)}%`)
-    .order('created_at', { ascending: false })
-    .limit(SEARCH_LIMIT);
+  const { data, error } = await readPosts((columns) =>
+    db
+      .from('feed_posts')
+      .select(columns)
+      .ilike('body', `%${escapeLike(term)}%`)
+      .order('created_at', { ascending: false })
+      .limit(SEARCH_LIMIT),
+  );
   if (isMissingTable(error) || isMissingColumn(error)) return [];
   if (error) throw new Error(error.message);
   return (data ?? []) as unknown as FeedPost[];

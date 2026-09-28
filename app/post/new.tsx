@@ -8,6 +8,7 @@ import { MyAvatar } from '../../src/ui/avatar';
 import { RowButton } from '../../src/ui/people';
 import { petFrame } from '../../src/ui/pet';
 import { EmojiPanel } from '../../src/ui/nomi';
+import { SentPostCard } from '../../src/ui/sent-post';
 import { GLYPH, Icon, type IconName } from '../../src/ui/glyphs';
 import { imageSize, pickImages, shrinkImage } from '../../src/ui/shrink-image';
 import { INPUT_FONT_SIZE, NO_FOCUS_RING, radius, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
@@ -52,7 +53,7 @@ import { petStage, toPetSpecies } from '../../src/core/pet';
  * first, rather than throwing the words away.
  */
 
-type Attachment = 'none' | 'photo' | 'set' | 'streak';
+type Attachment = 'none' | 'photo' | 'set' | 'streak' | 'shared';
 
 /** A little under the database's 2 MB: shrunk, a phone photo is 150–300 KB. */
 const PHOTO_QUALITY = 0.82;
@@ -65,15 +66,17 @@ export default function NewPost() {
   const router = useRouter();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
-  const params = useLocalSearchParams<{ set?: string; streak?: string; edit?: string }>();
+  const params = useLocalSearchParams<{ set?: string; streak?: string; edit?: string; share?: string }>();
   const editId = typeof params.edit === 'string' ? params.edit : null;
+  // Sharing a post to your feed (NOTES §62): the post, in the box, under your words.
+  const shareId = !editId && typeof params.share === 'string' ? params.share : null;
   const myId = useSessionStore((s) => s.session?.user.id ?? '');
 
   const [body, setBody] = useState('');
   const [audience, setAudience] = useState<Audience>(DEFAULT_AUDIENCE);
   const [choosingAudience, setChoosingAudience] = useState(false);
   const [attachment, setAttachment] = useState<Attachment>(
-    params.streak === '1' ? 'streak' : typeof params.set === 'string' ? 'set' : 'none',
+    shareId ? 'shared' : params.streak === '1' ? 'streak' : typeof params.set === 'string' ? 'set' : 'none',
   );
   const [setId, setSetId] = useState<string | null>(typeof params.set === 'string' ? params.set : null);
   const [photo, setPhoto] = useState<(Photo & { preview: string }) | null>(null);
@@ -104,6 +107,11 @@ export default function NewPost() {
     queryKey: ['public-set', setId],
     queryFn: () => getPublicSet(setId!),
     enabled: setId !== null,
+  });
+  const sharedPost = useQuery({
+    queryKey: ['post', shareId],
+    queryFn: () => getPost(shareId!),
+    enabled: shareId !== null,
   });
   const { data: snapshot } = useQuery({ queryKey: ['nomi-brain'], queryFn: () => getAppSnapshot() });
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
@@ -152,6 +160,7 @@ export default function NewPost() {
   const nothingYet = !editId && body.trim().length === 0 && attachment === 'none';
   const waitingForSet = !editId && attachment === 'set' && !setId;
   const noStreak = !editId && attachment === 'streak' && streak === 0;
+  const noShared = attachment === 'shared' && !sharedPost.data;
 
   async function submit() {
     setBusy(true);
@@ -165,6 +174,7 @@ export default function NewPost() {
           audience,
           setId: attachment === 'set' ? setId : null,
           streak: attachment === 'streak',
+          sharedPostId: attachment === 'shared' ? shareId : null,
         };
         const check = validateDraft({ ...draft, photo: attachment === 'photo' && !!photo });
         if (!check.ok) throw new Error(check.reason);
@@ -203,7 +213,7 @@ export default function NewPost() {
           </Pressable>
         </View>
         <Text style={[type.bodyStrong, { color: t.text }]} accessibilityRole="header">
-          {editId ? 'Edit post' : 'New post'}
+          {editId ? 'Edit post' : shareId ? 'Share post' : 'New post'}
         </Text>
         <View style={{ flex: 1, alignItems: 'flex-end' }}>
           <RowButton
@@ -211,7 +221,7 @@ export default function NewPost() {
             primary
             onPress={() => void submit()}
             busy={busy}
-            disabled={nothingYet || waitingForSet || noStreak}
+            disabled={nothingYet || waitingForSet || noStreak || noShared}
           />
         </View>
       </View>
@@ -245,7 +255,8 @@ export default function NewPost() {
     );
   }
 
-  const footer = editId ? null : (
+  // A share carries the post it shares and nothing else (0034), so no toolbar.
+  const footer = editId || shareId ? null : (
     <>
       {emojiOpen ? <EmojiPanel onPick={(e) => setBody((b) => appendEmoji(b, e))} /> : null}
       <View
@@ -379,7 +390,9 @@ export default function NewPost() {
           onChangeText={setBody}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder={attachment === 'streak' ? 'Say something about it (optional)' : 'What do you want to share?'}
+          placeholder={
+            attachment === 'streak' || attachment === 'shared' ? 'Say something about it (optional)' : 'What do you want to share?'
+          }
           placeholderTextColor={t.textMuted}
           multiline
           maxLength={POST_MAX_LENGTH}
@@ -395,6 +408,16 @@ export default function NewPost() {
             NO_FOCUS_RING,
           ]}
         />
+
+        {attachment === 'shared' ? (
+          sharedPost.isLoading ? (
+            <LoadingState />
+          ) : sharedPost.data ? (
+            <SentPostCard post={sharedPost.data} openable={false} />
+          ) : (
+            <Text style={[type.body, { color: t.textMuted }]}>That post can&apos;t be shared any more.</Text>
+          )
+        ) : null}
 
         {attachment === 'photo' && photo ? (
           <Attached onRemove={removeAttachment} what="the photo">

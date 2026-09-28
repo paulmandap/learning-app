@@ -13,8 +13,9 @@ import {
   savePetChoice,
   uploadAvatarPhoto,
 } from '../src/data/profile';
-import { Avatar, FacePicker, PhotoPicker, pickProfilePhoto, squareProfilePhoto } from '../src/ui/avatar';
+import { Avatar, FacePicker, PhotoPicker, pickProfilePhoto } from '../src/ui/avatar';
 import { UnreadablePictureError } from '../src/ui/pick-files';
+import { PhotoCropSheet } from '../src/ui/photo-cropper';
 import { PrivacyNotice } from '../src/ui/privacy';
 import { TextLink } from '../src/ui/legal';
 import { forgetAvatar } from '../src/data/avatar-cache';
@@ -171,21 +172,28 @@ export default function Settings() {
     }
   }
 
+  // The photo being placed in the circle (NOTES §63), between choosing it and
+  // saving it.
+  const [cropping, setCropping] = useState<File | null>(null);
+
   async function uploadPhoto() {
     setAvatarError(null);
+    // The editor opens the moment a photo is chosen, reading it while it
+    // says so — never a screen doing nothing (NOTES §61).
+    const file = await pickProfilePhoto();
+    if (file) setCropping(file);
+  }
+
+  /** Save what is in the circle. Throws, for the editor to say, if it cannot. */
+  async function savePlaced(picture: Blob) {
+    setAvatarBusy(true);
     try {
-      const file = await pickProfilePhoto();
-      if (!file) return;
-      // Busy from the moment a picture is chosen, not once it is small: a
-      // large phone photo takes a moment to read, and a screen that shows
-      // nothing meanwhile is what the owner reported as broken (NOTES §61).
-      setAvatarBusy(true);
-      const image = await squareProfilePhoto(file);
-      await uploadAvatarPhoto(image);
+      await uploadAvatarPhoto(picture);
       await queryClient.invalidateQueries({ queryKey: ['profile'] });
       await queryClient.invalidateQueries({ queryKey: ['avatar-photos'] });
+      setCropping(null);
     } catch (err) {
-      setAvatarError(describeAvatarError(err));
+      throw new Error(describeAvatarError(err));
     } finally {
       setAvatarBusy(false);
     }
@@ -303,6 +311,9 @@ export default function Settings() {
         />
         <Button label="Use a photo" variant="secondary" onPress={uploadPhoto} busy={avatarBusy} />
         {avatarError ? <Notice tone="error">{avatarError}</Notice> : null}
+        {cropping ? (
+          <PhotoCropSheet file={cropping} onCancel={() => setCropping(null)} onSave={savePlaced} />
+        ) : null}
       </Card>
 
       {/* ----------------------------------------------------- your pet -- */}

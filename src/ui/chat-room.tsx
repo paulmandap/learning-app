@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Body, Button, Card, Field, Label, LoadingState, Notice } from './components';
 import { StatePanel } from './states';
 import { Composer } from './nomi';
@@ -14,6 +14,9 @@ import { authorName, canEdit, EDIT_WINDOW_MINUTES, MESSAGE_MAX_LENGTH } from '..
 import { describeWhen } from '../core/chat';
 import type { Quote } from '../core/messages';
 import { tallyReactions, type Reaction, type ReactionTally } from '../core/emoji';
+import { postInMessage } from '../core/posts';
+import { getPost } from '../data/posts';
+import { SentPostCard } from './sent-post';
 
 /**
  * A room to talk in — the Everyone room, and a conversation with a friend
@@ -431,6 +434,22 @@ function Message({
   const [hovered, setHovered] = useState(false);
   const longPress = useLongPress(onAct);
 
+  // A post sent in a message (NOTES §62): drawn as the post, read through
+  // `feed_posts` as whoever is reading. A message that is only a post the
+  // reader may not see is not shown to them at all — no hole, no "not
+  // available" (the owner's rule for reposts, kept here too).
+  const carried = useMemo(() => postInMessage(body), [body]);
+  const sent = useQuery({
+    queryKey: ['post', carried?.postId ?? null],
+    queryFn: () => getPost(carried!.postId),
+    enabled: !!carried,
+    retry: false,
+    staleTime: 60_000,
+  });
+  if (carried && sent.isFetched && !sent.data && !carried.rest) return null;
+  const words = carried ? carried.rest : body;
+  const said = carried ? [carried.rest, 'a post'].filter(Boolean).join(', ') : body;
+
   return (
     <View
       style={{
@@ -485,7 +504,7 @@ function Message({
           accessibilityRole="button"
           accessibilityLabel={`${mine ? 'You' : name}${
             quote ? (quote.removed ? ', replying to a removed message,' : `, replying to ${quote.who}: ${quote.text},`) : ''
-          } said ${body}. ${when}${edited ? ', edited' : ''}. Hold for reactions and more.`}
+          } said ${said}. ${when}${edited ? ', edited' : ''}. Hold for reactions and more.`}
           // A long press on a touch screen; the ⋯ beside it on a pointer. The
           // bubble is no longer a one-tap unsend — the owner unsent something by
           // accident that way (NOTES §47), and this is the fix he asked for.
@@ -537,9 +556,12 @@ function Message({
               </Text>
             </View>
           ) : null}
-          <Text style={[type.body, { color: mine ? t.accentText : t.text }]} selectable>
-            {body}
-          </Text>
+          {words ? (
+            <Text style={[type.body, { color: mine ? t.accentText : t.text }]} selectable>
+              {words}
+            </Text>
+          ) : null}
+          {carried && sent.data ? <SentPostCard post={sent.data} /> : null}
         </Pressable>
 
         <HoverActions visible={hovered} mine={mine} canEdit={editable} onPick={onAct} />

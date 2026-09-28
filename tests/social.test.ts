@@ -448,13 +448,17 @@ describe('the app says so when the Privacy Policy changes', () => {
 
   it('is on Home, and remembered per person, so a shared phone shows it to each', () => {
     const home = readFileSync('app/(tabs)/index.tsx', 'utf8');
-    expect(home).toContain('<WhatsNewCard userId={userId} />');
+    expect(home).toContain('<WhatsNewSheet userId={userId} />');
     expect(whatsNewKey('a')).not.toBe(whatsNewKey('b'));
     expect(whatsNewKey('a')).toContain(WHATS_NEW.id);
   });
 
-  it('never leaves Continue without the one filled button', () => {
-    const card = readFileSync('src/ui/whats-new.tsx', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-    expect(card).not.toMatch(/<Button(?![^>]*variant=)/);
+  it('a sheet over the page since §62, closed by "Got it" or a tap outside — both remembered', () => {
+    const sheet = readFileSync('src/ui/whats-new.tsx', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(sheet).toContain('<Sheet');
+    expect(sheet).toContain('onClose={dismiss}');
+    // One filled button — the sheet's own answer — and nothing else filled.
+    expect(sheet.match(/<Button(?![^>]*variant=)/g)).toHaveLength(1);
+    expect(sheet).toContain('<Button label="Got it" onPress={dismiss} />');
   });
 });
