@@ -88,11 +88,11 @@ group chats — `26ad6e4` and migration 0032, verified (isolation 212/212,
 four is live** (NOTES §59): Profile, a person's page, Edit profile, a bio,
 Share profile (`/u/<username>`), and search for people, sets and posts
 (`/search`) — `fde3208` and migration 0033, verified (isolation 219/219).
-**Step five is built, not deployed** (NOTES §60): the new post as a sheet over
-what opened it (a transparent-modal route), Progress to the picture, the rules
-and report sheets with their button in a fixed footer, Nomi's chats and the
-folder panel as the one Sheet, `/icons` removed. No database change. **The
-redesign is done once step five is live.** **Probe reports pile up:** each run
+**Step five is live** (NOTES §60): the new post as a sheet over what opened it
+(a transparent-modal route), Progress to the picture, the rules and report
+sheets with their button in a fixed footer, Nomi's chats and the folder panel
+as the one Sheet, `/icons` removed — `7ebdf69`, verified (`friends-probe`
+24/24, isolation 219/219). **The redesign is done.** **Probe reports pile up:** each run
 of `friends-probe` and the isolation test leaves marked reports, and at 20 in
 a day test account B hits the report limit (§58.4) — clear them with the SQL
 the probes print. A report left open also makes a later identical report hand

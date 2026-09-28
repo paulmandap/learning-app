@@ -8717,6 +8717,20 @@ The owner: *"go with step 5."* The last of §56's five. No database change.
   sheet, the report sheet, Nomi's chats, and a folder (made for the photograph
   on the test account and deleted after).
 
+### 60.5 Deployed, and verified (2026-09-28) — the redesign is done
+
+Committed and deployed by the owner as `7ebdf69` — *production is exactly
+HEAD*, bundle matching — and the probe reports cleared (*"done"*).
+
+- `friends-probe` **24/24**, then `isolation-test.ts` **219/219**, then
+  `friends-probe` **24/24** again — run in that order on purpose: the second
+  probe run after the isolation test is what shows §59.5's collision is gone.
+
+All five steps of §56 are live. What the owner's two pictures asked for is
+built, and every extra he chose is in: a bio, group chats, reply on messages,
+replies and hearts on comments, search for people, sets and posts with recent
+searches, saved posts, and Share profile.
+
 
 ## Sources
 
