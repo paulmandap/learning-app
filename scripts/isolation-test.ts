@@ -996,6 +996,9 @@ async function main() {
     // ---- posts, comments, reactions and photos (0027, NOTES §52) ----
     await checkPosts(A, B, { privateSetId: set.id });
 
+    // ---- replies, hearts on comments and saved posts (0031, NOTES §57) ----
+    await checkRepliesHeartsAndSaves(A, B);
+
     // ---- messages between friends (0028, NOTES §53) ----
     await checkMessages(A, B);
 
@@ -1715,6 +1718,143 @@ async function checkPosts(
   await A.client.from('posts').delete().like('body', `${POST_PROBE}%`);
   await B.client.from('posts').delete().like('body', `${POST_PROBE}%`);
   await B.client.storage.from('post-images').remove([photoPath]);
+}
+
+/**
+ * Replies and hearts on comments, and saved posts (0031, NOTES §57).
+ *
+ * B posts and comments, A reads — strangers first, then a block. Everything new
+ * asks 0027's one rule through `can_see_post` or `can_see_comment`, and the two
+ * new tables are their owners' alone: nobody can list who gave a heart or who
+ * saved a post.
+ */
+async function checkRepliesHeartsAndSaves(
+  A: { client: SupabaseClient; userId: string },
+  B: { client: SupabaseClient; userId: string },
+) {
+  const gate = await A.client.from('comment_likes').select('comment_id').limit(1);
+  if (gate.error && isMissingRelation(gate.error)) {
+    console.log('\n  ----  replies, hearts and saves — not present (migration 0031), not checked');
+    return;
+  }
+  console.log('\nReplies, hearts on comments, and saved posts (0031):');
+
+  const strangers = async () => {
+    await A.client.from('blocks').delete().eq('blocker_id', A.userId);
+    await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
+  };
+  await strangers();
+  await B.client.from('posts').delete().like('body', `${POST_PROBE}%`);
+
+  const friendsPost = await B.client.rpc('create_post', { p_body: `${POST_PROBE} 0031 friends`, p_audience: 'friends' });
+  const openPost = await B.client.rpc('create_post', { p_body: `${POST_PROBE} 0031 everyone`, p_audience: 'everyone' });
+  if (friendsPost.error || openPost.error) {
+    fail('0031 seed', `${friendsPost.error?.message ?? ''} ${openPost.error?.message ?? ''}`.trim());
+    return;
+  }
+  const hiddenPostId = friendsPost.data as string;
+  const openPostId = openPost.data as string;
+  const onHidden = await B.client.rpc('add_comment', { p_post: hiddenPostId, p_body: `${POST_PROBE} hidden comment` });
+  const onOpen = await B.client.rpc('add_comment', { p_post: openPostId, p_body: `${POST_PROBE} open comment` });
+  if (onHidden.error || onOpen.error) {
+    fail('0031 seed', `${onHidden.error?.message ?? ''} ${onOpen.error?.message ?? ''}`.trim());
+    return;
+  }
+  const hiddenComment = onHidden.data as string;
+  const openComment = onOpen.data as string;
+
+  // ---- hearts ----
+  const heartHidden = await A.client.from('comment_likes').insert({ comment_id: hiddenComment, user_id: A.userId });
+  if (!heartHidden.error) fail('heart (hidden post)', "A gave a heart to a comment on a post A cannot see");
+  else ok('heart (hidden post)', `refused (${heartHidden.error.code ?? 'error'})`);
+
+  const heart = await A.client.from('comment_likes').insert({ comment_id: openComment, user_id: A.userId });
+  if (heart.error) fail('heart', heart.error.message);
+  else ok('heart', "A gave a heart to B's comment on a public post");
+
+  const heartAsB = await A.client.from('comment_likes').insert({ comment_id: openComment, user_id: B.userId });
+  if (!heartAsB.error) fail('heart (as B)', "A gave a heart in B's name");
+  else ok('heart (as B)', `refused (${heartAsB.error.code ?? 'error'})`);
+
+  const bReadsHearts = await B.client.from('comment_likes').select('user_id').eq('comment_id', openComment);
+  if ((bReadsHearts.data ?? []).some((r: { user_id: string }) => r.user_id === A.userId)) {
+    fail('comment_likes (as B)', 'B CAN SEE WHO GAVE A HEART — hearts are counted, not named');
+  } else ok('comment_likes (as B)', "B cannot list who gave hearts on B's own comment");
+
+  const counted = await B.client.from('post_comment_people').select('likes, liked').eq('id', openComment).maybeSingle();
+  const mineCounted = await A.client.from('post_comment_people').select('likes, liked').eq('id', openComment).maybeSingle();
+  const bRow = counted.data as { likes?: number; liked?: boolean } | null;
+  const aRow = mineCounted.data as { likes?: number; liked?: boolean } | null;
+  if (bRow?.likes === 1 && bRow.liked === false && aRow?.liked === true) {
+    ok('post_comment_people (hearts)', 'counted for B, marked as A’s own for A');
+  } else fail('post_comment_people (hearts)', `B sees ${JSON.stringify(bRow)}, A sees ${JSON.stringify(aRow)}`);
+
+  // ---- replies ----
+  const replyHidden = await A.client.rpc('add_reply', { p_comment: hiddenComment, p_body: 'can I see this?' });
+  if (!replyHidden.error) fail('reply (hidden post)', 'A replied to a comment on a post A cannot see');
+  else ok('reply (hidden post)', `refused (${replyHidden.error.code ?? 'error'}), as if it were not there`);
+
+  const reply = await A.client.rpc('add_reply', { p_comment: openComment, p_body: `${POST_PROBE} reply from A` });
+  if (reply.error) fail('add_reply', reply.error.message);
+  else {
+    const row = await B.client.from('post_comment_people').select('parent_id, author_id').eq('id', reply.data as string).maybeSingle();
+    if ((row.data as { parent_id?: string } | null)?.parent_id === openComment) ok('add_reply', "under B's comment, and B sees it there");
+    else fail('add_reply', `B sees ${JSON.stringify(row.data)}`);
+
+    const deeper = await B.client.rpc('add_reply', { p_comment: reply.data as string, p_body: `${POST_PROBE} reply to the reply` });
+    const deepRow = deeper.error
+      ? null
+      : await A.client.from('post_comment_people').select('parent_id').eq('id', deeper.data as string).maybeSingle();
+    if ((deepRow?.data as { parent_id?: string } | null)?.parent_id === openComment) {
+      ok('one level deep', 'a reply to a reply landed under the comment above it');
+    } else fail('one level deep', deeper.error?.message ?? `parent is ${JSON.stringify(deepRow?.data)}`);
+  }
+
+  const forgedReply = await A.client
+    .from('post_comments')
+    .insert({ post_id: openPostId, user_id: A.userId, body: 'around add_reply', parent_id: openComment });
+  if (!forgedReply.error) fail('post_comments insert (reply)', 'a reply went straight in, around add_reply');
+  else ok('post_comments insert (reply)', `refused (${forgedReply.error.code ?? 'error'})`);
+
+  // ---- saves ----
+  const saveHidden = await A.client.from('post_saves').insert({ post_id: hiddenPostId, user_id: A.userId });
+  if (!saveHidden.error) fail('save (hidden post)', 'A saved a post A cannot see');
+  else ok('save (hidden post)', `refused (${saveHidden.error.code ?? 'error'})`);
+
+  const save = await A.client.from('post_saves').insert({ post_id: openPostId, user_id: A.userId });
+  if (save.error) fail('save', save.error.message);
+  else ok('save', "A saved B's public post");
+
+  const saveAsB = await A.client.from('post_saves').insert({ post_id: openPostId, user_id: B.userId });
+  if (!saveAsB.error) fail('save (as B)', "A saved a post in B's name");
+  else ok('save (as B)', `refused (${saveAsB.error.code ?? 'error'})`);
+
+  const bReadsSaves = await B.client.from('post_saves').select('user_id').eq('post_id', openPostId);
+  if ((bReadsSaves.data ?? []).length > 0) fail('post_saves (as author)', 'B CAN SEE WHO SAVED B’S POST — saves are private');
+  else ok('post_saves (as author)', 'the author cannot see who saved their post');
+
+  // ---- a block: A's heart stops counting for B, and A cannot reply ----
+  await A.client.rpc('block_person', { p_other: B.userId });
+  const countAcross = await B.client.from('post_comment_people').select('likes').eq('id', openComment).maybeSingle();
+  if ((countAcross.data as { likes?: number } | null)?.likes === 0) {
+    ok('block (hearts)', 'a heart from across a block is not counted');
+  } else fail('block (hearts)', `B still counts ${JSON.stringify(countAcross.data)} after A blocked B`);
+
+  const aReplyToB = await A.client.rpc('add_reply', { p_comment: openComment, p_body: 'across a block' });
+  if (!aReplyToB.error) fail('block (reply)', 'A replied to B across a block');
+  else ok('block (reply)', `refused (${aReplyToB.error.code ?? 'error'})`);
+
+  // ---- a comment deleted takes its replies with it ----
+  await strangers();
+  await B.client.from('post_comments').delete().eq('id', openComment);
+  const orphans = await A.client.from('post_comments').select('id').eq('parent_id', openComment);
+  if ((orphans.data ?? []).length > 0) fail('cascade', "A's reply outlived the comment it answered");
+  else ok('cascade', 'the replies went with the comment');
+
+  // ---- tidy up ----
+  await A.client.from('post_saves').delete().eq('user_id', A.userId);
+  await A.client.from('comment_likes').delete().eq('user_id', A.userId);
+  await B.client.from('posts').delete().like('body', `${POST_PROBE}%`);
 }
 
 /**

@@ -343,11 +343,14 @@ describe('what the Privacy Policy says about posts is what the app does', () => 
     expect(policy('post_images_read_visible')).toContain('can_see_post_image(name)');
   });
 
-  it('Delete my data removes posts, their photos, and every comment and reaction left', () => {
-    expect(privacy).toMatch(/Delete my data removes[^.]*your posts and their photos, the comments and reactions you left/);
+  it('Delete my data removes posts, their photos, and every comment, reply, reaction, heart and save left', () => {
+    expect(privacy).toMatch(
+      /Delete my data removes[^.]*your posts and their photos, the comments, replies and reactions you left, the hearts you gave comments, the posts you saved/,
+    );
     const data = readFileSync('src/data/posts.ts', 'utf8');
     const body = data.slice(data.indexOf('export async function removeMyPosts'));
-    expect(body).toContain("['post_comments', 'post_reactions', 'posts']");
+    // 0031 added the hearts and the saves (NOTES §57).
+    expect(body).toContain("['comment_likes', 'post_saves', 'post_comments', 'post_reactions', 'posts']");
     expect(body).toContain(".from('post-images')");
     expect(readFileSync('src/data/sets.ts', 'utf8')).toContain('await removeMyPosts()');
   });

@@ -2,10 +2,13 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   FILL_ROW,
+  SMOOTH_TURN_DEG,
   TOLERANCE,
   flattenPath,
   iconFill,
   iconPieces,
+  segmentsOf,
+  strokeLayout,
   viewCount,
   type Segment,
 } from '../src/core/icon-geometry';
@@ -46,7 +49,9 @@ function segmentsOfPath(d: string): Segment[] {
 describe('every icon', () => {
   it('stays inside its 24-unit box', () => {
     for (const name of NAMES) {
-      const { segments, rings, frames } = iconPieces(name);
+      const pieces = iconPieces(name);
+      const { rings, frames } = pieces;
+      const segments = segmentsOf(pieces);
       const xs = [
         ...segments.flatMap(([x1, , x2]) => [x1, x2]),
         ...rings.flatMap((c) => [c.cx - c.r, c.cx + c.r]),
@@ -68,7 +73,7 @@ describe('every icon', () => {
     // The first photograph: user-plus's lines had x1/y1/x2/y2 skipped by the
     // generator and landed at 0,0.
     for (const name of NAMES) {
-      for (const [x1, y1, x2, y2] of iconPieces(name).segments) {
+      for (const [x1, y1, x2, y2] of segmentsOf(iconPieces(name))) {
         expect([x1, y1, x2, y2].every((v) => v === 0), name).toBe(false);
       }
     }
@@ -81,8 +86,11 @@ describe('every icon', () => {
     for (const name of ['heart', 'bookmark', 'star'] as IconName[]) {
       expect(viewCount(name, true), name).toBeLessThanOrEqual(80);
     }
+    // 112 with round-ended bars; 131 since §57 laid square-ended bars with
+    // round dots only at ends and sharp corners — the dots are the difference,
+    // and they are what made the curves smooth.
     const row = (['heart', 'comment', 'share', 'bookmark', 'more'] as IconName[]).reduce((s, n) => s + viewCount(n), 0);
-    expect(row).toBeLessThanOrEqual(130);
+    expect(row).toBeLessThanOrEqual(140);
   });
 
   it('carries Lucide’s licence notice and says it is generated', () => {
@@ -155,9 +163,68 @@ describe('the path reader', () => {
   });
 });
 
+describe('a stroke laid along a line (NOTES §57)', () => {
+  const W = 1.75;
+  /** The two ends of a bar, from its centre, length and angle. */
+  const ends = (b: { cx: number; cy: number; length: number; angle: number }) => {
+    const r = (b.angle * Math.PI) / 180;
+    const dx = (Math.cos(r) * b.length) / 2;
+    const dy = (Math.sin(r) * b.length) / 2;
+    return [
+      [b.cx - dx, b.cy - dy],
+      [b.cx + dx, b.cy + dy],
+    ];
+  };
+
+  it('a straight line is one bar with a round dot at each end', () => {
+    const { bars, dots } = strokeLayout({ points: [[2, 12], [22, 12]], closed: false }, W);
+    expect(bars).toHaveLength(1);
+    expect(bars[0]!.length).toBeCloseTo(20, 6);
+    expect(dots).toEqual([
+      { cx: 2, cy: 12 },
+      { cx: 22, cy: 12 },
+    ]);
+  });
+
+  it('a sharp corner gets a round join, a gentle bend does not', () => {
+    const corner = strokeLayout({ points: [[4, 4], [12, 12], [20, 4]], closed: false }, W);
+    expect(corner.dots).toContainEqual({ cx: 12, cy: 12 });
+    const gentle = strokeLayout({ points: [[0, 12], [10, 12], [20, 13]], closed: false }, W);
+    expect(gentle.dots).not.toContainEqual({ cx: 10, cy: 12 });
+    expect(SMOOTH_TURN_DEG).toBeLessThan(45);
+  });
+
+  it('bars along a bend reach past the join, so no wedge opens on the outside', () => {
+    // A 10° step, as along a curve: each bar must pass the shared point by at
+    // least w/2 · tan(5°), or the outside of the bend shows a notch.
+    const { bars } = strokeLayout({ points: [[0, 12], [10, 12], [20, 12 + 10 * Math.tan(Math.PI / 18)]], closed: false }, W);
+    const need = (W / 2) * Math.tan(Math.PI / 36);
+    const [, firstEnd] = ends(bars[0]!);
+    const [secondStart] = ends(bars[1]!);
+    expect(firstEnd![0]! - 10).toBeGreaterThanOrEqual(need);
+    expect(Math.hypot(secondStart![0]! - 10, secondStart![1]! - 12)).toBeGreaterThanOrEqual(need);
+  });
+
+  it('a closed line has no caps — a square has a round join at each corner and nothing else', () => {
+    const { bars, dots } = strokeLayout({ points: [[4, 4], [20, 4], [20, 20], [4, 20]], closed: true }, W);
+    expect(bars).toHaveLength(4);
+    expect(dots).toHaveLength(4);
+  });
+
+  it('a circle drawn as a path has no dots at all, and no bump where it closes', () => {
+    const circle = flattenPath('M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0')[0]!;
+    const { dots } = strokeLayout({ points: circle.points.slice(0, -1), closed: true }, W);
+    expect(dots).toEqual([]);
+  });
+
+  it('a dot is a dot', () => {
+    expect(strokeLayout({ points: [[9, 12.5]], closed: false }, W)).toEqual({ bars: [], dots: [{ cx: 9, cy: 12.5 }] });
+  });
+});
+
 describe('a filled icon', () => {
   it('fills the heart from edge to edge on every row', () => {
-    const outline = iconPieces('heart').segments;
+    const outline = segmentsOf(iconPieces('heart'));
     const bands = iconFill('heart');
     expect(bands.length).toBeGreaterThan(8);
     for (const [x, y, w, h] of bands) {

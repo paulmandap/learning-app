@@ -8,10 +8,9 @@ import { ICON_SHAPES, type IconName, type IconShape } from './icon-shapes';
  * The redesign needs about forty icons, and the owner chose to draw them rather
  * than add an icon package (+14 KB, two dependencies) or plain SVG (+1 KB, but
  * web-only) — *"try harder. draw boxes."* A View can be a ring, a rounded
- * frame, or a bar with round ends turned to any angle. That is enough for any
- * outline icon: a curve is a run of short round-ended bars laid end to end,
- * and where they meet, their round ends overlap into a round join — which is
- * exactly how Lucide strokes its lines (round caps, round joins).
+ * frame, a dot, or a bar turned to any angle. That is enough for any outline
+ * icon: a curve is a run of short bars laid end to end (`strokeLayout`), with
+ * round dots where Lucide's round caps and sharp round joins are.
  *
  * So circles and rectangles stay whole (one View each, perfectly smooth), and
  * every path is flattened here into bars short enough that no point of the
@@ -25,7 +24,7 @@ import { ICON_SHAPES, type IconName, type IconShape } from './icon-shapes';
 export const TOLERANCE = 0.06;
 
 /** Height of one row of a filled icon, in icon units. Its edge error is at most half of this, which the outline (0.875 either side of the line at 24 px) covers. */
-export const FILL_ROW = 1.25;
+export const FILL_ROW = 0.8;
 
 export type Segment = readonly [x1: number, y1: number, x2: number, y2: number];
 export interface Ring { cx: number; cy: number; r: number }
@@ -33,8 +32,8 @@ export interface Frame { x: number; y: number; w: number; h: number; r: number }
 
 /** What a View-drawn icon is made of, in its 24-unit box. */
 export interface IconPieces {
-  /** Round-ended bars. A dot is a bar of no length. */
-  segments: Segment[];
+  /** Lines to stroke — `strokeLayout` lays bars and dots along them. A dot is a line of one point. */
+  lines: Polyline[];
   rings: Ring[];
   frames: Frame[];
 }
@@ -266,8 +265,9 @@ export function flattenPath(d: string): Subpath[] {
   return paths.filter((p) => p.points.length > 1);
 }
 
-/** Drops points that sit on the straight line between their neighbours. */
-function simplify(points: Pt[]): Pt[] {
+/** Drops points that sit on the straight line between their neighbours, and repeats. */
+function simplify(input: Pt[]): Pt[] {
+  const points = input.filter((p, i) => i === 0 || p[0] !== input[i - 1]![0] || p[1] !== input[i - 1]![1]);
   if (points.length < 3) return points;
   const out: Pt[] = [points[0]!];
   for (let i = 1; i < points.length - 1; i++) {
@@ -283,26 +283,152 @@ function simplify(points: Pt[]): Pt[] {
   return out;
 }
 
-function segmentsOf(path: Subpath): Segment[] {
-  const pts = simplify(path.points);
-  if (pts.length === 1) return [[pts[0]![0], pts[0]![1], pts[0]![0], pts[0]![1]]];
-  const out: Segment[] = [];
-  for (let i = 0; i < pts.length - 1; i++) out.push([pts[i]![0], pts[i]![1], pts[i + 1]![0], pts[i + 1]![1]]);
+/**
+ * A line as a list of points — a path flattened, or a straight line — and
+ * whether it closes on itself. A closed line's last point is not its first
+ * again: the closing piece is implied.
+ */
+export interface Polyline {
+  points: readonly (readonly [number, number])[];
+  closed: boolean;
+}
+
+function polylineOf(path: Subpath): Polyline {
+  let pts = simplify(path.points);
   const first = pts[0]!;
   const last = pts[pts.length - 1]!;
-  if (path.closed && (first[0] !== last[0] || first[1] !== last[1])) out.push([last[0], last[1], first[0], first[1]]);
+  const meets = pts.length > 2 && first[0] === last[0] && first[1] === last[1];
+  // A path that ends where it began is closed whether or not it says `z`.
+  if (meets) pts = pts.slice(0, -1);
+  return { points: pts, closed: path.closed || meets };
+}
+
+/** Every straight piece of an icon's lines — for tests and for counting. */
+export function segmentsOf(pieces: IconPieces): Segment[] {
+  const out: Segment[] = [];
+  for (const line of pieces.lines) {
+    const p = line.points;
+    if (p.length === 1) out.push([p[0]![0], p[0]![1], p[0]![0], p[0]![1]]);
+    for (let i = 0; i + 1 < p.length; i++) out.push([p[i]![0], p[i]![1], p[i + 1]![0], p[i + 1]![1]]);
+    if (line.closed && p.length > 2) out.push([p[p.length - 1]![0], p[p.length - 1]![1], p[0]![0], p[0]![1]]);
+  }
   return out;
 }
 
 function piecesOf(shapes: readonly IconShape[]): IconPieces {
-  const pieces: IconPieces = { segments: [], rings: [], frames: [] };
+  const pieces: IconPieces = { lines: [], rings: [], frames: [] };
   for (const s of shapes) {
     if (s[0] === 'c') pieces.rings.push({ cx: s[1], cy: s[2], r: s[3] });
     else if (s[0] === 'r') pieces.frames.push({ x: s[1], y: s[2], w: s[3], h: s[4], r: s[5] });
-    else if (s[0] === 'l') pieces.segments.push([s[1], s[2], s[3], s[4]]);
-    else for (const path of flattenPath(s[1])) pieces.segments.push(...segmentsOf(path));
+    else if (s[0] === 'l') {
+      const dot = s[1] === s[3] && s[2] === s[4];
+      pieces.lines.push({ points: dot ? [[s[1], s[2]]] : [[s[1], s[2]], [s[3], s[4]]], closed: false });
+    } else for (const path of flattenPath(s[1])) pieces.lines.push(polylineOf(path));
   }
   return pieces;
+}
+
+// ------------------------------------------------------------ stroking a line
+
+/**
+ * A straight piece of stroke with square ends: centre, length, and the angle
+ * it is turned to, in degrees. Its thickness is the stroke's.
+ */
+export interface Bar { cx: number; cy: number; length: number; angle: number }
+/** A round dot the stroke's thickness across — a round cap, or a round join. */
+export interface Dot { cx: number; cy: number }
+
+/**
+ * Turns sharper than this get a round dot; gentler ones — every step along a
+ * curve — are closed by stretching the two bars a little into each other.
+ */
+export const SMOOTH_TURN_DEG = 25;
+
+/**
+ * How a stroke `w` thick is laid along a line, as Views draw it (NOTES §57).
+ *
+ * ## Why not round-ended bars, which was the first way
+ *
+ * A curve was a chain of bars with round ends, overlapping into round joins.
+ * Photographed at 4×, every join was a bump: where two ends overlap, each
+ * one's soft edge is drawn over the other's, so the edge is a little darker
+ * and a little wider there — thirty of them around a speech bubble, and it
+ * looked hand-drawn with a shaky pen.
+ *
+ * So the bars have square ends and meet end to end. Along a curve the turn at
+ * each step is a few degrees, and each bar is stretched by `w/2 · tan(turn/2)`
+ * — exactly enough to close the wedge on the outside of the turn — plus a
+ * third of the stroke, so their soft edges overlap rather than meet (meeting
+ * left a dashed seam at every join). Only where a line ends, or turns sharply (a
+ * chevron's point, a corner), is a round dot added: Lucide's round caps and
+ * round joins, where they can actually be seen.
+ */
+export function strokeLayout(line: Polyline, w: number): { bars: Bar[]; dots: Dot[] } {
+  const pts = line.points;
+  const bars: Bar[] = [];
+  const dots: Dot[] = [];
+  if (pts.length === 1) {
+    dots.push({ cx: pts[0]![0], cy: pts[0]![1] });
+    return { bars, dots };
+  }
+
+  const n = pts.length;
+  const count = line.closed ? n : n - 1;
+  const seg = (i: number) => [pts[i]!, pts[(i + 1) % n]!] as const;
+  const dir = (i: number) => {
+    const [a, b] = seg(i);
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    return [(b[0] - a[0]) / len, (b[1] - a[1]) / len] as const;
+  };
+  // Square ends that only touch leave a seam: each end's soft edge covers half
+  // a pixel, and two halves drawn over each other make three quarters, not
+  // one — photographed, every curve came out dashed. A third of the stroke
+  // (about half a point at 24) overlaps them by a whole device pixel.
+  const seam = w * 0.35;
+
+  // The join at point i is between segment i-1 and segment i (on a closed line
+  // the one at point 0 is between the last segment and the first). How far
+  // each bar reaches past its end there — or null where a dot makes the join.
+  const joint = (i: number): number | null => {
+    const [ax, ay] = dir((i - 1 + count) % count);
+    const [bx, by] = dir(i);
+    const turn = Math.acos(Math.max(-1, Math.min(1, ax * bx + ay * by)));
+    if ((turn * 180) / Math.PI > SMOOTH_TURN_DEG) return null;
+    return (w / 2) * Math.tan(turn / 2) + seam;
+  };
+
+  // Index i is the join at point i; an open line has none at its first point.
+  const reach: (number | null)[] = [];
+  for (let i = 0; i < count; i++) reach.push(line.closed || i > 0 ? joint(i) : null);
+
+  for (let i = 0; i < count; i++) {
+    const [a, b] = seg(i);
+    const [dx, dy] = dir(i);
+    const before = reach[i] ?? 0;
+    const hasNext = line.closed || i + 1 < count;
+    const after = hasNext ? (reach[(i + 1) % count] ?? 0) : 0;
+    const sx = a[0] - dx * before;
+    const sy = a[1] - dy * before;
+    const ex = b[0] + dx * after;
+    const ey = b[1] + dy * after;
+    bars.push({
+      cx: (sx + ex) / 2,
+      cy: (sy + ey) / 2,
+      length: Math.hypot(ex - sx, ey - sy),
+      angle: (Math.atan2(dy, dx) * 180) / Math.PI,
+    });
+  }
+
+  // Round joins where the turn is sharp; round caps at the ends of an open line.
+  for (let i = 0; i < count; i++) {
+    const interior = line.closed || i > 0;
+    if (interior && reach[i] === null) dots.push({ cx: pts[i]![0], cy: pts[i]![1] });
+  }
+  if (!line.closed) {
+    dots.push({ cx: pts[0]![0], cy: pts[0]![1] });
+    dots.push({ cx: pts[n - 1]![0], cy: pts[n - 1]![1] });
+  }
+  return { bars, dots };
 }
 
 const piecesCache = new Map<IconName, IconPieces>();
@@ -361,8 +487,16 @@ export function iconFill(name: IconName): Band[] {
   return bands;
 }
 
-/** How many Views an icon costs — held to a budget by tests/icons.test.ts. */
+/**
+ * How many Views an icon costs at 24 — held to a budget by
+ * tests/icons.test.ts. Bars and dots, rings and frames, and a filled icon's
+ * bands.
+ */
 export function viewCount(name: IconName, filled = false): number {
   const p = iconPieces(name);
-  return p.segments.length + p.rings.length + p.frames.length + (filled ? iconFill(name).length : 0);
+  const strokes = p.lines.reduce((n, line) => {
+    const { bars, dots } = strokeLayout(line, 1.75);
+    return n + bars.length + dots.length;
+  }, 0);
+  return strokes + p.rings.length + p.frames.length + (filled ? iconFill(name).length : 0);
 }

@@ -39,6 +39,14 @@ const PREVIOUS: Record<string, string> = {
 };
 
 describe('every way to reach another person asks the one question first', () => {
+  // Written after 0030, so it has no previous version to be held to: it is
+  // held to having the gate (HANDOFF rule 54). tests/comments.test.ts holds
+  // the rest of it.
+  it('add_reply (0031) asks it too', () => {
+    const later = strip(readFileSync('supabase/migrations/0031_comment_replies_likes_and_saves.sql', 'utf8'));
+    expect(fnIn(later, 'add_reply')).toContain(GATE);
+  });
+
   for (const [name, file] of Object.entries(PREVIOUS)) {
     it(`${name}: its previous version (${file.slice(0, 4)}) plus the gate, and nothing else`, () => {
       const now = fn(name);

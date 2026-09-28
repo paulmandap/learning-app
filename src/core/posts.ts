@@ -25,7 +25,10 @@ export const POST_MAX_LENGTH = 2000;
 export const COMMENT_MAX_LENGTH = 1000;
 /** Mirrors `create_post` (0027). */
 export const POSTS_PER_DAY = 20;
-/** Mirrors `add_comment` (0027), and the chat's own limit. */
+/**
+ * Mirrors `add_comment` (0027), and the chat's own limit. `add_reply` (0031)
+ * counts the same rows, so comments and replies share it.
+ */
 export const COMMENTS_PER_MINUTE = 10;
 /** How many posts the feed asks for at a time. */
 export const FEED_PAGE = 20;
@@ -73,7 +76,10 @@ export interface FeedPost {
   comments: number;
 }
 
-/** A row of `post_comment_people` (0027). */
+/**
+ * A row of `post_comment_people` (0027; 0031 added the last three). Until 0031
+ * is applied they read as a comment with no parent, no hearts and not yours.
+ */
 export interface PostComment {
   id: string;
   post_id: string;
@@ -83,6 +89,84 @@ export interface PostComment {
   author_avatar: string | null;
   body: string;
   created_at: string;
+  /** The comment this one replies to, or null for a comment on the post itself. */
+  parent_id: string | null;
+  /** Hearts from people the reader can see. Counted, never named. */
+  likes: number;
+  /** Is one of them the reader's? */
+  liked: boolean;
+}
+
+/** A comment on the post, with the replies to it underneath, oldest first. */
+export interface CommentThread {
+  comment: PostComment;
+  replies: PostComment[];
+}
+
+/**
+ * Comments as the post page shows them: each comment on the post, oldest
+ * first, with its replies under it (0031 keeps replies one level deep).
+ *
+ * A reply whose comment is not in the list is left out rather than shown loose:
+ * the comment it answers is hidden from the reader — its writer is across a
+ * block — and an answer to something you cannot see reads as a non sequitur
+ * addressed to nobody.
+ */
+export function threadComments(comments: readonly PostComment[]): CommentThread[] {
+  const byTime = [...comments].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  const threads = new Map<string, CommentThread>();
+  for (const c of byTime) if (!c.parent_id) threads.set(c.id, { comment: c, replies: [] });
+  for (const c of byTime) if (c.parent_id) threads.get(c.parent_id)?.replies.push(c);
+  return [...threads.values()];
+}
+
+/** The ❤️ the heart button on a post gives — the first of the six reactions. */
+export const HEART = '❤️';
+
+/**
+ * A post's hearts: how many, and whether one is the reader's. The heart button
+ * is ❤️ alone; the other five reactions stay in the post's sheet and show as
+ * chips (`otherReactions`).
+ */
+export function heartsOf(
+  reactions: readonly { user_id: string; emoji: string }[],
+  myId: string,
+): { count: number; mine: boolean } {
+  const hearts = reactions.filter((r) => r.emoji === HEART);
+  return { count: hearts.length, mine: hearts.some((r) => r.user_id === myId) };
+}
+
+/** Every reaction but the heart, which the heart button already shows. */
+export function otherReactions<T extends { emoji: string }>(reactions: readonly T[]): T[] {
+  return reactions.filter((r) => r.emoji !== HEART);
+}
+
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+/**
+ * How long ago, the way a feed says it: "now", "5m", "2h", "3d", then the
+ * date — "Sep 12", with the year once it is not this one.
+ *
+ * Not the chat's `describeWhen`, which gives a clock time for today: in a
+ * conversation "10:24 AM" places a message among others, while beside a post
+ * "2h" is what says how fresh it is (the owner's picture).
+ */
+export function agoShort(then: number, now: number): string {
+  const gone = Math.max(0, now - then);
+  if (gone < MINUTE) return 'now';
+  if (gone < HOUR) return `${Math.floor(gone / MINUTE)}m`;
+  if (gone < DAY) return `${Math.floor(gone / HOUR)}h`;
+  if (gone < 7 * DAY) return `${Math.floor(gone / DAY)}d`;
+  const date = new Date(then);
+  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  return date.toLocaleDateString('en-US', sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** "Replying to Maria", over the comment box while a reply is being written. */
+export function replyingTo(name: string): string {
+  return `Replying to ${name}`;
 }
 
 /** What is being posted, before it is. */

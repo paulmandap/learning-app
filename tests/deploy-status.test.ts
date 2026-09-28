@@ -59,6 +59,8 @@ describe('what counts as a dangerous migration', () => {
     // dropping it and adding it back, which is `add constraint`, not `create`.
     expect(destructiveDrops(sql('0026_friends_blocks_and_reports.sql'))).toEqual([]);
     expect(destructiveDrops(sql('0027_posts_and_feed.sql'))).toEqual([]);
+    // 0031 recreates post_comment_people with three more columns (NOTES §57).
+    expect(destructiveDrops(sql('0031_comment_replies_likes_and_saves.sql'))).toEqual([]);
     expect(
       destructiveDrops('alter table t drop constraint if exists c1;\nalter table t add constraint c1 check (x > 0);'),
     ).toEqual([]);

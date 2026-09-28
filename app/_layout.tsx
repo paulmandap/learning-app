@@ -177,6 +177,9 @@ function RootNavigator() {
     // The rooms (NOTES §53): the same reason as the chat pane had — a pinned
     // Send where the ✦ floats.
     path[0] !== 'messages' &&
+    // A post's page, and writing one (NOTES §57): the comment box is pinned
+    // to the bottom now, as in the owner's picture, and so is Send.
+    path[0] !== 'post' &&
     !isPublicRoute(segments[0]);
 
   return (
@@ -250,6 +253,10 @@ function RootNavigator() {
             not places: pushed with their own back control. */}
         <Stack.Screen name="post/new" options={{ title: '', ...backable }} />
         <Stack.Screen name="post/[id]" options={{ title: '', ...backable }} />
+        {/* The posts you saved (NOTES §57), from Profile's top bar. */}
+        <Stack.Screen name="saved" options={{ title: '', ...backable }} />
+        {/* Every icon, for photographing while the redesign is built (§56.2). */}
+        <Stack.Screen name="icons" options={{ title: '', ...backable }} />
         {/* The Everyone room and a conversation with a friend (NOTES §53):
             pushed rooms, each titled by the screen. */}
         <Stack.Screen name="messages/everyone" options={{ title: 'Everyone', ...backable }} />

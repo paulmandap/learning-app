@@ -154,8 +154,15 @@ export default function Profile() {
     <Screen>
       {/* Settings at the top right, where the bar's actions go (NOTES §56.3).
           A gear now, as in the owner's picture — it was the sliders the
-          Settings tab used to wear. */}
-      <TopBar title="Profile" actions={[{ icon: 'settings', label: 'Settings', onPress: () => router.push('/settings') }]} />
+          Settings tab used to wear. The bookmark opens what you saved (§57)
+          until step four gives Profile its Saved tab. */}
+      <TopBar
+        title="Profile"
+        actions={[
+          { icon: 'bookmark', label: 'Saved', onPress: () => router.push('/saved') },
+          { icon: 'settings', label: 'Settings', onPress: () => router.push('/settings') },
+        ]}
+      />
 
       {moderator.data ? (
         <Button

@@ -183,16 +183,58 @@ export async function deletePost(post: Pick<FeedPost, 'id' | 'image_path'>, db: 
 
 // ------------------------------------------------------------ comments --
 
+const COMMENT_COLUMNS = 'id, post_id, author_id, author_name, author_username, author_avatar, body, created_at';
+
+/**
+ * A post's comments and replies, oldest first, with their hearts.
+ *
+ * 0031 added `parent_id`, `likes` and `liked` to the view. Before it is
+ * applied, asking for them is a missing column (42703), so the old columns are
+ * asked for instead and every comment reads as one on the post with no hearts
+ * — the deploy order is not load-bearing (HANDOFF, "Migration order matters").
+ */
 export async function listComments(postId: string, db: Db = supabase): Promise<PostComment[]> {
-  const { data, error } = await db
-    .from('post_comment_people')
-    .select('id, post_id, author_id, author_name, author_username, author_avatar, body, created_at')
-    .eq('post_id', postId)
-    .order('created_at', { ascending: true })
-    .limit(500);
+  const ask = (columns: string) =>
+    db
+      .from('post_comment_people')
+      .select(columns)
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true })
+      .limit(500);
+
+  let { data, error } = await ask(`${COMMENT_COLUMNS}, parent_id, likes, liked`);
+  if (isMissingColumn(error)) ({ data, error } = await ask(COMMENT_COLUMNS));
   if (unavailable(error)) throw new PostsUnavailableError();
   if (error) throw new Error(error.message);
-  return (data ?? []) as PostComment[];
+  return ((data ?? []) as unknown as Partial<PostComment>[]).map(
+    (c) => ({ parent_id: null, likes: 0, liked: false, ...c }) as PostComment,
+  );
+}
+
+/**
+ * Reply to a comment (0031). A reply to a reply lands under the comment above
+ * it — the database keeps replies one level deep, not the app.
+ */
+export async function addReply(commentId: string, raw: string, db: Db = supabase): Promise<void> {
+  const check = validateComment(raw);
+  if (!check.ok) throw new Error(check.reason);
+  const { error } = await db.rpc('add_reply', { p_comment: commentId, p_body: check.body });
+  await throwIfGated(error, db);
+  if (missingFunction(error)) throw new Error("Replies aren't switched on yet.");
+  if (error?.code === 'P0001') throw new Error('That is a lot of comments at once — give it a moment.');
+  if (error?.code === 'P0002') throw new Error("That comment isn't there any more.");
+  if (error) throw new Error(error.message);
+}
+
+/** Give a comment your heart, or take it back (0031). */
+export async function likeComment(commentId: string, on: boolean, db: Db = supabase): Promise<void> {
+  const user_id = await currentUserId(db);
+  const { error } = on
+    ? await db.from('comment_likes').insert({ comment_id: commentId, user_id })
+    : await db.from('comment_likes').delete().eq('comment_id', commentId).eq('user_id', user_id);
+  if (isMissingTable(error)) throw new Error("Hearts on comments aren't switched on yet.");
+  // 23505: already given — the state asked for is the state.
+  if (error && error.code !== '23505') throw new Error(error.message);
 }
 
 export async function addComment(postId: string, raw: string, db: Db = supabase): Promise<void> {
@@ -257,6 +299,65 @@ export async function reactToPost(postId: string, emoji: string, on: boolean, db
   if (error && error.code !== '23505') throw new Error(error.message);
 }
 
+// --------------------------------------------------------------- saved --
+
+export class SavesUnavailableError extends Error {
+  constructor() {
+    super("Saving posts isn't switched on yet.");
+    this.name = 'SavesUnavailableError';
+  }
+}
+
+/**
+ * Which of these posts the reader saved (0031). Your own rows only — nobody
+ * can read anybody else's saves. Before 0031, none.
+ */
+export async function savedAmong(postIds: readonly string[], db: Db = supabase): Promise<Set<string>> {
+  if (postIds.length === 0) return new Set();
+  const { data, error } = await db.from('post_saves').select('post_id').in('post_id', [...postIds]);
+  if (isMissingTable(error)) return new Set();
+  if (error) throw new Error(error.message);
+  return new Set(((data ?? []) as { post_id: string }[]).map((r) => r.post_id));
+}
+
+/** Save a post for later, or take it out of Saved. Private (0031). */
+export async function savePost(postId: string, on: boolean, db: Db = supabase): Promise<void> {
+  const user_id = await currentUserId(db);
+  const { error } = on
+    ? await db.from('post_saves').insert({ post_id: postId, user_id })
+    : await db.from('post_saves').delete().eq('post_id', postId).eq('user_id', user_id);
+  if (isMissingTable(error)) throw new SavesUnavailableError();
+  if (error && error.code !== '23505') throw new Error(error.message);
+}
+
+/** How many saved posts the Saved screen shows — the most recently saved. */
+export const SAVED_LIMIT = 200;
+
+/**
+ * Your saved posts, most recently saved first.
+ *
+ * Read through `feed_posts`, so a saved post you can no longer see — made
+ * friends-only, an unfriending, a block — drops out of the list rather than
+ * showing, and one that was deleted is gone with its save.
+ */
+export async function listSaved(db: Db = supabase): Promise<FeedPost[]> {
+  const { data: saves, error } = await db
+    .from('post_saves')
+    .select('post_id, created_at')
+    .order('created_at', { ascending: false })
+    .limit(SAVED_LIMIT);
+  if (isMissingTable(error)) throw new SavesUnavailableError();
+  if (error) throw new Error(error.message);
+  const order = ((saves ?? []) as { post_id: string }[]).map((s) => s.post_id);
+  if (order.length === 0) return [];
+
+  const { data: posts, error: postsError } = await db.from('feed_posts').select(POST_COLUMNS).in('id', order);
+  if (unavailable(postsError)) throw new PostsUnavailableError();
+  if (postsError) throw new Error(postsError.message);
+  const byId = new Map(((posts ?? []) as unknown as FeedPost[]).map((p) => [p.id, p]));
+  return order.map((id) => byId.get(id)).filter((p): p is FeedPost => !!p);
+}
+
 // -------------------------------------------------------- a set, peeked --
 
 /** How many of a shared set's cards a post lets you flip through before opening it. */
@@ -304,13 +405,18 @@ export async function postImageUrls(paths: readonly string[], db: Db = supabase)
 
 /**
  * Everything this feature holds for one person: their posts (with their photos),
- * their comments anywhere, their reactions anywhere. Comments and reactions on
+ * their comments and replies anywhere, their reactions anywhere, the hearts they
+ * gave comments and the posts they saved (0031). Comments and reactions on
  * THEIR posts go with the posts; the ones they left under other people's posts
  * cascade from nothing of theirs — the omission NOTES §40 found for notes.
+ *
+ * Hearts and saves before comments and posts, so each delete says what it took
+ * rather than some of it having already cascaded. A table that does not exist
+ * yet (0031 not applied) is skipped by `unavailable`.
  */
 export async function removeMyPosts(db: Db = supabase): Promise<void> {
   const me = await currentUserId(db);
-  for (const table of ['post_comments', 'post_reactions', 'posts'] as const) {
+  for (const table of ['comment_likes', 'post_saves', 'post_comments', 'post_reactions', 'posts'] as const) {
     const { error } = await db.from(table).delete().eq('user_id', me);
     if (error && !unavailable(error)) throw new Error(error.message);
   }

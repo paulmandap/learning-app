@@ -14,7 +14,7 @@ import {
 } from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
 import { Segment, UnderlineTabs } from '../../src/ui/segment';
-import { PersonAvatar } from '../../src/ui/avatar';
+import { MyAvatar, PersonAvatar } from '../../src/ui/avatar';
 import { PersonRow } from '../../src/ui/people';
 import { Sheet, SheetTitle } from '../../src/ui/sheet';
 import { PostList } from '../../src/ui/post';
@@ -38,7 +38,7 @@ import {
   star,
   unstar,
 } from '../../src/data/community';
-import { listConversations, MessagesUnavailableError, startConversation } from '../../src/data/messages';
+import { listConversations, MessagesUnavailableError, startConversation, unreadMessages } from '../../src/data/messages';
 import { badgeLabel, INBOX_POLL_MS, inboxOrder, lastLine, type Conversation } from '../../src/core/messages';
 import { listFriendLinks } from '../../src/data/social';
 import { personName, splitFriends } from '../../src/core/social';
@@ -92,6 +92,14 @@ const SET_ORDERS = [
 export default function Community() {
   const t = useTheme();
   const [pane, setPane] = useState<Pane>('feed');
+  const signedIn = useSessionStore((s) => !!s.session);
+  // The same count as the tab's badge — one query key, one number.
+  const { data: unread = 0 } = useQuery({
+    queryKey: ['dm-unread'],
+    queryFn: () => unreadMessages(),
+    refetchInterval: INBOX_POLL_MS,
+    enabled: signedIn,
+  });
 
   return (
     // Not `Screen`: the chat needs a bounded scroll area with the box to type in
@@ -101,7 +109,15 @@ export default function Community() {
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <View style={{ alignItems: 'center', paddingHorizontal: space.lg, paddingTop: space.lg }}>
         <View style={{ width: '100%', maxWidth: CONTENT_MAX_WIDTH, gap: space.sm }}>
-          <TopBar title="Community" brand />
+          {/* The paper plane goes to your messages, with how many are new —
+              where the owner's picture and every feed put it. */}
+          <TopBar
+            title="Community"
+            brand
+            actions={[
+              { icon: 'send', label: 'Messages', badge: badgeLabel(unread), onPress: () => setPane('chat') },
+            ]}
+          />
           <UnderlineTabs value={pane} options={PANES} onChange={setPane} />
         </View>
       </View>
@@ -122,6 +138,7 @@ export default function Community() {
  * everything".
  */
 function FeedPane() {
+  const t = useTheme();
   const router = useRouter();
   const queryClient = useQueryClient();
   const myId = useSessionStore((s) => s.session?.user.id ?? '');
@@ -149,29 +166,34 @@ function FeedPane() {
         if (e.layoutMeasurement.height + e.contentOffset.y >= e.contentSize.height - 600) more();
       }}
     >
-      <View style={{ width: '100%', maxWidth: CONTENT_MAX_WIDTH, gap: space.md }}>
+      <View style={{ width: '100%', maxWidth: CONTENT_MAX_WIDTH }}>
         {/* The way in to posting, where every feed puts it. Not a filled
             Button: a feed is for reading first. */}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Write a post"
           onPress={() => router.push('/post/new')}
-          style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+          style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, paddingBottom: space.md })}
         >
           <ComposePrompt />
         </Pressable>
+        <View style={{ height: 1, backgroundColor: t.border, opacity: 0.6 }} />
 
-        {feed.isLoading ? <LoadingState /> : null}
-        {feed.error instanceof PostsUnavailableError ? <PostsNotSwitchedOn /> : null}
-        {feed.error && !(feed.error instanceof PostsUnavailableError) ? (
-          <Notice tone="error">Couldn&apos;t load the feed. Try again in a moment.</Notice>
-        ) : null}
-        {feed.data && posts.length === 0 ? (
-          <StatePanel
-            kind="empty"
-            title="Nothing here yet"
-            detail="Write the first post, or add friends from your Profile to see theirs."
-          />
+        {feed.isLoading || feed.error || (feed.data && posts.length === 0) ? (
+          <View style={{ gap: space.md, paddingTop: space.lg }}>
+            {feed.isLoading ? <LoadingState /> : null}
+            {feed.error instanceof PostsUnavailableError ? <PostsNotSwitchedOn /> : null}
+            {feed.error && !(feed.error instanceof PostsUnavailableError) ? (
+              <Notice tone="error">Couldn&apos;t load the feed. Try again in a moment.</Notice>
+            ) : null}
+            {feed.data && posts.length === 0 ? (
+              <StatePanel
+                kind="empty"
+                title="Nothing here yet"
+                detail="Write the first post, or add friends from your Profile to see theirs."
+              />
+            ) : null}
+          </View>
         ) : null}
 
         <PostList
@@ -180,37 +202,54 @@ function FeedPane() {
           onChanged={() => queryClient.invalidateQueries({ queryKey: ['feed'] })}
         />
 
-        {feed.hasNextPage ? (
-          <Button
-            label="Show older posts"
-            variant="secondary"
-            onPress={more}
-            busy={feed.isFetchingNextPage}
-          />
-        ) : posts.length > 0 ? (
-          <Body muted>That&apos;s everything for now.</Body>
-        ) : null}
+        <View style={{ paddingTop: space.sm }}>
+          {feed.hasNextPage ? (
+            <Button
+              label="Show older posts"
+              variant="secondary"
+              onPress={more}
+              busy={feed.isFetchingNextPage}
+            />
+          ) : posts.length > 0 ? (
+            <Body muted>That&apos;s everything for now.</Body>
+          ) : null}
+        </View>
       </View>
     </ScrollView>
   );
 }
 
-/** A box that looks like the place to type, and opens the composer. */
+/**
+ * Your picture, a box that looks like the place to type, and a photo icon —
+ * the owner's picture. All of it opens the composer; the photo is chosen
+ * there, since a browser only opens its file picker from a tap on the page
+ * that asks.
+ */
 function ComposePrompt() {
   const t = useTheme();
   return (
-    <View
-      style={{
-        minHeight: TOUCH_TARGET + space.sm,
-        justifyContent: 'center',
-        paddingHorizontal: space.lg,
-        borderRadius: radius.pill,
-        borderWidth: 1,
-        borderColor: t.border,
-        backgroundColor: t.card,
-      }}
-    >
-      <Text style={[type.body, { color: t.textMuted }]}>Share something — a win, a photo, a set…</Text>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+      <MyAvatar size={40} />
+      <View
+        style={{
+          flex: 1,
+          minHeight: TOUCH_TARGET,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.sm,
+          paddingLeft: space.lg,
+          paddingRight: space.md,
+          borderRadius: radius.pill,
+          borderWidth: 1,
+          borderColor: t.border,
+          backgroundColor: t.card,
+        }}
+      >
+        <Text style={[type.body, { color: t.textMuted, flex: 1 }]} numberOfLines={1}>
+          Share something…
+        </Text>
+        <Icon name="photo" color={t.textMuted} size={22} />
+      </View>
     </View>
   );
 }

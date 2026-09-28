@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useIsFocused } from 'expo-router';
 import { NomiCharacter } from './nomi-character';
@@ -395,11 +395,20 @@ export function Composer({
   autoFocus,
   maxLength = MAX_PASTE_CHARS,
   emoji = false,
+  leading,
+  focusSignal,
 }: {
   onSend: (text: string) => void;
   busy: boolean;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Drawn before the box — your picture, under a post (NOTES §57). */
+  leading?: ReactNode;
+  /**
+   * Change it to put the cursor in the box — "Reply" under a comment does, so
+   * a thumb is not sent looking for the box it is about to type in.
+   */
+  focusSignal?: number;
   /**
    * Where the box stops accepting characters.
    *
@@ -417,8 +426,13 @@ export function Composer({
   const t = useTheme();
   const [draft, setDraft] = useState('');
   const [picking, setPicking] = useState(false);
+  const input = useRef<TextInput>(null);
   // Up to a page of pasted notes: Nomi can make a set from them (NOTES §37).
   const canSend = !busy && isSendable(draft) && draft.trim().length <= maxLength;
+
+  useEffect(() => {
+    if (focusSignal) input.current?.focus();
+  }, [focusSignal]);
 
   const submit = () => {
     if (!canSend) return;
@@ -436,6 +450,9 @@ export function Composer({
       ) : null}
 
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: space.sm }}>
+      {leading ? (
+        <View style={{ height: TOUCH_TARGET, justifyContent: 'center' }}>{leading}</View>
+      ) : null}
       {emoji ? (
         <Pressable
           accessibilityRole="button"
@@ -457,6 +474,7 @@ export function Composer({
         </Pressable>
       ) : null}
       <TextInput
+        ref={input}
         value={draft}
         onChangeText={setDraft}
         placeholder={placeholder}

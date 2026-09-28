@@ -180,6 +180,27 @@ async function main() {
   try {
     for (const route of TABS) await visit(route);
 
+    // A post's page (NOTES §57): not a `Screen` since its comment box was
+    // pinned to the bottom, like the chat rooms — the layout that has broken
+    // scrolling before (§33). Reached from the first post in the feed; an
+    // empty feed has no post to open, and says so rather than passing.
+    await page.goto('/community');
+    await page.waitFor(`document.body.innerText.includes('Share something') ? 'y' : ''`, 'the feed');
+    const opened = await page.evaluate<string>(`(() => {
+      const b = [...document.querySelectorAll('[role="button"]')]
+        .find((el) => /^(Comment|\\d+ comments?)$/.test(el.getAttribute('aria-label') ?? ''));
+      if (!b) return '';
+      b.click();
+      return 'y';
+    })()`);
+    if (opened) {
+      await page.waitFor(`location.pathname.startsWith('/post/') ? 'y' : ''`, 'a post to open');
+      await page.waitFor(`document.body.innerText.includes('Comments') ? 'y' : ''`, "the post's comments");
+      await measure('/post/[id]');
+    } else {
+      console.log('  NOTE  /post/[id] — the feed has no post to open, not measured');
+    }
+
     // Community's panes are behind a segment control, not behind routes, and
     // the chat pane is the one layout in the app that is not a `Screen` — see
     // the note on COMMUNITY_PANES. `page.goto` reloads, so the segment has to be

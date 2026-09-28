@@ -8300,7 +8300,96 @@ skipped · built and booted · `scroll-probe` **9/9** · `friends-probe`
 px: Community and Profile's tops, the post sheet (dark and light), the message
 sheet, a shared set's ⋯, the report and block sheets.
 
-**Not deployed; not committed.**
+**Not deployed; not committed.** — Deployed by the owner as `95f1018` the same
+day: `deploy-status.ts` *production is exactly HEAD*, bundle matching.
+
+## 57. Step two: the feed, a post, replies, hearts and saves (2026-09-28)
+
+The owner: *"done. go step 2."* The feed and a post's page rebuilt to the
+picture, with three of the extras he took in §56.2: replies, hearts on
+comments, saved posts. Migration 0031.
+
+### 57.1 Migration 0031 — additive, either order
+
+- `post_comments.parent_id`, **on delete cascade** — a comment deleted takes
+  its replies (the Privacy Policy says so). One level deep is kept by
+  `add_reply`, the only writer: a reply to a reply is attached to the comment
+  above it.
+- `add_reply(comment, body)`: asks `assert_can_socialize()` first (rule 54;
+  `tests/moderation.test.ts` gained it), `can_see_comment` on the comment and
+  on the one above it, and **the same ten-a-minute count as `add_comment`** —
+  the same rows, so replying is no way around the limit.
+- `can_see_comment`: `post_visible` plus a block with whoever wrote the
+  comment, both ways — exactly the filters `post_comment_people` applies.
+- `comment_likes` and `post_saves`: own rows, select own-only, inserted only on
+  a comment or post you can see, no update policy. **Hearts are counted, never
+  named; saves are private, the post's author included.**
+- `post_comment_people` recreated: 0027's columns unchanged and in order, plus
+  `parent_id`, `likes` (not counting anybody across a block) and `liked`.
+  Nothing else depends on the view. `destructiveDrops` finds nothing.
+- The app asks for the new columns and **falls back on 42703** to the old ones,
+  so the deploy order is not load-bearing — measured: `posts-probe` 10/10
+  against the live database without 0031.
+
+### 57.2 On screen
+
+- **The feed**: Nomi's owl over the title, the paper plane with the unread
+  count (it opens Chat), your picture beside "Share something…" with a photo
+  icon, and posts separated by a hairline rather than boxed. Each post: name,
+  "@user · 2h" (`agoShort`, not the chat's clock time) and who can see it as
+  an icon named for a screen reader ("Seen by friends"); the words; the
+  attachment on a card of its own; then heart, comments, share, and save at the
+  far end. **The heart is ❤️, the first of the six reactions**; the other five
+  are still in the post's sheet and show as chips.
+- **Share** hands `/post/<id>` to the phone's share sheet, or copies it
+  ("Link copied"). The link grants nothing: whoever opens it signs in, and a
+  friends-only post is "This post isn't here" to a stranger.
+- **A shared set in a post**: its icon, "Title — 24 cards", the card to flip
+  ("Tap to flip"), "1 of 12 · Next", "Study this set".
+- **A post's page**: "Post" in the header with the ⋯ there; "Comments (3)";
+  each comment with Reply and a heart; replies indented under their comment;
+  **the comment box pinned to the bottom with your picture** — so the ✦ is kept
+  off `post/*`, for the chat rooms' reason. "Reply" puts "Replying to Maria"
+  over the box and the cursor in it (`focusSignal` on `Composer`). Deleting a
+  comment with replies says "Its replies go with it." first.
+- **Saved** (`app/saved.tsx`), from a bookmark in Profile's top bar until step
+  four's Saved tab. Reads through `feed_posts`, so a post you can no longer
+  see leaves the list.
+- `threadComments` leaves out a reply whose comment the reader cannot see (its
+  writer is across a block) rather than showing an answer to nothing.
+
+### 57.3 The icons, again: square-ended bars
+
+Photographed at 4×, §56's curves were bumpy: round-ended bars overlapping at
+every join drew each soft edge twice. `strokeLayout` now lays **square-ended
+bars end to end**, each stretched by `w/2·tan(turn/2)` to close the outside of
+the bend, with round dots only at line ends and turns over 25°. The first try
+overlapped them by a hair and every curve came out **dashed** — two soft
+edges that only touch make three quarters of a pixel, not one — so they
+overlap by a third of the stroke. At 4× the curves are still a touch soft
+(rotated boxes are anti-aliased one by one), smoother than before, and clean at
+real size. A post's action row is ~131 Views (was ~112); the budget test says
+140. `FILL_ROW` 0.8 (was 1.25) for a smoother filled heart.
+
+### 57.4 Measured, before 0031
+
+- typecheck clean with and without `.expo/` (the new route needed the dev
+  server once to regenerate its types) · **1484 tests**, 3 skipped
+  (`tests/comments.test.ts` new: 0031 held to its text, threading, `agoShort`,
+  hearts; `deploy-status` pins 0031) · built and booted.
+- `posts-probe` **10/10**, its reply / heart / save steps waiting on 0031 and
+  saying so; the audience is read from its label now, and the heart is one
+  button (it was React, then Heart). `scroll-probe` **10/10** — a post's page
+  added. `friends-probe` **21/21**, `messages-probe` **8/8**,
+  `community-probe` **11/11**.
+- `isolation-test.ts` gained `checkRepliesHeartsAndSaves` (16 checks), which
+  says "not present" until 0031 is applied.
+- The Privacy Policy (still September 28) says replies go with their comment,
+  hearts are counted and not named, saves are private, and Delete my data
+  removes hearts and saves too. No new Home card: nothing here shows anybody
+  anything they could not see before.
+
+**Not deployed; not committed. 0031 not applied.**
 
 
 ## Sources

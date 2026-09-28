@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { View } from 'react-native';
-import { iconFill, iconPieces } from '../core/icon-geometry';
+import { iconFill, iconPieces, strokeLayout, type Bar, type Dot, type Polyline } from '../core/icon-geometry';
 import type { IconName } from '../core/icon-shapes';
 
 export type { IconName };
@@ -38,9 +38,9 @@ export const GLYPH = {
  * The owner chose this over an icon package or SVG: *"try harder. draw
  * boxes."* The shapes are Lucide's (src/core/icon-shapes.ts, generated), and
  * src/core/icon-geometry.ts breaks each into what a View can be — a ring, a
- * rounded frame, or a bar with round ends turned to its angle. Curves are runs
- * of short bars whose round ends overlap into round joins, which is how Lucide
- * strokes them anyway.
+ * rounded frame, a dot, or a bar turned to its angle. Curves are runs of short
+ * square-ended bars meeting end to end, with round dots at the ends and sharp
+ * corners (`strokeLayout`, and why not round-ended bars: NOTES §57).
  *
  * The stroke is 1.75 at 24 and never thinner than 1.5, so a 16 px icon beside
  * a time stamp does not turn to hairlines. `filled` fills a closed shape — a
@@ -62,7 +62,8 @@ export const Icon = memo(function Icon({
 }) {
   const k = size / 24;
   const sw = Math.max(1.5, STROKE * k);
-  const { segments, rings, frames } = iconPieces(name);
+  const { lines, rings, frames } = iconPieces(name);
+  const strokes = strokesOf(name, lines, sw / k);
   let key = 0;
 
   return (
@@ -120,27 +121,60 @@ export const Icon = memo(function Icon({
           />
         );
       })}
-      {segments.map(([x1, y1, x2, y2]) => {
-        const length = Math.hypot(x2 - x1, y2 - y1) * k + sw;
-        return (
-          <View
-            key={key++}
-            style={{
-              position: 'absolute',
-              left: ((x1 + x2) / 2) * k - length / 2,
-              top: ((y1 + y2) / 2) * k - sw / 2,
-              width: length,
-              height: sw,
-              borderRadius: sw / 2,
-              backgroundColor: color,
-              transform: [{ rotate: `${(Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI}deg` }],
-            }}
-          />
-        );
-      })}
+      {strokes.bars.map((b) => (
+        <View
+          key={key++}
+          style={{
+            position: 'absolute',
+            left: b.cx * k - (b.length * k) / 2,
+            top: b.cy * k - sw / 2,
+            width: b.length * k,
+            height: sw,
+            backgroundColor: color,
+            transform: [{ rotate: `${b.angle}deg` }],
+          }}
+        />
+      ))}
+      {strokes.dots.map((d) => (
+        <View
+          key={key++}
+          style={{
+            position: 'absolute',
+            left: d.cx * k - sw / 2,
+            top: d.cy * k - sw / 2,
+            width: sw,
+            height: sw,
+            borderRadius: sw / 2,
+            backgroundColor: color,
+          }}
+        />
+      ))}
     </View>
   );
 });
+
+const layoutCache = new Map<string, { bars: Bar[]; dots: Dot[] }>();
+
+/**
+ * Every bar and dot of an icon's lines at one stroke, in icon units — worked
+ * out once per icon and size, since a feed draws the same heart twenty times.
+ */
+function strokesOf(name: IconName, lines: readonly Polyline[], width: number) {
+  const key = `${name}:${width.toFixed(3)}`;
+  let found = layoutCache.get(key);
+  if (!found) {
+    const bars: Bar[] = [];
+    const dots: Dot[] = [];
+    for (const line of lines) {
+      const l = strokeLayout(line, width);
+      bars.push(...l.bars);
+      dots.push(...l.dots);
+    }
+    found = { bars, dots };
+    layoutCache.set(key, found);
+  }
+  return found;
+}
 
 /**
  * Lucide's stroke at 24, a touch lighter than its default 2 — the owner's

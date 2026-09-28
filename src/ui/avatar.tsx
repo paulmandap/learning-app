@@ -3,7 +3,8 @@ import { Image, Platform, Pressable, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { AVATAR_FACES } from '../core/palette';
 import { defaultFaceIndex, faceValue, parseAvatar, photoValue } from '../core/avatar';
-import { avatarPhotoUrl } from '../data/profile';
+import { avatarPhotoUrl, fetchProfile } from '../data/profile';
+import { useSessionStore } from '../data/session';
 import { cachedAvatar, rememberAvatarPhoto, rememberAvatarValue } from '../data/avatar-cache';
 import { space, TOUCH_TARGET, useTheme } from './theme';
 
@@ -23,6 +24,18 @@ import { space, TOUCH_TARGET, useTheme } from './theme';
  * (`src/data/avatar-cache.ts`) and drawn before the profile has even loaded;
  * the network is asked only for a picture this device has not kept.
  */
+/**
+ * The signed-in person's own picture — beside the box you type a post or a
+ * comment into, as the owner's picture has it (NOTES §57). The same profile
+ * query every screen shares, so it is a cache read.
+ */
+export function MyAvatar({ size = 36 }: { size?: number }) {
+  const userId = useSessionStore((s) => s.session?.user.id ?? '');
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile, enabled: !!userId });
+  if (!userId) return null;
+  return <Avatar value={profile === undefined ? undefined : (profile?.avatar ?? null)} userId={userId} size={size} />;
+}
+
 export function Avatar({
   value,
   userId,

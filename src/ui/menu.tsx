@@ -164,6 +164,32 @@ export function HeaderBackButton({
 }
 
 /**
+ * One icon button at the right of a header, inset to the content column like
+ * the ⋯ — a post's ⋯ on its own page, whose sheet belongs to the post list.
+ */
+export function HeaderIconButton({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
+  const t = useTheme();
+  const gutter = useColumnEdge() - CONTROL_SLOT_PADDING;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      hitSlop={12}
+      style={{
+        width: TOUCH_TARGET,
+        height: TOUCH_TARGET,
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+        marginRight: gutter,
+      }}
+    >
+      <Icon name={icon} color={t.text} />
+    </Pressable>
+  );
+}
+
+/**
  * Several icon buttons at the right of a header — Nomi's "your chats" and
  * "new chat". One gutter for the row, not one per button, so the last button
  * lines up with the content column like every other header control.

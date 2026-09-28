@@ -226,7 +226,10 @@ async function main() {
     await page.goto('/community');
     await showing(page, B_TEXT);
     const feed = await page.evaluate<string>('document.body.innerText');
-    if (feed.includes('Probe B') && feed.includes('Friends')) ok('feed', "a friend's friends-only post, with who can see it");
+    // Who can see it is an icon since the redesign (NOTES §57), named for a
+    // screen reader — so it is read from its label, not from the words.
+    const audience = await page.evaluate<boolean>(`!!document.querySelector('[aria-label="Seen by friends"]')`);
+    if (feed.includes('Probe B') && audience) ok('feed', "a friend's friends-only post, with who can see it");
     else fail('feed', 'the post is there without its author or its audience');
     await showing(page, B_PHOTO);
     await page.waitFor(
@@ -236,12 +239,11 @@ async function main() {
     ok('photo', 'loaded through a signed link, as a friend');
     await shot(page, '01-feed.png');
 
-    // ---- react ----
-    await clickInCard(page, B_TEXT, 'React');
-    await page.click('Heart');
+    // ---- react: the heart under the post (NOTES §57; it was React, then Heart) ----
+    await clickInCard(page, B_TEXT, 'Heart');
     await page.waitFor(
-      `[...document.querySelectorAll('[role="button"]')].some((b) => (b.getAttribute('aria-label') ?? '').startsWith('❤️ from You')) ? 'y' : ''`,
-      'the heart chip',
+      `[...document.querySelectorAll('[role="button"]')].some((b) => b.getAttribute('aria-label') === 'Remove heart') ? 'y' : ''`,
+      'the heart to fill',
     );
     const reacted = await A.client.from('post_reactions').select('emoji').eq('post_id', bTextId).eq('user_id', A.userId);
     if ((reacted.data ?? []).some((r: { emoji: string }) => r.emoji === '❤️')) ok('react', 'on screen and in the database');
@@ -257,7 +259,55 @@ async function main() {
     const commented = await A.client.from('post_comments').select('body').eq('post_id', bTextId).eq('user_id', A.userId);
     if ((commented.data ?? []).length === 1) ok('comment', 'on screen and in the database');
     else fail('comment', `the database has ${JSON.stringify(commented.data)}`);
+
+    // ---- replies, hearts on comments, saves (0031, NOTES §57) ----
+    const has0031 = !(await A.client.from('comment_likes').select('comment_id').limit(1)).error;
+    const aCommentId = ((commented.data ?? [])[0] as { id?: string } | undefined)?.id
+      ?? (((await A.client.from('post_comments').select('id').eq('post_id', bTextId).eq('user_id', A.userId)).data ?? [])[0] as { id: string } | undefined)?.id;
+    if (!has0031) {
+      console.log('  NOTE  replies, hearts and saves — migration 0031 not applied, not checked');
+    } else {
+      await page.click('Heart this comment');
+      await page.waitFor(
+        `[...document.querySelectorAll('[role="button"]')].some((b) => b.getAttribute('aria-label') === 'Remove your heart from this comment') ? 'y' : ''`,
+        "the comment's heart to fill",
+      );
+      const hearted = await A.client.from('comment_likes').select('comment_id').eq('user_id', A.userId).eq('comment_id', aCommentId ?? '');
+      if ((hearted.data ?? []).length === 1) ok('heart a comment', 'on screen and in the database');
+      else fail('heart a comment', `the database has ${JSON.stringify(hearted.data)}`);
+
+      await page.click('Reply to Probe A');
+      await showing(page, 'Replying to Probe A');
+      await typeInto(page, 'Reply to Probe A', `${MARK} reply`);
+      await page.click('Send');
+      await showing(page, 'Comments (2)');
+      const replied = await A.client.from('post_comments').select('parent_id').eq('post_id', bTextId).eq('body', `${MARK} reply`);
+      if ((replied.data ?? []).some((r: { parent_id: string | null }) => r.parent_id === aCommentId)) {
+        ok('reply', 'under the comment, on screen and in the database');
+      } else fail('reply', `the database has ${JSON.stringify(replied.data)}`);
+    }
     await shot(page, '02-post-comments.png');
+
+    if (has0031) {
+      await page.goto('/community');
+      await showing(page, B_TEXT);
+      await clickInCard(page, B_TEXT, 'Save post');
+      await page.waitFor(
+        `[...document.querySelectorAll('[role="button"]')].some((b) => b.getAttribute('aria-label') === 'Remove from saved') ? 'y' : ''`,
+        'the bookmark to fill',
+      );
+      await page.goto('/saved');
+      await showing(page, B_TEXT);
+      const savedRow = await A.client.from('post_saves').select('post_id').eq('user_id', A.userId).eq('post_id', bTextId);
+      if ((savedRow.data ?? []).length === 1) ok('save', 'in Saved, and in the database');
+      else fail('save', `the database has ${JSON.stringify(savedRow.data)}`);
+      await shot(page, '02b-saved.png');
+      await clickInCard(page, B_TEXT, 'Remove from saved');
+      await page.waitFor(`document.body.innerText.includes('Nothing saved yet') ? 'y' : ''`, 'Saved to empty');
+      const unsaved = await A.client.from('post_saves').select('post_id').eq('user_id', A.userId).eq('post_id', bTextId);
+      if ((unsaved.data ?? []).length === 0) ok('unsave', 'gone from Saved and from the database');
+      else fail('unsave', 'gone from the screen, still in the database');
+    }
 
     // ---- write a post, with a set, for everyone ----
     await page.goto(`/post/new?set=${setId}`);

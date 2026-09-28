@@ -74,7 +74,9 @@ describe('switching views inside a screen is an underline', () => {
   it('Community is Feed · Sets · Chat as underline tabs, under a top bar', () => {
     const community = read('app', '(tabs)', 'community.tsx');
     expect(community).toContain('<UnderlineTabs value={pane} options={PANES} onChange={setPane} />');
-    expect(community).toContain('<TopBar title="Community" brand />');
+    expect(community).toMatch(/<TopBar\s+title="Community"\s+brand/);
+    // Its action: your messages, with the tab's own unread count (NOTES §57).
+    expect(community).toContain("{ icon: 'send', label: 'Messages', badge: badgeLabel(unread), onPress: () => setPane('chat') }");
   });
 
   it('the chosen tab is marked by more than colour', () => {
