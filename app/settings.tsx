@@ -13,7 +13,8 @@ import {
   savePetChoice,
   uploadAvatarPhoto,
 } from '../src/data/profile';
-import { Avatar, FacePicker, PhotoPicker, pickProfilePhoto } from '../src/ui/avatar';
+import { Avatar, FacePicker, PhotoPicker, pickProfilePhoto, squareProfilePhoto } from '../src/ui/avatar';
+import { UnreadablePictureError } from '../src/ui/pick-files';
 import { PrivacyNotice } from '../src/ui/privacy';
 import { TextLink } from '../src/ui/legal';
 import { forgetAvatar } from '../src/data/avatar-cache';
@@ -150,9 +151,10 @@ export default function Settings() {
    */
   function describeAvatarError(err: unknown): string {
     console.warn(`[settings] picture not saved: ${err instanceof Error ? err.message : String(err)}`);
-    return err instanceof AvatarsUnavailableError
-      ? "Choosing a picture isn't switched on yet."
-      : "Couldn't save that picture just now. Try again in a moment.";
+    if (err instanceof AvatarsUnavailableError) return "Choosing a picture isn't switched on yet.";
+    // Waiting will not help this one; another picture will (NOTES §61).
+    if (err instanceof UnreadablePictureError) return err.message;
+    return "Couldn't save that picture just now. Try again in a moment.";
   }
 
   /** A face or one of their photos. */
@@ -172,9 +174,13 @@ export default function Settings() {
   async function uploadPhoto() {
     setAvatarError(null);
     try {
-      const image = await pickProfilePhoto();
-      if (!image) return;
+      const file = await pickProfilePhoto();
+      if (!file) return;
+      // Busy from the moment a picture is chosen, not once it is small: a
+      // large phone photo takes a moment to read, and a screen that shows
+      // nothing meanwhile is what the owner reported as broken (NOTES §61).
       setAvatarBusy(true);
+      const image = await squareProfilePhoto(file);
       await uploadAvatarPhoto(image);
       await queryClient.invalidateQueries({ queryKey: ['profile'] });
       await queryClient.invalidateQueries({ queryKey: ['avatar-photos'] });

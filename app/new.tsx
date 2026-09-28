@@ -17,6 +17,7 @@ import { imagePaths } from '../src/core/rich-note';
 import { countChoices, countLine, findQaPairs, keepDetail, keepHeading, looksLikeQa } from '../src/core/qa-pairs';
 import { Segment } from '../src/ui/segment';
 import { NomiCharacter } from '../src/ui/nomi-character';
+import { pickFiles } from '../src/ui/pick-files';
 
 /** The same four Nomi chooses between, so the two can never offer different counts. */
 const COUNTS = CARD_COUNTS;
@@ -115,11 +116,9 @@ export default function NewSet() {
 
   function pickFile() {
     if (Platform.OS !== 'web') return;
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.pdf,.txt,image/*';
-    input.onchange = () => {
-      const f = input.files?.[0];
+    // Through `pickFiles`, which keeps the box in the page until it answers —
+    // iPhone Safari could lose one that was not (NOTES §61).
+    void pickFiles({ accept: '.pdf,.txt,image/*' }).then(([f]) => {
       if (!f) return;
 
       // Refused HERE, before a single byte is sent. Supabase Free gives 1 GB of
@@ -136,8 +135,7 @@ export default function NewSet() {
       setError(null);
       setFile({ blob: f, name: f.name, mime: f.type || 'application/pdf' });
       if (!title) setTitle(f.name.replace(/\.[^.]+$/, ''));
-    };
-    input.click();
+    });
   }
 
   async function make() {

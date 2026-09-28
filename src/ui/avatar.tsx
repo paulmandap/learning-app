@@ -7,6 +7,7 @@ import { avatarPhotoUrl, fetchProfile } from '../data/profile';
 import { useSessionStore } from '../data/session';
 import { cachedAvatar, rememberAvatarPhoto, rememberAvatarValue } from '../data/avatar-cache';
 import { space, TOUCH_TARGET, useTheme } from './theme';
+import { openPicture, pickFiles, UnreadablePictureError } from './pick-files';
 
 /**
  * A profile picture: an uploaded photo, or one of the built-in faces.
@@ -319,38 +320,35 @@ function choiceTile(selected: boolean, disabled: boolean | undefined, accent: st
 }
 
 /**
- * Let the student pick a picture and hand it back small.
+ * Let the student pick a picture. Null when they cancel.
  *
  * Web only, like adding notes from a file: the installed app is a PWA, and a
- * file input is how an iPhone offers the photo library to one. The picture is
- * centre-cropped square and drawn to 256px as JPEG before it leaves the phone —
- * a profile picture shown at 44 points does not need the 4 MB the camera took.
+ * file input is how an iPhone offers the photo library to one — through
+ * `pickFiles`, which keeps it in the page until it answers (NOTES §61).
+ *
+ * Only the choosing: the caller shows it is busy, THEN makes it small
+ * (`squareProfilePhoto`), so a large photo being read is never a screen doing
+ * nothing.
  */
-export function pickProfilePhoto(): Promise<Blob | null> {
-  if (Platform.OS !== 'web' || typeof document === 'undefined') return Promise.resolve(null);
-  return new Promise((resolve, reject) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return resolve(null);
-      try {
-        resolve(await squareJpeg(file, 256));
-      } catch (err) {
-        reject(err);
-      }
-    };
-    input.click();
-  });
+export async function pickProfilePhoto(): Promise<File | null> {
+  if (Platform.OS !== 'web') return null;
+  const [file] = await pickFiles({ accept: 'image/*' });
+  return file ?? null;
+}
+
+/**
+ * The picture centre-cropped square and drawn to 256px as JPEG before it
+ * leaves the phone — a profile picture shown at 44 points does not need the
+ * 4 MB the camera took.
+ */
+export function squareProfilePhoto(file: Blob): Promise<Blob> {
+  return squareJpeg(file, 256);
 }
 
 async function squareJpeg(file: Blob, side: number): Promise<Blob> {
   const url = URL.createObjectURL(file);
   try {
-    const img = new window.Image();
-    img.src = url;
-    await img.decode();
+    const img = await openPicture(url);
     const crop = Math.min(img.naturalWidth, img.naturalHeight);
     const canvas = document.createElement('canvas');
     canvas.width = side;
@@ -370,7 +368,7 @@ async function squareJpeg(file: Blob, side: number): Promise<Blob> {
       side,
     );
     return await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not read that picture.'))), 'image/jpeg', 0.85),
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new UnreadablePictureError())), 'image/jpeg', 0.85),
     );
   } finally {
     URL.revokeObjectURL(url);

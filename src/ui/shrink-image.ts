@@ -9,26 +9,18 @@
  * because JPEG has no transparency and would turn it black.
  */
 
+import { openPicture, pickFiles, UnreadablePictureError } from './pick-files';
+
 /** Let the student choose pictures. Resolves to none when they cancel or this is not the web. */
 export function pickImages(multiple = true): Promise<File[]> {
-  if (typeof document === 'undefined') return Promise.resolve([]);
-  return new Promise((resolve) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.multiple = multiple;
-    input.onchange = () => resolve(Array.from(input.files ?? []));
-    input.click();
-  });
+  return pickFiles({ accept: 'image/*', multiple });
 }
 
 /** A picture no larger than `maxSide` on its longest side, as JPEG. */
 export async function shrinkImage(file: Blob, maxSide: number, quality = 0.85): Promise<Blob> {
   const url = URL.createObjectURL(file);
   try {
-    const img = new window.Image();
-    img.src = url;
-    await img.decode();
+    const img = await openPicture(url);
     const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
     const width = Math.max(1, Math.round(img.naturalWidth * scale));
     const height = Math.max(1, Math.round(img.naturalHeight * scale));
@@ -44,7 +36,7 @@ export async function shrinkImage(file: Blob, maxSide: number, quality = 0.85): 
     g.drawImage(img, 0, 0, width, height);
 
     return await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not read that picture.'))), 'image/jpeg', quality),
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new UnreadablePictureError())), 'image/jpeg', quality),
     );
   } finally {
     URL.revokeObjectURL(url);
@@ -58,9 +50,7 @@ export async function shrinkImage(file: Blob, maxSide: number, quality = 0.85): 
 export async function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
   const url = URL.createObjectURL(blob);
   try {
-    const img = new window.Image();
-    img.src = url;
-    await img.decode();
+    const img = await openPicture(url);
     return { width: img.naturalWidth, height: img.naturalHeight };
   } finally {
     URL.revokeObjectURL(url);

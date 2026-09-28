@@ -8731,6 +8731,70 @@ built, and every extra he chose is in: a bio, group chats, reply on messages,
 replies and hearts on comments, search for people, sets and posts with recent
 searches, saved posts, and Share profile.
 
+## 61. A photo chosen on an iPhone, and nothing happening (2026-09-28)
+
+The owner, on a second account on his iPhone: *"when i uploaded a new profile
+picture, it's not uploading."* Asked what the screen did: *"i clicked on use a
+photo, selected photo library, picked a picture, check button, then nothing
+is happening. no errors."* And the read-only SQL put to him (that account's
+`avatar`, and its files in the `avatars` bucket): **0 photos**. The picture
+never left the phone.
+
+### 61.1 Measured before anything changed
+
+- `avatar-probe.ts` as A: every face and photo saved — the data layer, the
+  bucket (1 MB, JPEG/WebP/PNG) and its policies were fine. No rules gate on a
+  picture (0030 has none on `profiles.avatar`).
+- The picture code had not changed in the redesign beyond `MyAvatar`.
+- So the fault was between choosing and uploading, on the phone — and the
+  owner saw no spinner and no message, which rules out an upload that failed
+  (it would have said "Couldn't save that picture") and a picture that could
+  not be read (the same). Nothing after "choose" ran at all.
+
+### 61.2 The cause, and the fix
+
+Every picker — the profile photo, a post's photo, a note's pictures, notes
+from a file — made a file input, clicked it, and waited for `change` **without
+ever putting it in the page**. A detached input on iPhone Safari can be lost
+while the photo library is open, and its choice is then never heard: exactly
+"nothing is happening, no errors". Headless Chrome keeps it, which is why no
+probe ever saw this.
+
+- **`src/ui/pick-files.ts`, one picker for all four**: the input is added to
+  the page (hidden off-screen — not `display: none`, which a browser may
+  refuse to open a picker for) before it is clicked, and taken out once it
+  answers; `cancel` answers with nothing; one left unanswered is removed when
+  the next opens.
+- **Opening a picture can only end in a picture or in words.** `openPicture`
+  uses `onload`/`onerror` rather than `decode()`, the less dependable of the
+  two on iPhone Safari with big photos, and gives up after 20 seconds with
+  `UnreadablePictureError` — *"Couldn't read that picture. Try another one."*,
+  which Settings now shows as it is instead of "try again in a moment".
+- **Settings is busy from the moment a photo is chosen**: choosing
+  (`pickProfilePhoto`) and making it small (`squareProfilePhoto`) are two
+  steps now, with the spinner between them — a big photo being read is never a
+  screen doing nothing.
+
+### 61.3 Measured after
+
+- `tests/pick-files.test.ts` (11): the box is in the page when clicked and out
+  of it after, cancel answers with nothing, a stale one goes, `openPicture`
+  ends on load, on error and on a timeout; **no other file input anywhere in
+  `app/` or `src/`** (the old code fails this), and the four pickers use it.
+- **`scripts/photo-probe.ts` (new) 6/6**, through the screens: "Use a photo"
+  in Settings with a 4032 × 3024 photo handed to the page's own file box (found
+  by DevTools only because it is in the page now) — saved as a 14 KB picture,
+  the box gone after; and the same photo in a new post's box. It cannot show
+  the iPhone losing a detached box — Chrome never did — so **the proof on the
+  phone is the owner's**, after deploying.
+- **1574 tests**, typecheck clean with and without `.expo/`.
+- On the way: **test account A was restricted until October 5** (reason
+  "wrong") and warned "Be kind" — the owner trying `/moderation` on the probe
+  reports, as HANDOFF asked. It works. But a restricted A cannot share or
+  post, so `posts-probe` stopped at its first step ("Your account is
+  restricted"). The warning was acknowledged as A, as a person would; lifting
+  the restriction is the owner's (SQL, below in HANDOFF).
+
 
 ## Sources
 
