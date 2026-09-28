@@ -8,6 +8,7 @@ import { removeMyCommunityData } from './community';
 import { removeMySocialData } from './social';
 import { removeMyPosts } from './posts';
 import { removeMyMessages } from './messages';
+import { removeMyGroups } from './groups';
 
 /**
  * Study sets. RLS scopes every query to the signed-in user, so nothing here
@@ -212,6 +213,10 @@ export async function deleteAllMyData(): Promise<{ setsDeleted: number }> {
   // I hid and when I last read. The conversations stay — each holds the other
   // person's messages too, and those are theirs.
   await removeMyMessages();
+
+  // Groups (0032, NOTES §58): the messages I sent there, my reactions, what I
+  // hid — and every group left. The other members' messages are theirs.
+  await removeMyGroups();
 
   const sets = await listSets();
   for (const set of sets) {

@@ -1002,6 +1002,9 @@ async function main() {
     // ---- messages between friends (0028, NOTES §53) ----
     await checkMessages(A, B);
 
+    // ---- replies, and group chats (0032, NOTES §58) ----
+    await checkRepliesAndGroups(A, B);
+
     // ---- the friends' leaderboard (0029, NOTES §54) ----
     await checkLeaderboard(A, B);
 
@@ -1855,6 +1858,186 @@ async function checkRepliesHeartsAndSaves(
   await A.client.from('post_saves').delete().eq('user_id', A.userId);
   await A.client.from('comment_likes').delete().eq('user_id', A.userId);
   await B.client.from('posts').delete().like('body', `${POST_PROBE}%`);
+}
+
+/**
+ * Replies, and group chats (0032, NOTES §58), both directions.
+ *
+ * Replies: a reply must answer a message in the same room, and a quote comes
+ * back through the room's view. Groups: members only, since they joined; only
+ * friends can be added; only the owner renames or takes people out; a block
+ * hides the two people's messages from each other inside a group; leaving
+ * hands the group on. A and B start as friends — a group needs a friend in it.
+ */
+const GROUP_PROBE = 'group probe';
+
+async function checkRepliesAndGroups(
+  A: { client: SupabaseClient; userId: string },
+  B: { client: SupabaseClient; userId: string },
+) {
+  const gate = await A.client.from('my_groups').select('id').limit(1);
+  if (gate.error && (isMissingRelation(gate.error) || gate.error.code === '42703')) {
+    console.log('\n  ----  replies and groups — not present (migration 0032), not checked');
+    return;
+  }
+  console.log('\nReplies, and group chats (0032):');
+
+  const reset = async () => {
+    await A.client.from('blocks').delete().eq('blocker_id', A.userId);
+    await B.client.from('blocks').delete().eq('blocker_id', B.userId);
+    await A.client.from('friendships').delete().or(`requester_id.eq.${B.userId},addressee_id.eq.${B.userId}`);
+    await B.client.rpc('send_friend_request', { p_to: A.userId });
+    await A.client.rpc('accept_friend_request', { p_from: B.userId });
+  };
+  const leaveProbeGroups = async (who: { client: SupabaseClient }) => {
+    const mine = await who.client.from('my_groups').select('id').like('title', `${GROUP_PROBE}%`);
+    for (const g of (mine.data ?? []) as { id: string }[]) await who.client.rpc('leave_group', { p_group: g.id });
+  };
+  await reset();
+  await leaveProbeGroups(A);
+  await leaveProbeGroups(B);
+  await A.client.from('global_messages').delete().like('body', `${GROUP_PROBE}%`);
+  await B.client.from('global_messages').delete().like('body', `${GROUP_PROBE}%`);
+
+  // ---- a reply in the Everyone room ----
+  const original = await A.client.rpc('send_global_message', { message: `${GROUP_PROBE} original` });
+  const originalId = (original.data as { id?: string } | null)?.id;
+  if (!originalId) {
+    fail('0032 seed', original.error?.message ?? 'no message');
+    return;
+  }
+  const reply = await B.client.rpc('send_global_message', { message: `${GROUP_PROBE} reply`, p_reply_to: originalId });
+  const replyId = (reply.data as { id?: string } | null)?.id;
+  const quoted = replyId
+    ? await A.client.from('global_chat').select('reply_to, reply_body').eq('id', replyId).maybeSingle()
+    : null;
+  if ((quoted?.data as { reply_to?: string; reply_body?: string } | null)?.reply_body === `${GROUP_PROBE} original`) {
+    ok('reply (Everyone room)', 'answers A’s message, quoted back through the view');
+  } else fail('reply (Everyone room)', reply.error?.message ?? `A sees ${JSON.stringify(quoted?.data)}`);
+
+  const replyNowhere = await B.client.rpc('send_global_message', {
+    message: `${GROUP_PROBE} reply to nothing`,
+    p_reply_to: '00000000-0000-0000-0000-000000000000',
+  });
+  if (!replyNowhere.error) fail('reply (no such message)', 'a reply to a message that does not exist went');
+  else ok('reply (no such message)', `refused (${replyNowhere.error.code ?? 'error'})`);
+
+  await A.client.from('global_messages').delete().eq('id', originalId);
+  const afterUnsend = replyId
+    ? await A.client.from('global_chat').select('reply_to, reply_body').eq('id', replyId).maybeSingle()
+    : null;
+  const unsent = afterUnsend?.data as { reply_to?: string; reply_body?: string | null } | null;
+  if (unsent?.reply_to === originalId && unsent.reply_body === null) ok('reply (unsent)', 'the reply stays, and says what it answered is gone');
+  else fail('reply (unsent)', JSON.stringify(unsent));
+
+  // ---- a group ----
+  const nonFriend = await A.client.rpc('create_group', {
+    p_title: `${GROUP_PROBE} strangers`,
+    p_members: ['00000000-0000-0000-0000-000000000000'],
+  });
+  if (!nonFriend.error) fail('create_group (not a friend)', 'A put somebody who is not a friend in a group');
+  else ok('create_group (not a friend)', `refused (${nonFriend.error.code ?? 'error'})`);
+
+  const forgedGroup = await A.client.from('group_chats').insert({ title: 'straight in', created_by: A.userId, owner_id: A.userId });
+  if (!forgedGroup.error) fail('group_chats insert', 'a group went straight into the table');
+  else ok('group_chats insert', `refused (${forgedGroup.error.code ?? 'error'})`);
+
+  const made = await A.client.rpc('create_group', { p_title: `${GROUP_PROBE} one`, p_members: [B.userId] });
+  if (made.error) {
+    fail('create_group', made.error.message);
+    return;
+  }
+  const groupId = made.data as string;
+  const bGroups = await B.client.from('my_groups').select('id, i_own, member_count').eq('id', groupId).maybeSingle();
+  const bRow = bGroups.data as { i_own?: boolean; member_count?: number } | null;
+  if (bRow && bRow.member_count === 2 && bRow.i_own === false) ok('create_group', 'B is in it, and it is A’s');
+  else fail('create_group', JSON.stringify(bGroups.data));
+
+  const forgedMember = await B.client.from('group_members').insert({ group_id: groupId, user_id: B.userId });
+  if (!forgedMember.error) fail('group_members insert', 'a membership went straight into the table');
+  else ok('group_members insert', `refused (${forgedMember.error.code ?? 'error'})`);
+
+  const bRenames = await B.client.rpc('rename_group', { p_group: groupId, p_title: `${GROUP_PROBE} hijacked` });
+  if (!bRenames.error) fail('rename_group (not the owner)', 'B renamed A’s group');
+  else ok('rename_group (not the owner)', `refused (${bRenames.error.code ?? 'error'})`);
+  const bRemoves = await B.client.rpc('remove_group_member', { p_group: groupId, p_user: A.userId });
+  if (!bRemoves.error) fail('remove_group_member (not the owner)', 'B took A out of A’s group');
+  else ok('remove_group_member (not the owner)', `refused (${bRemoves.error.code ?? 'error'})`);
+
+  const first = await A.client.rpc('send_group_message', { p_group: groupId, p_body: `${GROUP_PROBE} first` });
+  const firstId = first.data as string | null;
+  const bSees = await B.client.from('group_chat_messages').select('id').eq('group_id', groupId);
+  if (firstId && (bSees.data ?? []).some((m: { id: string }) => m.id === firstId)) ok('group message', 'B, in it, reads A’s message');
+  else fail('group message', first.error?.message ?? 'B cannot see it');
+
+  const forgedMessage = await B.client.from('group_messages').insert({ group_id: groupId, user_id: B.userId, body: 'around the limit' });
+  if (!forgedMessage.error) fail('group_messages insert', 'a message went straight in, around send_group_message');
+  else ok('group_messages insert', `refused (${forgedMessage.error.code ?? 'error'})`);
+
+  const crossReply = await B.client.rpc('send_group_message', { p_group: groupId, p_body: `${GROUP_PROBE} cross`, p_reply_to: replyId });
+  if (!crossReply.error) fail('group reply (another room)', 'a group message answered a message from the Everyone room');
+  else ok('group reply (another room)', `refused (${crossReply.error.code ?? 'error'})`);
+
+  // ---- taken out: nothing; back in: only what is said from now ----
+  await A.client.rpc('remove_group_member', { p_group: groupId, p_user: B.userId });
+  const outside = await B.client.from('group_chat_messages').select('id').eq('group_id', groupId);
+  const outsideSend = await B.client.rpc('send_group_message', { p_group: groupId, p_body: `${GROUP_PROBE} still here?` });
+  if ((outside.data ?? []).length === 0 && outsideSend.error) ok('taken out', 'B reads nothing and sends nothing');
+  else fail('taken out', `B reads ${JSON.stringify(outside.data)}, send: ${outsideSend.error?.message ?? 'went'}`);
+
+  await A.client.rpc('add_group_members', { p_group: groupId, p_members: [B.userId] });
+  const later = await A.client.rpc('send_group_message', { p_group: groupId, p_body: `${GROUP_PROBE} after` });
+  const back = await B.client.from('group_chat_messages').select('id').eq('group_id', groupId);
+  const backIds = ((back.data ?? []) as { id: string }[]).map((m) => m.id);
+  if (backIds.includes(later.data as string) && !backIds.includes(firstId ?? '')) {
+    ok('added again', 'B sees what is said from when they joined, not before');
+  } else fail('added again', `B sees ${JSON.stringify(backIds)}`);
+
+  // ---- a report, from inside ----
+  const reported = await B.client.rpc('report_content', {
+    p_kind: 'group_message',
+    p_target: later.data as string,
+    p_reason: 'other',
+    p_details: PROBE_REPORT,
+  });
+  if (reported.error) fail('report (group message)', reported.error.message);
+  else ok('report (group message)', 'a member reported a message they can see');
+  const reportedOld = await B.client.rpc('report_content', {
+    p_kind: 'group_message',
+    p_target: firstId,
+    p_reason: 'other',
+    p_details: PROBE_REPORT,
+  });
+  if (!reportedOld.error) fail('report (before joining)', 'B reported a message from before they joined — ids can be probed');
+  else ok('report (before joining)', `refused (${reportedOld.error.code ?? 'error'})`);
+
+  // ---- a block, inside a group ----
+  const bSays = await B.client.rpc('send_group_message', { p_group: groupId, p_body: `${GROUP_PROBE} from B` });
+  await A.client.rpc('block_person', { p_other: B.userId });
+  const aReads = await A.client.from('group_chat_messages').select('id').eq('group_id', groupId);
+  const aMembers = await A.client.from('group_member_people').select('user_id').eq('group_id', groupId);
+  if (
+    !((aReads.data ?? []) as { id: string }[]).some((m) => m.id === bSays.data) &&
+    !((aMembers.data ?? []) as { user_id: string }[]).some((m) => m.user_id === B.userId)
+  ) {
+    ok('block (in a group)', 'A no longer sees B’s messages, or B among the members');
+  } else fail('block (in a group)', 'B is still visible to A in the group');
+  await A.client.from('blocks').delete().eq('blocker_id', A.userId);
+
+  // ---- leaving hands it on ----
+  await A.client.rpc('leave_group', { p_group: groupId });
+  const heir = await B.client.from('my_groups').select('i_own, member_count').eq('id', groupId).maybeSingle();
+  if ((heir.data as { i_own?: boolean } | null)?.i_own === true) ok('leave_group (owner)', 'B took it over when A left');
+  else fail('leave_group (owner)', JSON.stringify(heir.data));
+  const aGone = await A.client.from('group_chat_messages').select('id').eq('group_id', groupId);
+  if ((aGone.data ?? []).length === 0) ok('leave_group (reading)', 'A reads nothing once out');
+  else fail('leave_group (reading)', 'A still reads the group after leaving');
+
+  // ---- tidy up ----
+  await leaveProbeGroups(B);
+  await leaveProbeGroups(A);
+  await B.client.from('global_messages').delete().like('body', `${GROUP_PROBE}%`);
+  await A.client.from('global_messages').delete().like('body', `${GROUP_PROBE}%`);
 }
 
 /**

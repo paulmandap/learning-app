@@ -46,7 +46,7 @@ export interface Conversation {
   can_send: boolean;
 }
 
-/** A row of `conversation_messages` (0028). */
+/** A row of `conversation_messages` (0028; the reply columns since 0032). */
 export interface DirectMessage {
   id: string;
   conversation_id: string;
@@ -54,6 +54,40 @@ export interface DirectMessage {
   body: string;
   created_at: string;
   edited_at: string | null;
+  reply_to?: string | null;
+  reply_author_id?: string | null;
+  reply_body?: string | null;
+}
+
+/** What a reply shows of the message it answers, above its own bubble. */
+export interface Quote {
+  /** Whose it was — "You", or their name. Empty when it is gone. */
+  who: string;
+  text: string;
+  /** Unsent, or not for this reader any more — said, rather than left blank. */
+  removed: boolean;
+}
+
+/** Longest a quoted message runs before it is cut, on one line. */
+export const QUOTE_MAX = 120;
+
+/**
+ * The quote above a reply (NOTES §58), or null for a message that answers
+ * nothing. The message answered can be unsent after the reply — 0032 keeps
+ * the reply and says so, the way Messenger does — or be from somebody across
+ * a block, or from before the reader joined a group: all of those read as
+ * "Message removed", never as an empty box.
+ */
+export function quoteOf(
+  replyTo: string | null | undefined,
+  replyBody: string | null | undefined,
+  who: string,
+): Quote | null {
+  if (!replyTo) return null;
+  if (replyBody == null) return { who: '', text: 'Message removed', removed: true };
+  const flat = replyBody.replace(/\s+/g, ' ').trim();
+  const text = flat.length > QUOTE_MAX ? `${flat.slice(0, QUOTE_MAX - 1).trimEnd()}…` : flat;
+  return { who, text, removed: false };
 }
 
 /**

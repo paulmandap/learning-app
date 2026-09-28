@@ -24,13 +24,14 @@ import { EMOJI_GROUPS, REACTIONS, type ReactionTally } from '../core/emoji';
  *
  * Both routes end in this component; only the way it is summoned differs.
  *
- * ## What is NOT here
+ * ## Reply, since NOTES §58
  *
- * **Reply.** It appears in the reference screenshots and was never asked for in
- * words, and it is not a menu item — it is a threading model: a reply needs a
- * parent on the message, a quoted stub above the bubble, and a decision about
- * what happens to a reply whose parent is unsent. Building a button for it
- * would be the easy tenth of it.
+ * It was left out in §48 as "not a menu item — a threading model: a parent on
+ * the message, a quoted stub above the bubble, and a decision about what
+ * happens to a reply whose parent is unsent." The owner asked for it with the
+ * redesign, and 0032 is that model: `reply_to` on each kind of message, the
+ * quote in the rooms' views, and a reply that outlives an unsent parent and
+ * says "Message removed". The button is the last tenth.
  */
 
 export type MessageAction = 'react' | 'edit' | 'unsend-everyone' | 'unsend-me';
@@ -120,6 +121,7 @@ export function MessageSheet({
   busy,
   error,
   onReact,
+  onReply,
   onEdit,
   onUnsendEveryone,
   onUnsendMe,
@@ -136,6 +138,8 @@ export function MessageSheet({
   busy: boolean;
   error: string | null;
   onReact: (emoji: string) => void;
+  /** Answer it (NOTES §58). Absent where nothing can be sent — a closed conversation. */
+  onReply?: () => void;
   onEdit: () => void;
   onUnsendEveryone: () => void;
   onUnsendMe: () => void;
@@ -162,11 +166,13 @@ export function MessageSheet({
         actions={
           mine
             ? [
+                onReply ? { icon: 'reply', label: 'Reply', onPress: onReply, disabled: busy } : null,
                 canEdit ? { icon: 'edit', label: 'Edit message', onPress: onEdit, disabled: busy } : null,
                 { icon: 'trash', label: 'Unsend for everyone', onPress: onUnsendEveryone, disabled: busy },
                 { icon: 'hide', label: 'Unsend for me only', onPress: onUnsendMe, disabled: busy },
               ]
             : [
+                onReply ? { icon: 'reply', label: 'Reply', onPress: onReply, disabled: busy } : null,
                 { icon: 'hide', label: 'Hide this from my screen', detail: hideDetail, onPress: onUnsendMe, disabled: busy },
                 onViewProfile && name
                   ? { icon: 'person', label: `See ${name}'s profile`, onPress: onViewProfile, disabled: busy }

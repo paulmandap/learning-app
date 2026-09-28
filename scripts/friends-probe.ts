@@ -28,6 +28,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { openPage, type Page } from './screenshot';
+import { WHATS_NEW } from '../src/core/whats-new';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const publishable = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -154,14 +155,17 @@ async function main() {
     console.log('A, in the built app:');
 
     // --- the one-time notice on Home -------------------------------------
+    // Its title from the card itself: each announcement gets a new one (it was
+    // "New: friends…" until §58), and a probe with the old words typed in would
+    // wait for a card that says something else.
     await page.goto('/');
-    await showing(page, 'New: friends');
+    await showing(page, WHATS_NEW.title);
     await shot(page, '00-home-whats-new.png');
     await page.click('Got it');
-    await gone(page, 'New: friends');
+    await gone(page, WHATS_NEW.title);
     await page.goto('/');
     await showing(page, 'Your sets');
-    if ((await page.text()).includes('New: friends')) fail("what's new", 'came back after "Got it"');
+    if ((await page.text()).includes(WHATS_NEW.title)) fail("what's new", 'came back after "Got it"');
     else ok("what's new", 'shown once, and gone after "Got it" — across a reload');
 
     // --- a username, saved from the screen --------------------------------

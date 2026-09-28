@@ -51,6 +51,11 @@ export interface ChatMessage {
   created_at: string;
   /** When it was last edited, or null. Null before 0025, which reads the same. */
   edited_at?: string | null;
+  /** The message it answers, and that one's author and words (0032) — null words when it is gone. */
+  reply_to?: string | null;
+  reply_author_id?: string | null;
+  reply_name?: string | null;
+  reply_body?: string | null;
 }
 
 /**

@@ -61,18 +61,24 @@ export async function getConversation(id: string, db: Db = supabase): Promise<Co
 }
 
 /**
- * Unread messages across the inbox, for the badge on the Community tab.
+ * Unread messages across the inbox — conversations and groups (0032) — for the
+ * badge on the Community tab.
  *
  * Zero rather than an error when messages are not switched on, or the read
- * fails: a badge is a nudge, and a tab bar that throws is a broken app.
+ * fails: a badge is a nudge, and a tab bar that throws is a broken app. Groups
+ * the same: before 0032 they add nothing.
  */
 export async function unreadMessages(db: Db = supabase): Promise<number> {
-  const { data, error } = await db.from('my_conversations').select('unread');
-  if (error) {
-    if (!unavailable(error)) console.warn(`[messages] unread count: ${error.message}`);
-    return 0;
-  }
-  return ((data ?? []) as { unread: number }[]).reduce((n, r) => n + (r.unread ?? 0), 0);
+  const count = async (view: 'my_conversations' | 'my_groups'): Promise<number> => {
+    const { data, error } = await db.from(view).select('unread');
+    if (error) {
+      if (!unavailable(error)) console.warn(`[messages] unread count (${view}): ${error.message}`);
+      return 0;
+    }
+    return ((data ?? []) as { unread: number }[]).reduce((n, r) => n + (r.unread ?? 0), 0);
+  };
+  const [dms, groups] = await Promise.all([count('my_conversations'), count('my_groups')]);
+  return dms + groups;
 }
 
 /** Open a conversation with a friend, or find the one there is. */
@@ -92,28 +98,45 @@ export async function startConversation(personId: string, db: Db = supabase): Pr
  * (`listMessages`), for the same reason: a conversation with a year in it
  * should not download all of it to show the last page.
  */
+const DM_COLUMNS = 'id, conversation_id, author_id, body, created_at, edited_at';
+
 export async function listDirectMessages(conversationId: string, limit = 200, db: Db = supabase): Promise<DirectMessage[]> {
-  const { data, error } = await db
-    .from('conversation_messages')
-    .select('id, conversation_id, author_id, body, created_at, edited_at')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: false })
-    .limit(limit);
+  const ask = (columns: string) =>
+    db
+      .from('conversation_messages')
+      .select(columns)
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+  // Replies arrive with 0032 (NOTES §58); without them, messages as they were.
+  let { data, error } = await ask(`${DM_COLUMNS}, reply_to, reply_author_id, reply_body`);
+  if (isMissingColumn(error)) ({ data, error } = await ask(DM_COLUMNS));
   if (unavailable(error)) throw new MessagesUnavailableError();
   if (error) throw new Error(error.message);
-  return ((data ?? []) as DirectMessage[]).slice().reverse();
+  return ((data ?? []) as unknown as DirectMessage[]).slice().reverse();
 }
 
-export async function sendDirectMessage(conversationId: string, raw: string, db: Db = supabase): Promise<void> {
+export async function sendDirectMessage(
+  conversationId: string,
+  raw: string,
+  replyTo: string | null = null,
+  db: Db = supabase,
+): Promise<void> {
   const check = validateMessage(raw);
   if (!check.ok) throw new Error(check.reason);
-  const { error } = await db.rpc('send_direct_message', { p_conversation: conversationId, p_body: check.body });
+  // The reply only when there is one — before 0032 the function has no
+  // `p_reply_to`, and an ordinary message must still go.
+  const args = replyTo
+    ? { p_conversation: conversationId, p_body: check.body, p_reply_to: replyTo }
+    : { p_conversation: conversationId, p_body: check.body };
+  const { error } = await db.rpc('send_direct_message', args);
   await throwIfGated(error, db);
+  if (replyTo && missingFunction(error)) throw new Error("Replying isn't switched on yet.");
   if (unavailable(error)) throw new MessagesUnavailableError();
   if (error) {
     if (error.code === 'P0001') throw new Error('That is a lot of messages at once — give it a moment.');
     if (error.code === '42501') throw new Error("You're not friends any more, so this conversation is closed.");
-    if (error.code === 'P0002') throw new Error("This conversation isn't there any more.");
+    if (error.code === 'P0002') throw new Error("This conversation isn't there any more, or the message you're replying to is gone.");
     throw new Error(error.message);
   }
 }

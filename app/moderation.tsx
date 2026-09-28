@@ -38,6 +38,7 @@ const KIND_LABEL: Record<QueuedReport['target_kind'], string> = {
   person: 'A person',
   message: 'A message in the Everyone room',
   direct_message: 'A message to a friend',
+  group_message: 'A message in a group',
   set: 'A shared set',
   post: 'A post',
   comment: 'A comment',

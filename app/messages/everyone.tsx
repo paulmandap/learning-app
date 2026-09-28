@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { View } from 'react-native';
 import { Stack } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -15,7 +16,8 @@ import {
   sendMessage,
 } from '../../src/data/community';
 import { useSessionStore } from '../../src/data/session';
-import { CHAT_POLL_MS } from '../../src/core/messages';
+import { CHAT_POLL_MS, quoteOf } from '../../src/core/messages';
+import { authorName } from '../../src/core/community';
 
 /**
  * The Everyone room — one room that everyone signed in shares (NOTES §46).
@@ -49,6 +51,16 @@ export default function EveryoneRoom() {
     await queryClient.invalidateQueries({ queryKey: ['chat-reactions'] });
   };
 
+  // Each reply with the message it answers, named (NOTES §58).
+  const roomMessages = useMemo(
+    () =>
+      messages.map((m) => ({
+        ...m,
+        quote: quoteOf(m.reply_to, m.reply_body, m.reply_author_id === myId ? 'You' : authorName(m.reply_name ?? null)),
+      })),
+    [messages, myId],
+  );
+
   if (error instanceof CommunityUnavailableError) {
     return (
       <Screen>
@@ -65,7 +77,7 @@ export default function EveryoneRoom() {
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ title: 'Everyone' }} />
       <ChatRoom
-        messages={messages}
+        messages={roomMessages}
         loading={isLoading}
         myId={myId}
         reactions={reactions}
@@ -79,7 +91,7 @@ export default function EveryoneRoom() {
         hideDetail="It stays in the room for everyone else — only the person who sent it can take it back."
         editNote="Everyone will see it marked as edited."
         actions={{
-          send: sendMessage,
+          send: (text, replyTo) => sendMessage(text, replyTo),
           edit: editMessage,
           unsendEveryone: deleteMessageForEveryone,
           hideForMe: hideMessage,

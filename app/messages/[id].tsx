@@ -7,7 +7,8 @@ import { StatePanel } from '../../src/ui/states';
 import { ChatRoom, type RoomMessage } from '../../src/ui/chat-room';
 import { OverflowMenu } from '../../src/ui/menu';
 import { BlockSheet, ReportSheet } from '../../src/ui/people';
-import { type, useTheme } from '../../src/ui/theme';
+import { PersonAvatar } from '../../src/ui/avatar';
+import { space, type, useTheme } from '../../src/ui/theme';
 import {
   editDirectMessage,
   getConversation,
@@ -20,7 +21,7 @@ import {
   sendDirectMessage,
   unsendDirectMessage,
 } from '../../src/data/messages';
-import { CHAT_POLL_MS, CLOSED_CONVERSATION, seenMessageId } from '../../src/core/messages';
+import { CHAT_POLL_MS, CLOSED_CONVERSATION, quoteOf, seenMessageId } from '../../src/core/messages';
 import { personName } from '../../src/core/social';
 import { useSessionStore } from '../../src/data/session';
 
@@ -90,6 +91,8 @@ export default function Conversation() {
         body: m.body,
         created_at: m.created_at,
         edited_at: m.edited_at,
+        // The message it answers — only ever one of the two of yours (NOTES §58).
+        quote: quoteOf(m.reply_to, m.reply_body, m.reply_author_id === myId ? 'You' : name),
       })),
     [messages.data, myId, name, who?.avatar],
   );
@@ -134,13 +137,16 @@ export default function Conversation() {
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen
         options={{
-          // Their name, which opens their page — where a messenger puts it.
+          // Their face and name, which open their page — where a messenger
+          // puts them, and the owner's picture.
           headerTitle: () => (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`${name}'s profile`}
               onPress={() => router.push(`/person/${who.person_id}`)}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}
             >
+              <PersonAvatar avatar={who.avatar} userId={who.person_id} name={name} size={32} />
               <Text style={[type.bodyStrong, { color: t.text }]} numberOfLines={1}>
                 {name}
               </Text>
@@ -172,7 +178,7 @@ export default function Conversation() {
         hideDetail={`It stays for ${name} — only the person who sent it can take it back.`}
         editNote={`${name} will see it marked as edited.`}
         actions={{
-          send: (text) => sendDirectMessage(conversationId, text),
+          send: (text, replyTo) => sendDirectMessage(conversationId, text, replyTo),
           edit: editDirectMessage,
           unsendEveryone: unsendDirectMessage,
           hideForMe: hideDirectMessage,

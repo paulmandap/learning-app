@@ -48,6 +48,8 @@ const PUBLIC_SET_COLUMNS =
 
 /** Columns of `global_chat`. `edited_at` arrives with 0025 (NOTES §48). */
 const CHAT_COLUMNS = 'id, author_id, author_name, author_avatar, body, created_at, edited_at';
+/** With 0032's replies. Asked for first; a database without them answers 42703 and gets CHAT_COLUMNS. */
+const CHAT_COLUMNS_WITH_REPLIES = `${CHAT_COLUMNS}, reply_to, reply_author_id, reply_name, reply_body`;
 const CHAT_COLUMNS_BEFORE_0025 = 'id, author_id, author_name, author_avatar, body, created_at';
 
 /**
@@ -284,7 +286,9 @@ export async function listMessages(limit = 100, db: Db = supabase): Promise<Chat
   const ask = (columns: string) =>
     db.from('global_chat').select(columns).order('created_at', { ascending: false }).limit(limit);
 
-  let { data, error } = await ask(CHAT_COLUMNS);
+  let { data, error } = await ask(CHAT_COLUMNS_WITH_REPLIES);
+  // Replies arrive with 0032 (NOTES §58): without them, the chat as it was.
+  if (isMissingColumn(error)) ({ data, error } = await ask(CHAT_COLUMNS));
   // `edited_at` arrives with 0025. Asked for separately so a build deployed
   // before the migration still shows the chat instead of answering PGRST204
   // for the whole screen — the same rule as `listSets` and NOTES §19.4.
@@ -390,16 +394,21 @@ export async function react(
  * and so the person is told in words rather than shown a constraint name. The
  * database still checks; this only saves the trip.
  */
-export async function sendMessage(raw: string, db: Db = supabase): Promise<void> {
+export async function sendMessage(raw: string, replyTo: string | null = null, db: Db = supabase): Promise<void> {
   const check = validateMessage(raw);
   if (!check.ok) throw new Error(check.reason);
 
-  const { error } = await db.rpc('send_global_message', { message: check.body });
+  // The reply only when there is one: a database without 0032 has no
+  // `p_reply_to`, and an ordinary message must still go (NOTES §58).
+  const args = replyTo ? { message: check.body, p_reply_to: replyTo } : { message: check.body };
+  const { error } = await db.rpc('send_global_message', args);
   await throwIfGated(error, db);
 
+  if (replyTo && error?.code === 'PGRST202') throw new Error("Replying isn't switched on yet.");
   if (isMissingTable(error) || error?.code === 'PGRST202') {
     throw new CommunityUnavailableError();
   }
+  if (error?.code === 'P0002') throw new Error("The message you're replying to is gone.");
   if (error) {
     // P0001 is the rate limit raising. Its own message names a minute, which is
     // not what someone wants to read when they are typing fast.

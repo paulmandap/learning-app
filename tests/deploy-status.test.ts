@@ -61,6 +61,9 @@ describe('what counts as a dangerous migration', () => {
     expect(destructiveDrops(sql('0027_posts_and_feed.sql'))).toEqual([]);
     // 0031 recreates post_comment_people with three more columns (NOTES §57).
     expect(destructiveDrops(sql('0031_comment_replies_likes_and_saves.sql'))).toEqual([]);
+    // 0032 recreates two views and two functions, and widens reports_kind_check
+    // by name (NOTES §58).
+    expect(destructiveDrops(sql('0032_message_replies_and_group_chats.sql'))).toEqual([]);
     expect(
       destructiveDrops('alter table t drop constraint if exists c1;\nalter table t add constraint c1 check (x > 0);'),
     ).toEqual([]);

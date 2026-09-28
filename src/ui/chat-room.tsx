@@ -8,9 +8,11 @@ import { Composer } from './nomi';
 import { PersonAvatar } from './avatar';
 import { BlockSheet, ReportSheet } from './people';
 import { HoverActions, MessageSheet, ReactionChips, useLongPress } from './message-actions';
+import { Icon } from './glyphs';
 import { CONTENT_MAX_WIDTH, radius, space, type, useTheme } from './theme';
 import { authorName, canEdit, EDIT_WINDOW_MINUTES, MESSAGE_MAX_LENGTH } from '../core/community';
 import { describeWhen } from '../core/chat';
+import type { Quote } from '../core/messages';
 import { tallyReactions, type Reaction, type ReactionTally } from '../core/emoji';
 
 /**
@@ -38,10 +40,13 @@ export interface RoomMessage {
   body: string;
   created_at: string;
   edited_at?: string | null;
+  /** The message this one answers, as the screen can name it (NOTES §58). */
+  quote?: Quote | null;
 }
 
 export interface RoomActions {
-  send: (text: string) => Promise<void>;
+  /** `replyTo` is the message answered, or null (NOTES §58). */
+  send: (text: string, replyTo: string | null) => Promise<void>;
   edit: (id: string, text: string) => Promise<void>;
   unsendEveryone: (id: string) => Promise<void>;
   hideForMe: (id: string) => Promise<void>;
@@ -70,7 +75,7 @@ export function ChatRoom({
   reactions: readonly Reaction[];
   empty: { title: string; detail: string };
   placeholder: string;
-  reportKind: 'message' | 'direct_message';
+  reportKind: 'message' | 'direct_message' | 'group_message';
   /** Names over the first bubble of a run — in a room of many; not between two. */
   showNames: boolean;
   /** The message to say "Seen" under, if any. */
@@ -101,6 +106,9 @@ export function ChatRoom({
   /** Somebody else's message being reported, or its sender being blocked (NOTES §51). */
   const [reporting, setReporting] = useState<RoomMessage | null>(null);
   const [blocking, setBlocking] = useState<{ id: string; name: string } | null>(null);
+  /** The message being answered, shown over the box until it is sent (NOTES §58). */
+  const [replying, setReplying] = useState<RoomMessage | null>(null);
+  const [focus, setFocus] = useState(0);
 
   const byMessage = useMemo(() => {
     const map = new Map<string, Reaction[]>();
@@ -114,7 +122,13 @@ export function ChatRoom({
   // the room would send with TanStack's context object as its database, and
   // fail. Home carries the same warning for listSets; the community probe
   // caught this one in the moved Everyone room (NOTES §53).
-  const send = useMutation({ mutationFn: (text: string) => actions.send(text), onSuccess: onChanged });
+  const send = useMutation({
+    mutationFn: (text: string) => actions.send(text, replying?.id ?? null),
+    onSuccess: async () => {
+      setReplying(null);
+      await onChanged();
+    },
+  });
   const unsend = useMutation({
     mutationFn: ({ id, everyone }: { id: string; everyone: boolean }) =>
       everyone ? actions.unsendEveryone(id) : actions.hideForMe(id),
@@ -175,6 +189,7 @@ export function ChatRoom({
                 startsRun={messages[i - 1]?.author_id !== m.author_id}
                 endsRun={messages[i + 1]?.author_id !== m.author_id}
                 edited={!!m.edited_at}
+                quote={m.quote ?? null}
                 seen={m.id === seenId}
                 canEdit={canEdit(m, myId, now)}
                 tallies={tallyReactions(byMessage.get(m.id) ?? [], myId)}
@@ -209,6 +224,16 @@ export function ChatRoom({
               setEditing({ id: acting.id, body: acting.body });
               setActing(null);
             }}
+            // Not in a closed conversation: there is no box to answer in.
+            onReply={
+              closed
+                ? undefined
+                : () => {
+                    setReplying(acting);
+                    setActing(null);
+                    setFocus((f) => f + 1);
+                  }
+            }
             onUnsendEveryone={() => unsend.mutate({ id: acting.id, everyone: true })}
             onUnsendMe={() => unsend.mutate({ id: acting.id, everyone: false })}
             hideDetail={hideDetail}
@@ -277,7 +302,36 @@ export function ChatRoom({
           </View>
         ) : null}
 
-        <View style={{ paddingBottom: space.lg, backgroundColor: t.bg }}>
+        <View style={{ paddingBottom: space.lg, backgroundColor: t.bg, gap: space.sm }}>
+          {replying && !closed ? (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: space.sm,
+                paddingLeft: space.md,
+                borderLeftWidth: 3,
+                borderLeftColor: t.accent,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[type.caption, { color: t.text, fontWeight: '700' }]} numberOfLines={1}>
+                  {`Replying to ${replying.author_id === myId ? 'yourself' : nameOf(replying)}`}
+                </Text>
+                <Text style={[type.caption, { color: t.textMuted }]} numberOfLines={1}>
+                  {replying.body}
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Cancel the reply"
+                onPress={() => setReplying(null)}
+                hitSlop={12}
+              >
+                <Icon name="close" color={t.textMuted} size={18} />
+              </Pressable>
+            </View>
+          ) : null}
           {closed ? (
             <Notice tone="info">{closed}</Notice>
           ) : (
@@ -289,6 +343,7 @@ export function ChatRoom({
               // rather than letting someone type a page and then be told no.
               maxLength={MESSAGE_MAX_LENGTH}
               emoji
+              focusSignal={focus}
             />
           )}
         </View>
@@ -333,6 +388,7 @@ function Message({
   startsRun,
   endsRun,
   edited,
+  quote,
   seen,
   canEdit: editable,
   tallies,
@@ -350,6 +406,8 @@ function Message({
   startsRun: boolean;
   endsRun: boolean;
   edited: boolean;
+  /** The message this one answers (NOTES §58). */
+  quote: Quote | null;
   /** "Seen" under this one — the last of mine they have read (NOTES §53). */
   seen: boolean;
   canEdit: boolean;
@@ -425,9 +483,9 @@ function Message({
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${mine ? 'You' : name} said ${body}. ${when}${
-            edited ? ', edited' : ''
-          }. Hold for reactions and more.`}
+          accessibilityLabel={`${mine ? 'You' : name}${
+            quote ? (quote.removed ? ', replying to a removed message,' : `, replying to ${quote.who}: ${quote.text},`) : ''
+          } said ${body}. ${when}${edited ? ', edited' : ''}. Hold for reactions and more.`}
           // A long press on a touch screen; the ⋯ beside it on a pointer. The
           // bubble is no longer a one-tap unsend — the owner unsent something by
           // accident that way (NOTES §47), and this is the fix he asked for.
@@ -450,6 +508,35 @@ function Message({
             opacity: pressed ? 0.75 : 1,
           })}
         >
+          {/* The message answered, inside the reply's own bubble, with a bar
+              down its side — the owner's picture, and Messenger. "Message
+              removed" when it was unsent, never an empty box. */}
+          {quote ? (
+            <View
+              style={{
+                marginBottom: space.xs,
+                paddingLeft: space.sm,
+                borderLeftWidth: 3,
+                borderLeftColor: mine ? t.accentText : t.accent,
+                opacity: 0.85,
+              }}
+            >
+              {quote.who ? (
+                <Text style={[type.caption, { color: mine ? t.accentText : t.text, fontWeight: '700' }]} numberOfLines={1}>
+                  {quote.who}
+                </Text>
+              ) : null}
+              <Text
+                style={[
+                  type.caption,
+                  { color: mine ? t.accentText : t.textMuted, fontStyle: quote.removed ? 'italic' : 'normal' },
+                ]}
+                numberOfLines={2}
+              >
+                {quote.text}
+              </Text>
+            </View>
+          ) : null}
           <Text style={[type.body, { color: mine ? t.accentText : t.text }]} selectable>
             {body}
           </Text>

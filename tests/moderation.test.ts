@@ -85,6 +85,14 @@ describe('the app hears both refusals from every social write', () => {
     'src/data/social.ts': ["rpc('send_friend_request'", "rpc('accept_friend_request'"],
     'src/data/posts.ts': ["rpc('create_post'", "rpc('edit_post'", "rpc('add_comment'"],
     'src/data/messages.ts': ["rpc('start_conversation'", "rpc('send_direct_message'", "rpc('edit_direct_message'"],
+    // Groups (0032, NOTES §58): every write that reaches somebody.
+    'src/data/groups.ts': [
+      "rpc('create_group'",
+      "rpc('add_group_members'",
+      "rpc('rename_group'",
+      "rpc('send_group_message'",
+      "rpc('edit_group_message'",
+    ],
   };
   for (const [file, rpcs] of Object.entries(calls)) {
     it(file, () => {

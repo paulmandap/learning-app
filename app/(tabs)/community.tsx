@@ -1,27 +1,18 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Body,
-  Button,
-  Card,
-  LoadingState,
-  Notice,
-  PillButton,
-  SectionRow,
-  TopBar,
-} from '../../src/ui/components';
+import { Body, Button, Card, Label, LoadingState, Notice, Rows, TopBar } from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
 import { Segment, UnderlineTabs } from '../../src/ui/segment';
 import { MyAvatar, PersonAvatar } from '../../src/ui/avatar';
 import { PersonRow } from '../../src/ui/people';
-import { Sheet, SheetTitle } from '../../src/ui/sheet';
+import { Sheet, SheetActions, SheetTitle } from '../../src/ui/sheet';
 import { PostList } from '../../src/ui/post';
 import { Icon } from '../../src/ui/glyphs';
 import { PostsUnavailableError, listFeed } from '../../src/data/posts';
 import { joinPages, nextCursor, type FeedCursor } from '../../src/core/posts';
-import { CONTENT_MAX_WIDTH, radius, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
+import { CONTENT_MAX_WIDTH, INPUT_FONT_SIZE, radius, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
 import {
   authorName,
   browseOrder,
@@ -39,7 +30,9 @@ import {
   unstar,
 } from '../../src/data/community';
 import { listConversations, MessagesUnavailableError, startConversation, unreadMessages } from '../../src/data/messages';
-import { badgeLabel, INBOX_POLL_MS, inboxOrder, lastLine, type Conversation } from '../../src/core/messages';
+import { listGroups } from '../../src/data/groups';
+import { badgeLabel, INBOX_POLL_MS, lastLine } from '../../src/core/messages';
+import { groupLastLine, inboxMatches, matchesQuery, mergeInbox, type InboxEntry } from '../../src/core/groups';
 import { listFriendLinks } from '../../src/data/social';
 import { personName, splitFriends } from '../../src/core/social';
 import { useSessionStore } from '../../src/data/session';
@@ -92,6 +85,7 @@ const SET_ORDERS = [
 export default function Community() {
   const t = useTheme();
   const [pane, setPane] = useState<Pane>('feed');
+  const [composing, setComposing] = useState(false);
   const signedIn = useSessionStore((s) => !!s.session);
   // The same count as the tab's badge — one query key, one number.
   const { data: unread = 0 } = useQuery({
@@ -111,18 +105,28 @@ export default function Community() {
         <View style={{ width: '100%', maxWidth: CONTENT_MAX_WIDTH, gap: space.sm }}>
           {/* The paper plane goes to your messages, with how many are new —
               where the owner's picture and every feed put it. */}
+          {/* On Chat itself, the pencil instead: a new message or a new group
+              (NOTES §58) — the owner's picture. */}
           <TopBar
             title="Community"
             brand
-            actions={[
-              { icon: 'send', label: 'Messages', badge: badgeLabel(unread), onPress: () => setPane('chat') },
-            ]}
+            actions={
+              pane === 'chat'
+                ? [{ icon: 'compose', label: 'New message', onPress: () => setComposing(true) }]
+                : [{ icon: 'send', label: 'Messages', badge: badgeLabel(unread), onPress: () => setPane('chat') }]
+            }
           />
           <UnderlineTabs value={pane} options={PANES} onChange={setPane} />
         </View>
       </View>
 
-      {pane === 'chat' ? <InboxPane /> : pane === 'feed' ? <FeedPane /> : <SetsPane />}
+      {pane === 'chat' ? (
+        <InboxPane composing={composing} onCloseCompose={() => setComposing(false)} />
+      ) : pane === 'feed' ? (
+        <FeedPane />
+      ) : (
+        <SetsPane />
+      )}
     </View>
   );
 }
@@ -499,19 +503,24 @@ function StarButton({
 // ------------------------------------------------------------------ inbox --
 
 /**
- * Chat, as an inbox (NOTES §53, the owner's choice): the Everyone room at the
- * top, then your conversations with friends, newest first, the unread ones in
- * bold with a count — the way Messenger lists them.
+ * Chat, as an inbox (NOTES §53, the owner's choice; redrawn in §58 from his
+ * picture): "Search messages" at the top, the Everyone room, then your
+ * conversations with friends and your groups together, newest first, the
+ * unread ones in bold with a count — the way Messenger lists them. Rows with a
+ * hairline between them, not a stack of boxes.
+ *
+ * The pencil in the top bar (`composing`) opens a new message: a friend, or a
+ * new group.
  *
  * The Everyone room used to BE this pane. It is a screen of its own now
- * (`app/messages/everyone.tsx`), and so is each conversation; both are the same
- * `ChatRoom`.
+ * (`app/messages/everyone.tsx`), and so is each conversation and each group;
+ * all three are the same `ChatRoom`.
  */
-function InboxPane() {
+function InboxPane({ composing, onCloseCompose }: { composing: boolean; onCloseCompose: () => void }) {
   const t = useTheme();
   const router = useRouter();
   const myId = useSessionStore((s) => s.session?.user.id ?? '');
-  const [picking, setPicking] = useState(false);
+  const [query, setQuery] = useState('');
 
   const inbox = useQuery({
     queryKey: ['conversations'],
@@ -519,19 +528,23 @@ function InboxPane() {
     refetchInterval: INBOX_POLL_MS,
     retry: (count, err) => !(err instanceof MessagesUnavailableError) && count < 1,
   });
+  // Empty before 0032, so the inbox is conversations alone until then.
+  const groups = useQuery({ queryKey: ['groups'], queryFn: () => listGroups(), refetchInterval: INBOX_POLL_MS });
   const off = inbox.error instanceof MessagesUnavailableError;
-  const ordered = useMemo(() => inboxOrder(inbox.data ?? []), [inbox.data]);
+  const entries = useMemo(() => mergeInbox(inbox.data ?? [], groups.data ?? []), [inbox.data, groups.data]);
+  const shown = entries.filter((e) => inboxMatches(e, query, entryName(e)));
+  const everyoneShown = matchesQuery(query, ['Everyone', 'The room everyone signed in shares']);
 
   // Friends to start a conversation with — only asked for when the picker opens.
   const friends = useQuery({
     queryKey: ['friend-links'],
     queryFn: () => listFriendLinks(),
-    enabled: picking,
+    enabled: composing,
   });
   const start = useMutation({
     mutationFn: (personId: string) => startConversation(personId),
     onSuccess: (conversationId) => {
-      setPicking(false);
+      onCloseCompose();
       router.push(`/messages/${conversationId}`);
     },
   });
@@ -540,46 +553,39 @@ function InboxPane() {
 
   return (
     <Pane>
-      <SectionRow
-        title="Messages"
-        action={off ? undefined : <PillButton label="+ New message" onPress={() => setPicking(true)} />}
-      />
-
-      {/* The room everyone shares, always first. */}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Everyone. The room everyone signed in shares."
-        onPress={() => router.push('/messages/everyone')}
-        style={({ pressed }) => ({
+      {/* At the top of what it searches — the owner's first example of what
+          the redesign fixes (search at the bottom of Profile). The inbox is
+          on the phone already, so nothing is sent anywhere to search it. */}
+      <View
+        style={{
           flexDirection: 'row',
           alignItems: 'center',
-          gap: space.md,
-          padding: space.md,
-          borderRadius: radius.md,
+          gap: space.sm,
+          minHeight: TOUCH_TARGET,
+          paddingHorizontal: space.md,
+          borderRadius: radius.pill,
+          backgroundColor: t.card,
           borderWidth: 1,
           borderColor: t.border,
-          backgroundColor: t.card,
-          opacity: pressed ? 0.7 : 1,
-        })}
+        }}
       >
-        <View
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: t.bg,
-          }}
-        >
-          <Icon name="people" color={t.accent} size={22} />
-        </View>
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={[type.bodyStrong, { color: t.text }]}>Everyone</Text>
-          <Text style={[type.caption, { color: t.textMuted }]}>The room everyone signed in shares</Text>
-        </View>
-        <Icon name="forward" color={t.textMuted} size={20} />
-      </Pressable>
+        <Icon name="search" color={t.textMuted} size={20} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search messages"
+          placeholderTextColor={t.textMuted}
+          accessibilityLabel="Search messages"
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={{ flex: 1, minHeight: TOUCH_TARGET, color: t.text, fontSize: INPUT_FONT_SIZE }}
+        />
+        {query ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="Clear the search" onPress={() => setQuery('')} hitSlop={10}>
+            <Icon name="close" color={t.textMuted} size={18} />
+          </Pressable>
+        ) : null}
+      </View>
 
       {off ? (
         <Card>
@@ -588,23 +594,68 @@ function InboxPane() {
         </Card>
       ) : null}
       {inbox.isLoading ? <LoadingState /> : null}
-      {inbox.data && ordered.length === 0 ? (
-        <Body muted>No conversations yet. Start one with a friend here, or from their profile.</Body>
+
+      <Rows>
+        {/* The room everyone shares, always first. */}
+        {everyoneShown ? (
+          <InboxRow
+            label="Everyone. The room everyone signed in shares."
+            leading={<GroupBadge />}
+            title="Everyone"
+            line="The room everyone signed in shares"
+            trailing={<Icon name="forward" color={t.textMuted} size={20} />}
+            onPress={() => router.push('/messages/everyone')}
+          />
+        ) : null}
+        {shown.map((e) =>
+          e.kind === 'dm' ? (
+            <InboxRow
+              key={e.item.id}
+              label={`${entryName(e)}. ${lastLine(e.item, myId)}${e.item.unread > 0 ? `. ${e.item.unread} new` : ''}`}
+              leading={<PersonAvatar avatar={e.item.avatar} userId={e.item.person_id} name={entryName(e)} size={48} />}
+              title={entryName(e)}
+              line={lastLine(e.item, myId)}
+              when={e.item.last_at ? describeWhen(Date.parse(e.item.last_at), now) : ''}
+              unread={e.item.unread}
+              onPress={() => router.push(`/messages/${e.item.id}`)}
+            />
+          ) : (
+            <InboxRow
+              key={e.item.id}
+              label={`${e.item.title}, a group. ${groupLastLine(e.item, myId)}${e.item.unread > 0 ? `. ${e.item.unread} new` : ''}`}
+              leading={<GroupBadge />}
+              title={e.item.title}
+              line={groupLastLine(e.item, myId)}
+              when={e.item.last_at ? describeWhen(Date.parse(e.item.last_at), now) : ''}
+              unread={e.item.unread}
+              onPress={() => router.push(`/groups/${e.item.id}`)}
+            />
+          ),
+        )}
+      </Rows>
+
+      {inbox.data && entries.length === 0 ? (
+        <Body muted>No conversations yet. Start one with the pencil above, or from a friend&apos;s profile.</Body>
       ) : null}
+      {query && shown.length === 0 && !everyoneShown ? <Body muted>{`Nothing matches "${query.trim()}".`}</Body> : null}
 
-      {ordered.map((c) => (
-        <ConversationRow
-          key={c.id}
-          conversation={c}
-          line={lastLine(c, myId)}
-          when={c.last_at ? describeWhen(Date.parse(c.last_at), now) : ''}
-          onPress={() => router.push(`/messages/${c.id}`)}
-        />
-      ))}
-
-      {picking ? (
-        <Sheet onClose={() => setPicking(false)}>
+      {composing ? (
+        <Sheet onClose={onCloseCompose}>
           <SheetTitle>New message</SheetTitle>
+          <SheetActions
+            actions={[
+              {
+                icon: 'people',
+                label: 'New group',
+                detail: 'A chat with several of your friends at once',
+                onPress: () => {
+                  onCloseCompose();
+                  router.push('/groups/new');
+                },
+              },
+            ]}
+          />
+          <Label>Or message a friend</Label>
           {start.isError ? <Notice tone="error">{(start.error as Error).message}</Notice> : null}
           {friends.isLoading ? <LoadingState /> : null}
           {friends.data && splitFriends(friends.data).friends.length === 0 ? (
@@ -620,62 +671,95 @@ function InboxPane() {
               onPress={() => start.mutate(f.person_id)}
             />
           ))}
-          <Button label="Cancel" variant="secondary" onPress={() => setPicking(false)} />
         </Sheet>
       ) : null}
     </Pane>
   );
 }
 
-/** One conversation in the inbox: who, the last line, when, and how many are new. */
-function ConversationRow({
-  conversation,
+/** A conversation's other person, or a group's name. */
+function entryName(e: InboxEntry): string {
+  return e.kind === 'dm' ? personName({ name: e.item.name, username: e.item.username }) : e.item.title;
+}
+
+/** A group's face: people in a circle — the Everyone room's, and every group's. */
+function GroupBadge() {
+  const t = useTheme();
+  return (
+    <View
+      style={{
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: t.card,
+      }}
+    >
+      <Icon name="people" color={t.accent} size={24} />
+    </View>
+  );
+}
+
+/**
+ * One row of the inbox: a face, the name, the last line, and on the right when
+ * and how many are new — the owner's picture. Bold AND counted when new,
+ * never colour alone.
+ */
+function InboxRow({
+  label,
+  leading,
+  title,
   line,
   when,
+  unread = 0,
+  trailing,
   onPress,
 }: {
-  conversation: Conversation;
+  label: string;
+  leading: React.ReactNode;
+  title: string;
   line: string;
-  when: string;
+  when?: string;
+  unread?: number;
+  trailing?: React.ReactNode;
   onPress: () => void;
 }) {
   const t = useTheme();
-  const name = personName({ name: conversation.name, username: conversation.username });
-  const unread = conversation.unread > 0;
-  const badge = badgeLabel(conversation.unread);
+  const isNew = unread > 0;
+  const badge = badgeLabel(unread);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${name}. ${line}${unread ? `. ${conversation.unread} new` : ''}`}
+      accessibilityLabel={label}
       onPress={onPress}
       style={({ pressed }) => ({
         flexDirection: 'row',
         alignItems: 'center',
         gap: space.md,
-        padding: space.md,
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: t.border,
-        backgroundColor: t.card,
+        paddingVertical: space.md,
         opacity: pressed ? 0.7 : 1,
       })}
     >
-      <PersonAvatar avatar={conversation.avatar} userId={conversation.person_id} name={name} size={40} />
+      {leading}
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={[unread ? type.bodyStrong : type.body, { color: t.text }]} numberOfLines={1}>
-          {name}
+        <Text style={[isNew ? type.bodyStrong : type.body, { color: t.text, fontWeight: isNew ? '700' : '600' }]} numberOfLines={1}>
+          {title}
         </Text>
-        {/* Bold AND counted when new — never colour alone. */}
         <Text
-          style={[type.caption, { color: unread ? t.text : t.textMuted, fontWeight: unread ? '700' : '400' }]}
+          style={[type.caption, { color: isNew ? t.text : t.textMuted, fontWeight: isNew ? '700' : '400' }]}
           numberOfLines={1}
         >
           {line}
-          {when ? ` · ${when}` : ''}
         </Text>
       </View>
-      {badge ? <CountBadge label={badge} /> : null}
+      {trailing ?? (
+        <View style={{ alignItems: 'flex-end', gap: space.xs, minWidth: 48 }}>
+          {when ? <Text style={[type.caption, { color: isNew ? t.accent : t.textMuted }]}>{when}</Text> : null}
+          {badge ? <CountBadge label={badge} /> : null}
+        </View>
+      )}
     </Pressable>
   );
 }

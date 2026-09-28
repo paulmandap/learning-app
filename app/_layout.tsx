@@ -177,6 +177,8 @@ function RootNavigator() {
     // The rooms (NOTES §53): the same reason as the chat pane had — a pinned
     // Send where the ✦ floats.
     path[0] !== 'messages' &&
+    // And the groups (NOTES §58): the same room, the same pinned Send.
+    path[0] !== 'groups' &&
     // A post's page, and writing one (NOTES §57): the comment box is pinned
     // to the bottom now, as in the owner's picture, and so is Send.
     path[0] !== 'post' &&
@@ -261,6 +263,10 @@ function RootNavigator() {
             pushed rooms, each titled by the screen. */}
         <Stack.Screen name="messages/everyone" options={{ title: 'Everyone', ...backable }} />
         <Stack.Screen name="messages/[id]" options={{ title: '', ...backable }} />
+        {/* Groups (NOTES §58): making one, the room, and who is in it. */}
+        <Stack.Screen name="groups/new" options={{ title: '', ...backable }} />
+        <Stack.Screen name="groups/[id]/index" options={{ title: '', ...backable }} />
+        <Stack.Screen name="groups/[id]/info" options={{ title: '', ...backable }} />
         {/* Each document names itself in its body. */}
         {/* The community rules, and the moderator's reports (NOTES §55). */}
         <Stack.Screen name="rules" options={{ title: '', ...backable }} />

@@ -227,9 +227,10 @@ describe('what the Privacy Policy says about messages is what the app does', () 
 describe('on screen', () => {
   it('Chat is an inbox: the Everyone room first, then conversations', () => {
     const community = readFileSync('app/(tabs)/community.tsx', 'utf8');
-    expect(community).toContain("pane === 'chat' ? <InboxPane />");
+    expect(community).toMatch(/pane === 'chat' \? \(\s*<InboxPane /);
     expect(community).toContain("router.push('/messages/everyone')");
-    expect(community).toContain('inboxOrder(inbox.data ?? [])');
+    // Conversations and groups together since NOTES §58, most recent first.
+    expect(community).toContain('mergeInbox(inbox.data ?? [], groups.data ?? [])');
   });
 
   it('both rooms are the one ChatRoom, registered with a back control, with the ✦ kept off their Send', () => {
@@ -258,7 +259,8 @@ describe('on screen', () => {
     // nothing arrived — the community probe caught it.
     const room = readFileSync('src/ui/chat-room.tsx', 'utf8').replace(/\/\/.*$/gm, '');
     expect(room).not.toMatch(/mutationFn:\s*actions\./);
-    expect(room).toContain('mutationFn: (text: string) => actions.send(text)');
+    // With the message answered since NOTES §58 — still wrapped.
+    expect(room).toContain('mutationFn: (text: string) => actions.send(text, replying?.id ?? null)');
   });
 
   it('a friend’s page offers a message', () => {

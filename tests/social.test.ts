@@ -256,9 +256,10 @@ describe('the limits are the database’s, copied', () => {
 
   it('what can be reported, why, and how much can be said about it', () => {
     // The kinds as the LATEST migration to define them has them: 0027 widened
-    // 0026's three to five (NOTES §52), and 0028 to six (§53), by name.
+    // 0026's three to five (NOTES §52), 0028 to six (§53), and 0032 to seven
+    // with a message in a group (§58), each by name.
     const kinds = REPORT_KINDS.map((k) => `'${k}'`).join(', ');
-    const latest = older('0028_direct_messages.sql');
+    const latest = older('0032_message_replies_and_group_chats.sql');
     expect(latest).toContain(`check (target_kind in (${kinds}))`);
     expect(SQL).toContain("check (target_kind in ('person', 'message', 'set'))");
     const reasons = REPORT_REASONS.map((r) => `'${r.key}'`).join(', ');

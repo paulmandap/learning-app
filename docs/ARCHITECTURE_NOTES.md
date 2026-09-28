@@ -8389,7 +8389,109 @@ real size. A post's action row is ~131 Views (was ~112); the budget test says
   removes hearts and saves too. No new Home card: nothing here shows anybody
   anything they could not see before.
 
-**Not deployed; not committed. 0031 not applied.**
+### 57.5 Deployed, then 0031 applied, and verified (2026-09-28)
+
+Committed and deployed by the owner as `6a82ffb` — `deploy-status.ts`:
+*production is exactly HEAD*, bundle `84dbba996fe0` matching — then 0031
+pasted (*"done"*).
+
+- **`isolation-test.ts`: 193/193**, all 16 of 0031's new: a heart and a save
+  refused on a post A cannot see, and in B's name; B unable to list who gave a
+  heart on B's own comment, or who saved B's post; hearts counted for B and
+  marked as A's own for A; a reply refused on a hidden post, landing under B's
+  comment, and a reply to a reply landing under the comment above it; a reply
+  refused straight into the table; after a block, A's heart no longer counted
+  for B and A's reply refused; and the replies gone with their comment.
+- **`posts-probe`: 14/14** in the built app — the four that waited on 0031: a
+  heart on a comment, a reply under it, a save shown in Saved, and taking it
+  out again, each checked in the database.
+
+## 58. Step three: the inbox, replies, and group chats (2026-09-28)
+
+The owner: *"start."* Chat and a conversation rebuilt to the picture, and two
+of the extras from §56.2: reply on messages everywhere, and group chats with
+the defaults he took. Migration 0032.
+
+### 58.1 Decisions made here, named to the owner
+
+- **Anyone in a group can add their own friends** (his default said only "you
+  can only add your friends").
+- **Somebody added sees messages from when they joined**, not before — what was
+  said to a smaller group is not handed to whoever joins later. Taken out and
+  added back starts again. The Privacy Policy says so.
+- **When the maker leaves, whoever has been in it longest takes over**; the
+  last one out takes the group with them.
+- **A group needs one friend besides you** (Messenger asks for two). With two
+  test accounts, a three-person minimum could not be tested at all.
+- Leaving, taking somebody out and marking read are **not** gated by the rules:
+  they reach nobody, and a restricted account can always leave.
+
+### 58.2 Migration 0032 — additive, either order
+
+- **Replies:** `reply_to` on `global_messages` and `direct_messages` — **not a
+  key**, so a reply outlives the message it answers and says "Message
+  removed". `send_global_message` and `send_direct_message` gain `p_reply_to
+  default null`, checked to be in the same room; **the old signatures are
+  dropped first** — two side by side and PostgREST refuses to choose — and a
+  call without the argument (the live app's) lands on the new function.
+  `global_chat` and `conversation_messages` gain the quote at the end, every
+  old column as it was; a quote from across a block reads as removed.
+- **Groups:** `group_chats` (owner), `group_members` (joined, read), 
+  `group_messages` (with `reply_to`), reactions and hiding in 0028's shapes.
+  **One rule, `group_message_visible`**: a member, sent since they joined, no
+  block either way — the policies, the four views and reporting all ask it.
+  `group_members` is own-rows-only; everybody else comes through
+  `group_member_people`, with the block filter. Functions: `create_group`,
+  `add_group_members` (friends only, no block, 30 people, 10 new groups a day),
+  `rename_group` and `remove_group_member` (the owner), `leave_group`,
+  `send_group_message` (20 a minute), `edit_group_message`, `mark_group_read`.
+- **Reports and moderation:** `reports_kind_check` gains `group_message` by
+  name; `report_content` and `moderate_remove` each gain one branch.
+- `tests/groups.test.ts` (40) holds the two sends to 0030's versions plus only
+  the reply, `report_content` to 0028's plus only the branch, `moderate_remove`
+  to 0030's plus only the branch — the check 0030 used for its gate — and the
+  rest to the SQL. `destructiveDrops` finds nothing.
+
+### 58.3 On screen
+
+- **The inbox** (Community → Chat): "Search messages" at the top (filters on the
+  phone — name, last line, username, case and accents aside), the Everyone
+  room, then **conversations and groups together, newest first**, as rows
+  with a hairline: a face or the group's badge, the name bold when new, the
+  last line, the time and count on the right. On Chat, **the top bar's
+  pencil** is "New message": a New group row, then friends.
+- **A conversation's header** is their face and name, as in the picture.
+- **Reply** is first in the message sheet (not offered in a closed
+  conversation); "Replying to Maria" over the box with the cursor in it; the
+  quote inside the reply's bubble with a bar down its side.
+- **Groups:** `/groups/new` (a name, friends ticked in `FriendPicker`),
+  `/groups/[id]` (the same `ChatRoom`, names over bubbles, its name and "4
+  people" in the header opening who is in it), `/groups/[id]/info` (rename,
+  add people, take people out, leave — with what leaving means said first).
+  The ✦ is kept off all three. The badge counts group messages too.
+- Delete my data removes group messages, reactions and hides, and leaves every
+  group (`removeMyGroups`). Privacy Policy (still September 28): groups — who
+  sees them, from when, the owner's powers, leaving, not end-to-end encrypted,
+  blocking and reporting inside them — and replies. **A new Home card, "New:
+  group chats and replies"**: something new that other people see of you.
+  `friends-probe` now reads the card's title from `WHATS_NEW` rather than
+  having "New: friends" typed in.
+
+### 58.4 Measured, before 0032
+
+- typecheck clean with and without `.expo/` (the dev server once, for the new
+  routes) · **1525 tests**, 3 skipped · built and booted.
+- `messages-probe` **8/8**, `community-probe` **11/11**, `friends-probe`
+  **21/21**, `posts-probe` **14/14**, `scroll-probe` **10/10** — all against the
+  database without 0032, which is what proves the order does not matter.
+- `isolation-test.ts` **192/193**: the one failure is `report_content (direct
+  message) — Too many reports today`. Measured: test account B had made **20
+  reports in the last day, all marked probe reports** — the daily limit doing
+  its job. The owner's cleanup SQL (`… like '%probe%not a real report'`)
+  clears it. `checkRepliesAndGroups` (22 checks) says "not present" until 0032.
+- `scripts/groups-probe.ts` (new) stops with "is migration 0032 applied?".
+
+**Not deployed; not committed. 0032 not applied.**
 
 
 ## Sources

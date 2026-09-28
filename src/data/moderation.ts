@@ -131,7 +131,7 @@ export async function isModerator(db: Db = supabase): Promise<boolean> {
 /** A row of `report_queue` (0030). */
 export interface QueuedReport {
   id: string;
-  target_kind: 'person' | 'message' | 'set' | 'post' | 'comment' | 'direct_message';
+  target_kind: 'person' | 'message' | 'set' | 'post' | 'comment' | 'direct_message' | 'group_message';
   target_id: string;
   reason: string;
   details: string | null;

@@ -79,12 +79,14 @@ reply on messages, reply and like on comments, search for sets and posts with
 recent searches, bookmarks, share profile — with the defaults in NOTES §56.2.
 **Step one of five is built** (NOTES §56.3): one `Sheet` for everything
 temporary, `SheetActions`, `TopBar`, `UnderlineTabs`, `Rows`, and icons
-everywhere — deployed as `95f1018`. **Step two is built** (NOTES §57): the feed
+everywhere — deployed as `95f1018`. **Step two is live** (NOTES §57): the feed
 and a post's page to the picture, replies, hearts on comments, saved posts —
-**migration 0031, written and not applied**; additive, either order. After the
-owner applies it: `isolation-test.ts` (0031's section says "not present"
-until then) and `posts-probe` (its reply/heart/save steps likewise). **Next:
-step three — Chat, conversations, reply on messages, group chats.** `/icons`
+`6a82ffb` and migration 0031, verified. **Step three is built** (NOTES §58):
+the inbox and a conversation to the picture, reply on messages everywhere,
+group chats — **migration 0032, written and not applied**; additive, either
+order. After it: clear the probe reports (test account B hit the 20-a-day
+report limit, §58.4), then `isolation-test.ts` and `scripts/groups-probe.ts`.
+**Next: step four — Profile, a person's page, bio, share profile, search.** `/icons`
 is a check page; delete it when the redesign is done.
 
 Still his to do: try `/moderation` (a button on his Profile) on the probe
@@ -93,12 +95,16 @@ messages (there is no server to send them on insert); searching posts (search
 finds people only); realtime instead of polling (§46.5's reasoning stands);
 end-to-end encryption of messages (the Privacy Policy says they are not).
 
-### Migrations — 31; 0031 written and waiting
+### Migrations — 32; 0032 written and waiting
 
-**0031 (replies, hearts on comments, saved posts — NOTES §57) is written and
-waiting.** Additive: a column, two tables, two functions, and
-`post_comment_people` recreated with three more columns. Safe before or after
-the code deploys — the app falls back to the old columns on 42703.
+**0032 (reply on messages, group chats — NOTES §58) is written and waiting.**
+Additive: recreates two sends with a reply argument (old signatures dropped in
+the same file), two views with the quote, and adds the group tables,
+functions and views. Safe before or after the code deploys.
+
+**0031 (replies, hearts on comments, saved posts — NOTES §57) was applied by
+the owner on 2026-09-28, after deploying `6a82ffb`,** and verified the same
+day: isolation **193/193**, `posts-probe` **14/14**.
 
 **0030 (community rules and moderation — NOTES §55) was applied by the owner on
 2026-09-28, after deploying first,** and verified the same day: isolation
@@ -747,6 +753,7 @@ npx tsx --env-file=.env scripts/finish-lines-probe.ts [--out <dir>]     # what N
 npx tsx --env-file=.env scripts/community-probe.ts [--out <dir>]        # a shared set seen by the OTHER person, in the built app: listed, read-only, dealt, chatted. NEEDS 0021. NEVER RUN YET
 npx tsx --env-file=.env scripts/scroll-probe.ts --height 420            # 7 screens now, including Community's Chat pane — the one layout that is not a `Screen`
 npx tsx --env-file=.env scripts/messages-probe.ts [--out <dir>]         # the badge, the inbox, open and read, reply, Seen, "Message <name>", a closed conversation — in the built app as A (NEEDS 0028)
+npx tsx --env-file=.env scripts/groups-probe.ts [--out <dir>]           # a group from Chat's pencil, a message, a reply to B's, a rename, leaving it to B — in the built app as A (NEEDS 0032)
 npx tsx --env-file=.env scripts/posts-probe.ts [--out <dir>]            # feed, photo, react, comment, compose with a set for everyone, flip it in the feed, edit, delete — in the built app as A, the database checked after each step (NEEDS 0027)
 npx tsx --env-file=.env scripts/friends-probe.ts [--out <dir>]          # username, a request, search, accept, block, unblock, report — in the built app as A, the database checked after each step (NEEDS 0026; leaves one marked report)
 npx tsx --env-file=.env scripts/drag-probe.ts [--shot <file.png>]       # hold a set and drag it into a folder, with a real mouse and a real finger; asks the database whether it moved
