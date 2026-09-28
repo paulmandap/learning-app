@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, Chip, LoadingState, Notice, Screen, Title } from '../src/ui/components';
+import { Body, Button, Card, Chip, LoadingState, Notice, Screen, TopBar } from '../src/ui/components';
 import { StatePanel } from '../src/ui/states';
 import { PersonAvatar } from '../src/ui/avatar';
 import { GLYPH, Icon } from '../src/ui/glyphs';
@@ -88,7 +88,7 @@ export default function Moderation() {
 
   return (
     <Screen>
-      <Title>Reports</Title>
+      <TopBar title="Reports" />
       <Text style={[type.caption, { color: t.textMuted }]}>
         What you do here is between you and them: the person who reported is never named to anybody.
       </Text>

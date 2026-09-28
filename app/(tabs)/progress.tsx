@@ -1,7 +1,7 @@
 import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, LoadingState, Notice, Screen, TitleRow } from '../../src/ui/components';
+import { Body, Button, Card, LoadingState, Notice, Screen, TopBar } from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
 import { GrowBar } from '../../src/ui/charts';
 import { radius, space, type, useTheme } from '../../src/ui/theme';
@@ -89,7 +89,7 @@ export default function Progress() {
   if (isLoading) {
     return (
       <Screen>
-        <TitleRow title="Progress" />
+        <TopBar title="Progress" />
         <LoadingState />
       </Screen>
     );
@@ -100,7 +100,7 @@ export default function Progress() {
   if (data.totalAttempts === 0) {
     return (
       <Screen>
-        <TitleRow title="Progress" />
+        <TopBar title="Progress" />
         {/* Names the blocks it will fill in, in the words those blocks
             actually use. It said "what has stuck" and "worth another look"
             after those headings had been rewritten, which is how an empty
@@ -122,7 +122,7 @@ export default function Progress() {
 
   return (
     <Screen>
-      <TitleRow title="Progress" />
+      <TopBar title="Progress" />
       <Streak data={data} />
       {/* Right after your own streak (NOTES §54): how you are going first,
           then the company you keep while you do it. */}
@@ -304,7 +304,7 @@ function Mastery({ data }: { data: DashboardData }) {
 
   return (
     <Card>
-      <Body>What you know</Body>
+      <Body strong>What you know</Body>
 
       <View
         style={{
@@ -407,7 +407,7 @@ function Forecast({ data }: { data: DashboardData }) {
 
   return (
     <Card>
-      <Body>Coming up this week</Body>
+      <Body strong>Coming up this week</Body>
 
       <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.xs }}>
         {/* The count, up the side. */}
@@ -509,7 +509,7 @@ function Sections({ data }: { data: DashboardData }) {
   if (strong.length === 0 && weak.length === 0) {
     return (
       <Card>
-        <Body>How each part is going</Body>
+        <Body strong>How each part is going</Body>
         <Body muted>
           {tooEarly > 0
             ? // Says WHY it is empty. Without this the block looks broken to
@@ -524,7 +524,7 @@ function Sections({ data }: { data: DashboardData }) {
 
   return (
     <Card>
-      <Body>How each part is going</Body>
+      <Body strong>How each part is going</Body>
       <SectionList heading="Going well" tone="ok" sections={strong} trends={data.trends} />
       <SectionList heading="Worth another look" tone="warn" sections={weak} trends={data.trends} />
       {tooEarly > 0 ? (
@@ -711,7 +711,7 @@ function Space({ data }: { data: DashboardData }) {
 
   return (
     <Card>
-      <Body>{worthMentioning ? 'Running low on space' : 'Space'}</Body>
+      <Body strong>{worthMentioning ? 'Running low on space' : 'Space'}</Body>
 
       <View
         style={{

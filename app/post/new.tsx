@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Image, Pressable, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Card, Label, LoadingState, Notice, PillButton, Screen, Title } from '../../src/ui/components';
-import { Segment } from '../../src/ui/segment';
-import { PostPhoto } from '../../src/ui/post';
+import { Body, Label, LoadingState, Notice, Rows } from '../../src/ui/components';
+import { Sheet } from '../../src/ui/sheet';
+import { MyAvatar } from '../../src/ui/avatar';
+import { RowButton } from '../../src/ui/people';
 import { petFrame } from '../../src/ui/pet';
-import { GLYPH } from '../../src/ui/glyphs';
+import { EmojiPanel } from '../../src/ui/nomi';
+import { GLYPH, Icon, type IconName } from '../../src/ui/glyphs';
 import { imageSize, pickImages, shrinkImage } from '../../src/ui/shrink-image';
-import { INPUT_FONT_SIZE, radius, space, type, useTheme } from '../../src/ui/theme';
+import { INPUT_FONT_SIZE, NO_FOCUS_RING, radius, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
 import { createPost, editPost, getPost, PostsUnavailableError, type PostPhoto as Photo } from '../../src/data/posts';
 import { getPublicSet, listPublicSets } from '../../src/data/community';
 import { getAppSnapshot } from '../../src/data/nomi';
@@ -25,28 +27,38 @@ import {
   validateDraft,
   type Audience,
 } from '../../src/core/posts';
+import { appendEmoji } from '../../src/core/emoji';
 import { petStage, toPetSpecies } from '../../src/core/pet';
 
 /**
- * Write a post, or change one (NOTES §52).
+ * Write a post, or change one (NOTES §52) — a sheet over whatever opened it
+ * since §60, as in the owner's picture: Cancel · New post · Post along the top,
+ * your face and who will see it, the words with what is attached inside the
+ * same box, and Photo · Flashcard set · Streak · Emoji along the bottom.
  *
  * Words, and at most one of a photo, a shared set or your streak — 0027's
- * `posts_one_attachment`. Friends see it unless you say everyone, and the
- * choice is on screen above the button with what it means in a sentence, so
- * nobody posts to everyone by not noticing.
+ * `posts_one_attachment`. Friends see it unless you say everyone, and what the
+ * choice means is on screen under it, in a sentence, so nobody posts to
+ * everyone by not noticing.
  *
  * Opened three ways: from the feed; with `?set=<id>` from a set's ⋯ ("Post
  * about this set"); with `?streak=1` from Progress on the day the pet grows.
  * `?edit=<id>` changes a post's words and who sees it — its photo, set or
  * streak stay as they were posted.
+ *
+ * Still a route, so every way in keeps working: registered as a transparent
+ * modal (app/_layout.tsx), which on the web leaves the screen underneath drawn
+ * for the Sheet to dim and blur. Tapping outside with something written asks
+ * first, rather than throwing the words away.
  */
 
 type Attachment = 'none' | 'photo' | 'set' | 'streak';
 
-const AUDIENCE_OPTIONS = AUDIENCES.map((a) => ({ key: a, label: audienceLabel(a) }));
-
 /** A little under the database's 2 MB: shrunk, a phone photo is 150–300 KB. */
 const PHOTO_QUALITY = 0.82;
+
+/** The photo's preview in the box — a thumbnail, as in the picture, not the post's full width. */
+const THUMB_SIDE = 180;
 
 export default function NewPost() {
   const t = useTheme();
@@ -59,11 +71,15 @@ export default function NewPost() {
 
   const [body, setBody] = useState('');
   const [audience, setAudience] = useState<Audience>(DEFAULT_AUDIENCE);
+  const [choosingAudience, setChoosingAudience] = useState(false);
   const [attachment, setAttachment] = useState<Attachment>(
     params.streak === '1' ? 'streak' : typeof params.set === 'string' ? 'set' : 'none',
   );
   const [setId, setSetId] = useState<string | null>(typeof params.set === 'string' ? params.set : null);
   const [photo, setPhoto] = useState<(Photo & { preview: string }) | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [askDiscard, setAskDiscard] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,8 +108,9 @@ export default function NewPost() {
   const { data: snapshot } = useQuery({ queryKey: ['nomi-brain'], queryFn: () => getAppSnapshot() });
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
   const streak = snapshot?.streak ?? 0;
+  const pet = toPetSpecies(profile?.pet);
 
-  // Let go of a photo preview when it is replaced or the screen closes.
+  // Let go of a photo preview when it is replaced or the sheet closes.
   useEffect(() => () => {
     if (photo) URL.revokeObjectURL(photo.preview);
   }, [photo]);
@@ -112,10 +129,29 @@ export default function NewPost() {
     }
   }
 
+  function removeAttachment() {
+    setAttachment('none');
+    setPhoto(null);
+    setSetId(null);
+  }
+
   function leave() {
     if (navigation.canGoBack()) router.back();
     else router.replace('/community');
   }
+
+  // Something written or a photo picked is worth a question before it goes.
+  const dirty = editId
+    ? !!editing.data && (body !== editing.data.body || audience !== editing.data.audience)
+    : body.trim().length > 0 || photo !== null;
+  function close() {
+    if (dirty && !busy) setAskDiscard(true);
+    else leave();
+  }
+
+  const nothingYet = !editId && body.trim().length === 0 && attachment === 'none';
+  const waitingForSet = !editId && attachment === 'set' && !setId;
+  const noStreak = !editId && attachment === 'streak' && streak === 0;
 
   async function submit() {
     setBusy(true);
@@ -151,128 +187,394 @@ export default function NewPost() {
     }
   }
 
+  const header = (
+    <View style={{ gap: space.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: TOUCH_TARGET }}>
+        <View style={{ flex: 1, alignItems: 'flex-start' }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            onPress={close}
+            disabled={busy}
+            hitSlop={8}
+            style={{ minHeight: TOUCH_TARGET, justifyContent: 'center' }}
+          >
+            <Text style={[type.body, { color: t.text }]}>Cancel</Text>
+          </Pressable>
+        </View>
+        <Text style={[type.bodyStrong, { color: t.text }]} accessibilityRole="header">
+          {editId ? 'Edit post' : 'New post'}
+        </Text>
+        <View style={{ flex: 1, alignItems: 'flex-end' }}>
+          <RowButton
+            label={editId ? 'Save' : 'Post'}
+            primary
+            onPress={() => void submit()}
+            busy={busy}
+            disabled={nothingYet || waitingForSet || noStreak}
+          />
+        </View>
+      </View>
+      {askDiscard ? (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: space.sm,
+            padding: space.md,
+            borderRadius: radius.md,
+            backgroundColor: t.card,
+          }}
+        >
+          <Text style={[type.body, { color: t.text, flex: 1, minWidth: 140 }]}>
+            {editId ? 'Throw away your changes?' : 'Throw away this post?'}
+          </Text>
+          <RowButton label="Keep writing" onPress={() => setAskDiscard(false)} />
+          <RowButton label="Throw away" primary onPress={leave} />
+        </View>
+      ) : null}
+    </View>
+  );
+
   if (editId && editing.isLoading) {
     return (
-      <Screen>
+      <Sheet tall onClose={leave} header={header}>
         <LoadingState />
-      </Screen>
+      </Sheet>
     );
   }
 
-  return (
-    <Screen>
-      <Title>{editId ? 'Edit post' : 'New post'}</Title>
-
-      <TextInput
-        value={body}
-        onChangeText={setBody}
-        placeholder={attachment === 'streak' ? 'Say something about it (optional)' : 'What do you want to share?'}
-        placeholderTextColor={t.textMuted}
-        multiline
-        maxLength={POST_MAX_LENGTH}
-        autoFocus={attachment === 'none' && !editId}
+  const footer = editId ? null : (
+    <>
+      {emojiOpen ? <EmojiPanel onPick={(e) => setBody((b) => appendEmoji(b, e))} /> : null}
+      <View
         style={{
-          minHeight: 120,
-          padding: space.md,
+          flexDirection: 'row',
+          borderRadius: radius.md,
           borderWidth: 1,
           borderColor: t.border,
-          borderRadius: radius.sm,
           backgroundColor: t.card,
-          color: t.text,
-          // Never under 16, or iOS zooms the page and stays zoomed.
-          fontSize: INPUT_FONT_SIZE,
-          textAlignVertical: 'top',
+          paddingVertical: space.xs,
         }}
-      />
+      >
+        <Tool icon="photo" label="Photo" name="Add a photo" on={attachment === 'photo'} onPress={() => void choosePhoto()} />
+        <Tool
+          icon="set"
+          label="Flashcard set"
+          name="Add a flashcard set"
+          on={attachment === 'set'}
+          onPress={() => {
+            setPhoto(null);
+            setAttachment('set');
+          }}
+        />
+        <Tool
+          icon="streak"
+          label="Streak"
+          name="Add your streak"
+          on={attachment === 'streak'}
+          onPress={() => {
+            setPhoto(null);
+            setSetId(null);
+            setAttachment('streak');
+          }}
+        />
+        <Tool icon="emoji" label="Emoji" name="Emoji" on={emojiOpen} onPress={() => setEmojiOpen((v) => !v)} />
+      </View>
+    </>
+  );
 
-      {/* ------------------------------------------------ the attachment -- */}
-      {editId ? (
-        editing.data && (editing.data.image_path || editing.data.set_id || editing.data.streak_days) ? (
-          <Body muted>The photo, set or streak stays as it was posted.</Body>
-        ) : null
-      ) : (
-        <>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-            <PillButton label={attachment === 'photo' ? 'Change photo' : 'Photo'} onPress={choosePhoto} />
-            <PillButton label="A shared set" onPress={() => setAttachment('set')} />
-            <PillButton label="My streak" onPress={() => setAttachment('streak')} />
-            {attachment !== 'none' ? (
-              <PillButton
-                label="Remove"
-                onPress={() => {
-                  setAttachment('none');
-                  setPhoto(null);
-                  setSetId(null);
-                }}
-              />
-            ) : null}
-          </View>
+  const name = profile?.display_name?.trim() || 'You';
 
-          {attachment === 'photo' && photo ? (
-            <PostPhoto uri={photo.preview} width={photo.width} height={photo.height} />
-          ) : null}
+  return (
+    <Sheet tall onClose={close} header={header} footer={footer}>
+      {/* ------------------------------------------ who you are, who sees it -- */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+        <MyAvatar size={44} />
+        <View style={{ flex: 1, alignItems: 'flex-start', gap: space.xs }}>
+          <Text style={[type.bodyStrong, { color: t.text }]} numberOfLines={1}>
+            {name}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Who can see it: ${audienceLabel(audience)}`}
+            accessibilityState={{ expanded: choosingAudience }}
+            onPress={() => setChoosingAudience((v) => !v)}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: space.xs,
+              minHeight: 32,
+              paddingHorizontal: space.sm + space.hair,
+              borderRadius: radius.pill,
+              borderWidth: 1,
+              borderColor: t.border,
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <Icon name={audience === 'everyone' ? 'everyone' : 'people'} color={t.text} size={16} />
+            <Text style={[type.label, { color: t.text, fontWeight: '600' }]}>{audienceLabel(audience)}</Text>
+            <Icon name="down" color={t.textMuted} size={14} />
+          </Pressable>
+        </View>
+      </View>
+      {/* What the choice means, always — nobody posts to everyone unnoticed. */}
+      <Text style={[type.caption, { color: t.textMuted, marginTop: -space.sm }]}>{audienceDetail(audience)}</Text>
 
-          {attachment === 'set' ? (
-            <Card>
-              <Label>Which set?</Label>
-              {chosenSet ? (
-                <Body strong>{chosenSet.title}</Body>
-              ) : null}
-              {mySets.length === 0 && !chosenSet ? (
-                <Body muted>
-                  {`You haven't shared a set yet. Open one of your sets and choose "Share with everyone" from its ${GLYPH.more} first.`}
-                </Body>
-              ) : null}
-              {mySets
-                .filter((s) => s.id !== setId)
-                .map((s) => (
-                  <Pressable
-                    key={s.id}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: s.id === setId }}
-                    onPress={() => setSetId(s.id)}
-                    style={({ pressed }) => ({ paddingVertical: space.sm, opacity: pressed ? 0.6 : 1 })}
-                  >
-                    <Text style={[type.body, { color: t.accent }]}>{s.title}</Text>
-                  </Pressable>
-                ))}
-            </Card>
-          ) : null}
+      {choosingAudience ? (
+        <View accessibilityRole="radiogroup">
+          <Rows card>
+            {AUDIENCES.map((a) => {
+              const chosen = a === audience;
+              return (
+                <Pressable
+                  key={a}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: chosen }}
+                  accessibilityLabel={audienceLabel(a)}
+                  onPress={() => {
+                    setAudience(a);
+                    setChoosingAudience(false);
+                  }}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: space.md,
+                    minHeight: TOUCH_TARGET + space.sm,
+                    paddingHorizontal: space.lg,
+                    paddingVertical: space.sm,
+                    backgroundColor: pressed ? t.bg : 'transparent',
+                  })}
+                >
+                  <Icon name={a === 'everyone' ? 'everyone' : 'people'} color={t.text} size={22} />
+                  <View style={{ flex: 1, gap: space.hair }}>
+                    <Text style={[chosen ? type.bodyStrong : type.body, { color: t.text }]}>{audienceLabel(a)}</Text>
+                    <Text style={[type.caption, { color: t.textMuted }]}>{audienceDetail(a)}</Text>
+                  </View>
+                  {/* A mark as well as the weight — never one signal alone. */}
+                  <View style={{ width: 22 }}>{chosen ? <Icon name="check" color={t.accent} size={22} /> : null}</View>
+                </Pressable>
+              );
+            })}
+          </Rows>
+        </View>
+      ) : null}
 
-          {attachment === 'streak' ? (
-            <Card>
+      {/* ---------------------------------- the words, and what is attached -- */}
+      <View
+        style={{
+          gap: space.md,
+          padding: space.md,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          // The box's edge is the focus mark, so the browser's own ring is off.
+          borderColor: focused ? t.accent : t.border,
+          backgroundColor: t.card,
+        }}
+      >
+        <TextInput
+          value={body}
+          onChangeText={setBody}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder={attachment === 'streak' ? 'Say something about it (optional)' : 'What do you want to share?'}
+          placeholderTextColor={t.textMuted}
+          multiline
+          maxLength={POST_MAX_LENGTH}
+          autoFocus={attachment === 'none' && !editId}
+          style={[
+            {
+              minHeight: 120,
+              color: t.text,
+              // Never under 16, or iOS zooms the page and stays zoomed.
+              fontSize: INPUT_FONT_SIZE,
+              textAlignVertical: 'top',
+            },
+            NO_FOCUS_RING,
+          ]}
+        />
+
+        {attachment === 'photo' && photo ? (
+          <Attached onRemove={removeAttachment} what="the photo">
+            <Image
+              source={{ uri: photo.preview }}
+              style={{
+                width: photo.width >= photo.height ? THUMB_SIDE : (THUMB_SIDE * photo.width) / photo.height,
+                height: photo.width >= photo.height ? (THUMB_SIDE * photo.height) / photo.width : THUMB_SIDE,
+                borderRadius: radius.md,
+              }}
+              accessibilityLabel="The photo you picked"
+            />
+          </Attached>
+        ) : null}
+
+        {attachment === 'set' && chosenSet ? (
+          <Attached onRemove={removeAttachment} what="the set">
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: space.md,
+                padding: space.md,
+                paddingRight: space.xl + space.md,
+                borderRadius: radius.md,
+                backgroundColor: t.bg,
+              }}
+            >
+              <Icon name="set" color={t.accent} size={22} />
+              <View style={{ flex: 1 }}>
+                <Text style={[type.bodyStrong, { color: t.text }]} numberOfLines={2}>
+                  {chosenSet.title}
+                </Text>
+                <Text style={[type.caption, { color: t.textMuted }]}>{`${chosenSet.cards} card${chosenSet.cards === 1 ? '' : 's'}`}</Text>
+              </View>
+            </View>
+          </Attached>
+        ) : null}
+
+        {attachment === 'streak' ? (
+          <Attached onRemove={removeAttachment} what="your streak">
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: space.md,
+                padding: space.md,
+                // Room for the ✕, so it never sits on the words.
+                paddingRight: space.xl + space.md,
+                borderRadius: radius.md,
+                backgroundColor: t.bg,
+              }}
+            >
               {streak > 0 ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.lg }}>
-                  <Image
-                    source={petFrame(toPetSpecies(profile?.pet), petStage(streak)?.index ?? 0)}
-                    style={{ width: 72, height: 72 }}
-                    resizeMode="contain"
-                  />
-                  <Body>{streakLine(streak, toPetSpecies(profile?.pet))}</Body>
-                </View>
+                <>
+                  <Image source={petFrame(pet, petStage(streak)?.index ?? 0)} style={{ width: 64, height: 64 }} resizeMode="contain" />
+                  <Text style={[type.body, { color: t.text, flex: 1 }]}>{streakLine(streak, pet)}</Text>
+                </>
               ) : (
-                <Body muted>No streak yet — answer a card today and there will be one to share.</Body>
+                <Text style={[type.body, { color: t.textMuted, flex: 1 }]}>
+                  No streak yet — answer a card today and there will be one to share.
+                </Text>
               )}
-            </Card>
-          ) : null}
-        </>
-      )}
-
-      {/* ------------------------------------------------ who sees it -- */}
-      <View style={{ gap: space.sm }}>
-        <Label>Who can see it</Label>
-        <Segment value={audience} options={AUDIENCE_OPTIONS} onChange={setAudience} role="radio" />
-        <Body muted>{audienceDetail(audience)}</Body>
+            </View>
+          </Attached>
+        ) : null}
       </View>
 
+      {/* Which set, when a set is wanted and none is picked yet. */}
+      {waitingForSet ? (
+        <View style={{ gap: space.xs }}>
+          <Label>Which set?</Label>
+          {mySets.length === 0 ? (
+            <Body muted>
+              {`You haven't shared a set yet. Open one of your sets and choose "Share with everyone" from its ${GLYPH.more} first.`}
+            </Body>
+          ) : (
+            <Rows card>
+              {mySets.map((s) => (
+                <Pressable
+                  key={s.id}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: false }}
+                  accessibilityLabel={s.title}
+                  onPress={() => setSetId(s.id)}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: space.md,
+                    minHeight: TOUCH_TARGET,
+                    paddingHorizontal: space.lg,
+                    paddingVertical: space.sm,
+                    backgroundColor: pressed ? t.bg : 'transparent',
+                  })}
+                >
+                  <Icon name="set" color={t.accent} size={20} />
+                  <Text style={[type.body, { color: t.text, flex: 1 }]}>{s.title}</Text>
+                  <Text style={[type.caption, { color: t.textMuted }]}>{`${s.cards} card${s.cards === 1 ? '' : 's'}`}</Text>
+                </Pressable>
+              ))}
+            </Rows>
+          )}
+        </View>
+      ) : null}
+
+      {editId && editing.data && (editing.data.image_path || editing.data.set_id || editing.data.streak_days) ? (
+        <Body muted>The photo, set or streak stays as it was posted.</Body>
+      ) : null}
+
       {error ? <Notice tone="error">{error}</Notice> : null}
-      <Button
-        label={editId ? 'Save' : 'Post'}
-        onPress={submit}
-        busy={busy}
-        disabled={attachment === 'set' && !setId && !editId}
-      />
-      <Button label="Cancel" variant="secondary" onPress={leave} disabled={busy} />
-    </Screen>
+    </Sheet>
+  );
+}
+
+/** What is attached, with a ✕ in its corner to take it off again — the picture's photo. */
+function Attached({ children, onRemove, what }: { children: ReactNode; onRemove: () => void; what: string }) {
+  const t = useTheme();
+  return (
+    <View style={{ alignSelf: 'flex-start', maxWidth: '100%' }}>
+      {children}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Remove ${what}`}
+        onPress={onRemove}
+        hitSlop={8}
+        style={{
+          position: 'absolute',
+          top: space.xs,
+          right: space.xs,
+          width: 28,
+          height: 28,
+          borderRadius: 14,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        }}
+      >
+        <Icon name="close" color="#ffffff" size={16} />
+      </Pressable>
+    </View>
+  );
+}
+
+/** One of the four along the bottom: an icon, its name under it, the accent while it is the one in use. */
+function Tool({
+  icon,
+  label,
+  name,
+  on,
+  onPress,
+}: {
+  icon: IconName;
+  label: string;
+  /** What a screen reader says — "Add a photo", not just "Photo". */
+  name: string;
+  on: boolean;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  const color = on ? t.accent : t.text;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={name}
+      accessibilityState={{ selected: on }}
+      aria-selected={on}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: space.hair,
+        minHeight: TOUCH_TARGET + space.md,
+        opacity: pressed ? 0.6 : 1,
+      })}
+    >
+      <Icon name={icon} color={color} size={22} />
+      <Text style={[type.caption, { color, fontWeight: on ? '700' : '400' }]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }

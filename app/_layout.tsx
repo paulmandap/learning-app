@@ -255,7 +255,13 @@ function RootNavigator() {
         <Stack.Screen name="person/[id]" options={{ title: '', ...backable }} />
         {/* Writing a post, and one post with its comments (NOTES §52). Tasks,
             not places: pushed with their own back control. */}
-        <Stack.Screen name="post/new" options={{ title: '', ...backable }} />
+        {/* A sheet over whatever opened it — the feed, a set, Progress (NOTES
+            §60, the owner's picture). On the web a transparent modal leaves the
+            screen underneath drawn; the Sheet dims and blurs it. */}
+        <Stack.Screen
+          name="post/new"
+          options={{ presentation: 'transparentModal', headerShown: false, animation: 'none', contentStyle: { backgroundColor: 'transparent' } }}
+        />
         <Stack.Screen name="post/[id]" options={{ title: '', ...backable }} />
         {/* Search (NOTES §59): its own box and Cancel at the top, so no header. */}
         <Stack.Screen name="search" options={{ headerShown: false }} />
@@ -263,8 +269,6 @@ function RootNavigator() {
         <Stack.Screen name="edit-profile" options={{ title: '', ...backable }} />
         {/* A shared profile link, /u/<username> (§59): finds the person, opens their page. */}
         <Stack.Screen name="u/[username]" options={{ title: '', ...backable }} />
-        {/* Every icon, for photographing while the redesign is built (§56.2). */}
-        <Stack.Screen name="icons" options={{ title: '', ...backable }} />
         {/* The Everyone room and a conversation with a friend (NOTES §53):
             pushed rooms, each titled by the screen. */}
         <Stack.Screen name="messages/everyone" options={{ title: 'Everyone', ...backable }} />

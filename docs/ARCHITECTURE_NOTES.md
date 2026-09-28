@@ -8616,6 +8616,107 @@ profile, and search for sets and posts with recent searches. Migration 0033.
 - `isolation-test.ts` **212/212**; `checkBio` (7 checks) says "not present"
   until 0033.
 
+### 59.5 Deployed, then 0033 applied, and verified (2026-09-28)
+
+Committed and deployed by the owner as `fde3208` — *production is exactly
+HEAD*, bundle `c0a5b16024e6` matching — then 0033 pasted and the probe reports
+cleared (*"done. go with step 5"*).
+
+- **`isolation-test.ts`: 219/219**, all 7 of 0033's: a bio written by B and
+  read by A; one of 151 characters refused by the database (23514); A unable
+  to write B's; hidden both ways across a block; kept in a report's copy;
+  refused with `RULES` before the rules are agreed to; cleared without them.
+- `friends-probe` **23/24**: the bio saved from Edit profile and read by B,
+  and shown under the name on Profile. **The one failure was the isolation
+  test's, not the app's**: `checkBio` had A report B as a person, and a second
+  open report on the same thing is the first one handed back — so the probe's
+  own report (A reporting B) landed on the isolation test's, and its check for
+  a row with its own words found none. `checkBio` now has B report A. The
+  report it left stays open until the cleanup SQL runs.
+- `posts-probe` **14/14** (Saved through Profile's tab).
+
+## 60. Step five: Progress, the new post as a sheet, the rules and report sheets (2026-09-28)
+
+The owner: *"go with step 5."* The last of §56's five. No database change.
+
+### 60.1 The new post is a sheet over what opened it
+
+- **Still a route** (`/post/new`, with `?set=`, `?streak=1`, `?edit=`), so the
+  feed's box, a set's ⋯, Progress's "Share it with your friends" and a post's
+  Edit all keep working. **Registered as a `transparentModal`**: on the web,
+  Expo Router's stack leaves the screen underneath drawn when the next one is
+  a transparent modal (measured in its `NativeStackView`, the
+  `TRANSPARENT_PRESENTATIONS` check), so the `Sheet` dims and blurs the page
+  that opened it — the picture.
+- **To the picture:** Cancel · New post · Post (a pill, dimmed until there is
+  something to post) along the top; your face and name with **who sees it as a
+  chip** — Friends ▾ — opening the two choices as rows with a tick; the words
+  and what is attached **in one box** (a photo as a thumbnail, a set as a
+  tile, your streak with the pet), each with a ✕; and **Photo · Flashcard set
+  · Streak · Emoji** along the bottom, the one in use in the accent. Emoji
+  opens the same panel as Nomi's chat.
+- **What the choice means stays on screen under the chip**, not only inside
+  it — §52's rule that nobody posts to everyone by not noticing.
+- **Tapping outside with something written asks first** ("Throw away this
+  post?"), where before a stray tap would have lost the words.
+- **`Sheet` gained `header`, `footer` and `tall`**: the header and footer sit
+  outside what scrolls. The rules' "I agree" and the report's "Send report"
+  moved into a footer too — seven rules had pushed "I agree" below the fold on
+  a phone.
+- `RowButton` gained `disabled`. `posts-probe` opens the composer from the
+  set's ⋯ now, as a person does: a sheet is drawn outside `#root`, which the
+  harness's `goto` waits on, so opening `/post/new` cold timed out (the app
+  itself shows the sheet over a dimmed page then). After Post it returns to
+  the set. Its edit step waited for "Edit post", which the header says while
+  the post is still loading, and typed into nothing; it waits for the box to
+  hold the post's words now (§19.7 again).
+
+### 60.2 Progress
+
+- The shared **`TopBar`** in all three of its branches (the test that holds
+  the three moved with it).
+- **The pet card to the picture:** the number large, "in a row" under it, a
+  rounded bar in the accent, then "N more days and it grows again".
+- **Friends' streaks as rows** with a hairline between them, a flame in the
+  streak's amber beside each streak, "Best 30" under it, your row outlined
+  (and shaded — never one signal alone); "Your friends see your streak here."
+  and **Change in Settings** on one line at the end. **Find friends goes to
+  search** (§59), not to Profile.
+- Every card's heading in the same weight: Friends' streaks, What you know,
+  Coming up this week, How each part is going, Space. What you know keeps its
+  real four columns — the picture's four were Gemini's invention (§56.1).
+
+### 60.3 The rules, reporting, blocking, and the last two panels
+
+- **The rules as rows with an icon on a tile**, the way a set is listed —
+  heart, an eye struck through, a lock, a person, a no-entry sign, a set, a
+  warning sign. The numbers they had were an order the rules do not have.
+  `RULE_ICONS` in `src/ui/rules.tsx`; a test holds every rule to a picture.
+- The report sheet: the warning sign beside its title, the reasons as the
+  shared rows with the tick on the right, **Send report and Cancel in the
+  footer**. The block sheet: the no-entry sign beside its title.
+- **Nomi's chat history and the folder panel are the `Sheet` now** — the last
+  two panels that drew their own overlay, older than the redesign. The history
+  says "Open now" under the open chat (it was a shade alone) and deletes with
+  a bin icon; the folder keeps its name and counts as the sheet's header.
+  `tests/redesign.test.ts` now allows no `<Modal` anywhere but the Sheet and
+  the privacy notice.
+- **Reports** (the moderator's screen) under the shared `TopBar`.
+- **`/icons` is gone**, with the redesign done (§56.2).
+
+### 60.4 Measured
+
+- typecheck clean · **1563 tests**, 3 skipped · built and booted.
+- `posts-probe` **14/14**, `messages-probe` **8/8**, `groups-probe` **7/7**,
+  `community-probe` **11/11**, `scroll-probe` **10/10**, isolation
+  **219/219**.
+- `friends-probe` **23/24** — the report left open by §59.5's first
+  `checkBio`, not the app; it passes once the cleanup SQL has run.
+- Photographed at 393 px, dark and light: the composer over the blurred feed
+  (and with the chooser, emoji and streak open), Progress, the rules page and
+  sheet, the report sheet, Nomi's chats, and a folder (made for the photograph
+  on the test account and deleted after).
+
 
 ## Sources
 

@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Body, Button, Notice } from './components';
+import { Body, Button, Notice, Rows } from './components';
 import { Sheet, SheetTitle } from './sheet';
+import { Icon, type IconName } from './glyphs';
 import { TextLink } from './legal';
-import { space, type, useTheme } from './theme';
+import { radius, space, type, useTheme } from './theme';
 import { COMMUNITY_RULES, RULES_CONSEQUENCES, ruleTitle } from '../core/rules';
 import {
   acceptCommunityRules,
@@ -16,26 +17,54 @@ import {
 import { useSessionStore } from '../data/session';
 
 /**
+ * Each rule's picture, beside it (NOTES §60). Every key in `COMMUNITY_RULES`
+ * has one — tests/redesign.test.ts holds the two together.
+ */
+export const RULE_ICONS: Record<string, IconName> = {
+  kind: 'heart',
+  clean: 'hide',
+  private: 'lock',
+  yourself: 'person',
+  spam: 'block',
+  yours: 'set',
+  honest: 'report',
+};
+
+/**
  * The community rules on screen (NOTES §55).
  *
- * Numbered, one line of title and one of detail each — seven things a person
- * can hold in their head, not a terms page. The Terms of Use still carry the
- * whole agreement; these are the part that is about how to treat each other.
+ * One line of title and one of detail each — seven things a person can hold in
+ * their head, not a terms page. The Terms of Use still carry the whole
+ * agreement; these are the part that is about how to treat each other.
+ *
+ * Rows with an icon on a tile since §60, the way a set is listed: the numbers
+ * they had were an order the rules do not have.
  */
 export function RulesList() {
   const t = useTheme();
   return (
-    <View style={{ gap: space.md }}>
-      {COMMUNITY_RULES.map((rule, i) => (
-        <View key={rule.key} style={{ flexDirection: 'row', gap: space.md }}>
-          <Text style={[type.bodyStrong, { color: t.accent, minWidth: 18 }]}>{i + 1}</Text>
+    <Rows>
+      {COMMUNITY_RULES.map((rule) => (
+        <View key={rule.key} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md, paddingVertical: space.md }}>
+          <View
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: radius.sm,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: t.card,
+            }}
+          >
+            <Icon name={RULE_ICONS[rule.key] ?? 'check'} color={t.accent} size={20} />
+          </View>
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[type.bodyStrong, { color: t.text }]}>{rule.title}</Text>
             <Text style={[type.body, { color: t.textMuted }]}>{rule.detail}</Text>
           </View>
         </View>
       ))}
-    </View>
+    </Rows>
   );
 }
 
@@ -78,25 +107,33 @@ export function RulesSheet() {
     }
   }
 
+  if (done) {
+    return (
+      <Sheet onClose={close}>
+        <SheetTitle>Thanks</SheetTitle>
+        <Body>You&apos;re all set. Now try that again.</Body>
+        <Button label="Done" onPress={close} />
+      </Sheet>
+    );
+  }
+
+  // "I agree" stays at the bottom whatever is scrolled (NOTES §60): seven
+  // rules had pushed it below the fold on a phone.
   return (
-    <Sheet onClose={close}>
-      {done ? (
+    <Sheet
+      onClose={close}
+      footer={
         <>
-          <SheetTitle>Thanks</SheetTitle>
-          <Body>You&apos;re all set. Now try that again.</Body>
-          <Button label="Done" onPress={close} />
-        </>
-      ) : (
-        <>
-          <SheetTitle>Community rules</SheetTitle>
-          <Body muted>Before you post, message or add friends, please agree to these.</Body>
-          <RulesList />
-          <Body muted>{RULES_CONSEQUENCES}</Body>
           {error ? <Notice tone="error">{error}</Notice> : null}
           <Button label="I agree" onPress={agree} busy={busy} />
           <Button label="Not now" variant="secondary" onPress={close} disabled={busy} />
         </>
-      )}
+      }
+    >
+      <SheetTitle>Community rules</SheetTitle>
+      <Body muted>Before you post, message or add friends, please agree to these.</Body>
+      <RulesList />
+      <Body muted>{RULES_CONSEQUENCES}</Body>
     </Sheet>
   );
 }

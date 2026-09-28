@@ -2406,19 +2406,24 @@ async function checkBio(
   await A.client.from('blocks').delete().eq('blocker_id', A.userId);
 
   // ---- a report on a person keeps a copy of it ----
-  const report = await A.client.rpc('report_content', {
+  // B reports A, never A reporting B: friends-probe reports B as A, and a
+  // second open report on the same person is the first one handed back — so
+  // an open one from here made that probe's own report land on this one.
+  await A.client.from('profiles').update({ bio: BIO_PROBE }).eq('id', A.userId);
+  const report = await B.client.rpc('report_content', {
     p_kind: 'person',
-    p_target: B.userId,
+    p_target: A.userId,
     p_reason: 'other',
     p_details: PROBE_REPORT,
   });
   if (report.error) fail('report (bio)', report.error.message);
   else {
-    const mine = await A.client.from('reports').select('snapshot').eq('id', report.data as string).maybeSingle();
+    const mine = await B.client.from('reports').select('snapshot').eq('id', report.data as string).maybeSingle();
     const snapshot = (mine.data as { snapshot?: string } | null)?.snapshot ?? '';
     if (snapshot.includes(BIO_PROBE)) ok('report (bio)', 'the copy kept with the report includes the bio');
     else fail('report (bio)', `the copy is ${JSON.stringify(snapshot)}`);
   }
+  await A.client.from('profiles').update({ bio: null }).eq('id', A.userId);
 
   // ---- the rules, first; taking one down never waits for them ----
   await B.client.from('profiles').update({ rules_accepted_at: null }).eq('id', B.userId);

@@ -313,15 +313,26 @@ async function main() {
     }
 
     // ---- write a post, with a set, for everyone ----
-    await page.goto(`/post/new?set=${setId}`);
+    // From the set's ⋯, the way a person gets there. The composer is a sheet
+    // over the page that opened it since §60, and a sheet is drawn outside
+    // #root — which `goto` waits on, so opening it cold timed out.
+    await page.goto(`/set/${setId}`);
+    await showing(page, SET_TITLE);
+    await page.click('More actions');
+    await page.click('Post about this set');
+    await page.waitFor(`location.pathname === '/post/new' ? 'y' : ''`, 'the composer');
     await showing(page, SET_TITLE);
     await showing(page, 'Only your friends can see it.');
     await typeInto(page, 'What do you want to share?', A_TEXT);
+    // Who sees it is a chip under your name since §60, opening the choice.
+    await page.click('Who can see it: Friends');
     await page.click('Everyone');
     await showing(page, 'Anyone signed in to Nomi can see it.');
     await shot(page, '03-composer.png');
     await page.click('Post');
-    await page.waitFor(`location.pathname === '/community' ? 'y' : ''`, 'back to the feed');
+    // Back to the set it was opened from, then the feed to find it.
+    await page.waitFor(`location.pathname === '/set/${setId}' ? 'y' : ''`, 'back to the set');
+    await page.goto('/community');
     await showing(page, A_TEXT);
     const mine = await A.client.from('posts').select('id, audience, set_id').eq('body', A_TEXT).maybeSingle();
     const row = mine.data as { id: string; audience: string; set_id: string } | null;
@@ -344,6 +355,12 @@ async function main() {
       await page.click('Edit post');
       await page.waitFor(`location.pathname === '/post/new' ? 'y' : ''`, 'the composer');
       await showing(page, 'Edit post');
+      // The header says "Edit post" while the post is still loading (§60), so
+      // wait for the box to hold its words — only true once it has loaded.
+      await page.waitFor(
+        `[...document.querySelectorAll('textarea')].some((e) => e.value === ${JSON.stringify(A_TEXT)}) ? 'y' : ''`,
+        'the post’s words in the box',
+      );
       await typeInto(page, 'What do you want to share?', `${A_TEXT} (fixed)`);
       await page.click('Save');
       await showing(page, `${A_TEXT} (fixed)`);

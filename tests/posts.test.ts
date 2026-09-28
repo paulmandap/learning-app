@@ -382,9 +382,10 @@ describe('on screen', () => {
     expect(data).toContain("That comment couldn't be removed.");
   });
 
-  it('both new screens are registered with a back control', () => {
+  it('a post is registered with a back control, and writing one as a sheet with its own Cancel', () => {
     const layout = readFileSync('app/_layout.tsx', 'utf8');
-    expect(layout).toContain('<Stack.Screen name="post/new" options={{ title: \'\', ...backable }} />');
+    // A sheet over what opened it since §60: the screen underneath stays drawn.
+    expect(layout).toMatch(/name="post\/new"\s+options=\{\{ presentation: 'transparentModal', headerShown: false/);
     expect(layout).toContain('<Stack.Screen name="post/[id]" options={{ title: \'\', ...backable }} />');
   });
 });

@@ -534,8 +534,10 @@ export function Composer({
  * every emoji there is, so this is a convenience there rather than the only
  * way in — which is why it is a short grouped list and not a searchable picker
  * with a library behind it (`src/core/emoji.ts` records that decision).
+ *
+ * The new post's Emoji button opens the same panel (NOTES §60).
  */
-function EmojiPanel({ onPick }: { onPick: (emoji: string) => void }) {
+export function EmojiPanel({ onPick }: { onPick: (emoji: string) => void }) {
   const t = useTheme();
   return (
     <View

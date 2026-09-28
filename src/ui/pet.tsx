@@ -1,5 +1,5 @@
 import { Image, Pressable, Text, View, type ImageSourcePropType } from 'react-native';
-import { radius, space, useTheme } from './theme';
+import { radius, space, type, useTheme } from './theme';
 import { GLYPH } from './glyphs';
 import { daysToNextStage, petStage, PET_SPECIES, type PetSpecies } from '../core/pet';
 
@@ -174,44 +174,50 @@ export function PetStreak({ streak, species }: { streak: number; species: PetSpe
         }
       />
 
-      <View style={{ flex: 1, gap: 4 }}>
-        <Text style={{ fontSize: 28, fontWeight: '700', color: t.text }}>
-          {streak > 0 ? `${streak} day${streak === 1 ? '' : 's'} in a row` : 'Not hatched yet'}
-        </Text>
+      {/* The owner's picture (NOTES §60): the number large, "in a row" under
+          it, then the bar, then what the bar is counting towards. */}
+      <View style={{ flex: 1, gap: space.xs }}>
+        {streak > 0 ? (
+          <View accessible accessibilityLabel={`${streak} day${streak === 1 ? '' : 's'} in a row`}>
+            <Text style={{ fontSize: 32, lineHeight: 38, fontWeight: '700', color: t.text }}>
+              {`${streak} day${streak === 1 ? '' : 's'}`}
+            </Text>
+            <Text style={[type.body, { color: t.text }]}>in a row</Text>
+          </View>
+        ) : (
+          <Text style={{ fontSize: 26, lineHeight: 32, fontWeight: '700', color: t.text }}>Not hatched yet</Text>
+        )}
 
         {stage === null ? (
-          <Text style={{ fontSize: 14, color: t.textMuted }}>
-            Answer a card today and it hatches.
-          </Text>
+          <Text style={[type.caption, { color: t.textMuted }]}>Answer a card today and it hatches.</Text>
         ) : toGo === null ? (
-          <Text style={{ fontSize: 14, color: t.textMuted }}>
-            Fully grown. Keep going and it stays that way.
-          </Text>
+          <Text style={[type.caption, { color: t.textMuted }]}>Fully grown. Keep going and it stays that way.</Text>
         ) : (
           <>
-            <Text style={{ fontSize: 14, color: t.textMuted }}>
-              {toGo} more day{toGo === 1 ? '' : 's'} and it grows again.
-            </Text>
             {/* Progress across THIS stage, not the whole road to 30 — see the
                 note in core/pet.ts. A bar that barely moves for a month is
                 worse than no bar. */}
             <View
               style={{
-                height: 6,
-                borderRadius: radius.sm,
+                height: 8,
+                borderRadius: radius.pill,
                 overflow: 'hidden',
                 backgroundColor: t.chart.neutral,
-                marginTop: 2,
+                marginTop: space.xs,
               }}
             >
               <View
                 style={{
                   width: `${Math.max(2, stage.progress * 100)}%`,
                   height: '100%',
-                  backgroundColor: t.chart.known,
+                  borderRadius: radius.pill,
+                  backgroundColor: t.accent,
                 }}
               />
             </View>
+            <Text style={[type.caption, { color: t.textMuted }]}>
+              {toGo} more day{toGo === 1 ? '' : 's'} and it grows again.
+            </Text>
           </>
         )}
       </View>

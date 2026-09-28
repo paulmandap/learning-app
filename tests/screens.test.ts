@@ -248,7 +248,8 @@ describe('Nomi has a way in and a place to go', () => {
   it("Progress's three render branches keep their heading", () => {
     // Progress returns early for loading and for nothing-answered-yet. Hand
     // editing three branches is how two of them quietly lose their title.
-    const rows = progress.match(/<TitleRow title="Progress" \/>/g) ?? [];
+    // The shared top bar since §60, as every tab the redesign reached.
+    const rows = progress.match(/<TopBar title="Progress" \/>/g) ?? [];
     expect(rows).toHaveLength(3);
   });
 

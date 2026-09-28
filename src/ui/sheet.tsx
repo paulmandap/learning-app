@@ -26,8 +26,29 @@ import { CONTENT_MAX_WIDTH, elevation, radius, space, type, useTheme } from './t
  *
  * A phone gets the whole width. A desktop gets the content column, centred — a
  * panel spanning 1440 px with six emoji at its left end read as broken.
+ *
+ * ## Header and footer stay put (NOTES §60)
+ *
+ * What scrolls is the middle. `header` sits under the grab handle and `footer`
+ * at the bottom, outside the scroll — the new post's Cancel · New post · Post
+ * and its toolbar, as in the owner's picture, and the one button a long sheet
+ * ends in ("I agree", "Send report"), which seven rules had pushed below the
+ * fold on a phone. `tall` gives the sheet most of the screen whatever is in
+ * it, for writing in.
  */
-export function Sheet({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+export function Sheet({
+  children,
+  onClose,
+  header,
+  footer,
+  tall,
+}: {
+  children: ReactNode;
+  onClose: () => void;
+  header?: ReactNode;
+  footer?: ReactNode;
+  tall?: boolean;
+}) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const reduce = useReducedMotion();
@@ -70,6 +91,7 @@ export function Sheet({ children, onClose }: { children: ReactNode; onClose: () 
             maxWidth: CONTENT_MAX_WIDTH + 2 * space.lg,
             alignSelf: 'center',
             maxHeight: '90%',
+            height: tall ? '90%' : undefined,
             backgroundColor: t.bg,
             borderTopLeftRadius: radius.lg,
             borderTopRightRadius: radius.lg,
@@ -91,12 +113,30 @@ export function Sheet({ children, onClose }: { children: ReactNode; onClose: () 
               backgroundColor: t.border,
             }}
           />
+          {header ? <View style={{ paddingHorizontal: space.lg, paddingTop: space.sm }}>{header}</View> : null}
           <ScrollView
+            // Without a header or footer the scroll is as tall as what is in
+            // it; with one, it takes what they leave.
+            style={header || footer || tall ? { flexShrink: 1, flexGrow: tall ? 1 : 0 } : undefined}
             contentContainerStyle={{ padding: space.lg, paddingTop: space.md, gap: space.md }}
             keyboardShouldPersistTaps="handled"
           >
             {children}
           </ScrollView>
+          {footer ? (
+            <View
+              style={{
+                paddingHorizontal: space.lg,
+                paddingTop: space.sm,
+                paddingBottom: space.md,
+                gap: space.sm,
+                borderTopWidth: 1,
+                borderTopColor: t.border,
+              }}
+            >
+              {footer}
+            </View>
+          ) : null}
         </Animated.View>
       </View>
     </Modal>

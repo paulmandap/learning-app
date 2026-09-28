@@ -85,25 +85,30 @@ and a post's page to the picture, replies, hearts on comments, saved posts —
 the inbox and a conversation to the picture, reply on messages everywhere,
 group chats — `26ad6e4` and migration 0032, verified (isolation 212/212,
 `groups-probe` 7/7), then the group box's placeholder as `2c0a897`. **Step
-four is built, not deployed** (NOTES §59): Profile, a person's page, Edit
-profile, a bio, Share profile (`/u/<username>`), and search for people, sets
-and posts (`/search`) — migration 0033, not applied yet. **Probe reports pile
-up:** each run of `friends-probe` and the isolation test leaves marked
-reports, and at 20 in a day test account B hits the report limit (§58.4) —
-clear them with the SQL the probes print. **Next: step five — Progress, the
-new-post sheet, the report and rules sheets.** `/icons` is a check page;
-delete it when the redesign is done.
+four is live** (NOTES §59): Profile, a person's page, Edit profile, a bio,
+Share profile (`/u/<username>`), and search for people, sets and posts
+(`/search`) — `fde3208` and migration 0033, verified (isolation 219/219).
+**Step five is built, not deployed** (NOTES §60): the new post as a sheet over
+what opened it (a transparent-modal route), Progress to the picture, the rules
+and report sheets with their button in a fixed footer, Nomi's chats and the
+folder panel as the one Sheet, `/icons` removed. No database change. **The
+redesign is done once step five is live.** **Probe reports pile up:** each run
+of `friends-probe` and the isolation test leaves marked reports, and at 20 in
+a day test account B hits the report limit (§58.4) — clear them with the SQL
+the probes print. A report left open also makes a later identical report hand
+back the first one (§59.5), so **never have two scripts report the same
+person from the same account.**
 
 Still his to do: try `/moderation` (a button on his Profile) on the probe
 reports. Not built, and worth knowing if asked: push notifications for new
 messages (there is no server to send them on insert); realtime instead of polling (§46.5's reasoning stands);
 end-to-end encryption of messages (the Privacy Policy says they are not).
 
-### Migrations — 33, 0033 not applied yet
+### Migrations — 33, all applied
 
-**0033 (a bio — NOTES §59) is written, not applied.** Additive, safe either
-order; the app hides the bio without it. After the owner pastes it: isolation
-should gain 7 (`checkBio`), and `friends-probe`'s bio step runs.
+**0033 (a bio — NOTES §59) was applied by the owner on 2026-09-28, after
+deploying `fde3208`,** and verified the same day: isolation **219/219**, the
+7 of `checkBio` included; `friends-probe`'s bio step passes.
 
 **0032 (reply on messages, group chats — NOTES §58) was applied by the owner on
 2026-09-28, after deploying `26ad6e4`,** and verified the same day: isolation
@@ -761,7 +766,7 @@ npx tsx --env-file=.env scripts/community-probe.ts [--out <dir>]        # a shar
 npx tsx --env-file=.env scripts/scroll-probe.ts --height 420            # 7 screens now, including Community's Chat pane — the one layout that is not a `Screen`
 npx tsx --env-file=.env scripts/messages-probe.ts [--out <dir>]         # the badge, the inbox, open and read, reply, Seen, "Message <name>", a closed conversation — in the built app as A (NEEDS 0028)
 npx tsx --env-file=.env scripts/groups-probe.ts [--out <dir>]           # a group from Chat's pencil, a message, a reply to B's, a rename, leaving it to B — in the built app as A (NEEDS 0032)
-npx tsx --env-file=.env scripts/posts-probe.ts [--out <dir>]            # feed, photo, react, comment, compose with a set for everyone, flip it in the feed, edit, delete — in the built app as A, the database checked after each step (NEEDS 0027)
+npx tsx --env-file=.env scripts/posts-probe.ts [--out <dir>]            # feed, photo, react, comment, save, compose (from a set's ⋯, as a sheet) for everyone, flip it in the feed, edit, delete — in the built app as A, the database checked after each step (NEEDS 0027)
 npx tsx --env-file=.env scripts/friends-probe.ts [--out <dir>]          # username, a bio (0033), a request, search, accept, block, unblock, report — in the built app as A, the database checked after each step (NEEDS 0026; leaves one marked report)
 npx tsx --env-file=.env scripts/drag-probe.ts [--shot <file.png>]       # hold a set and drag it into a folder, with a real mouse and a real finger; asks the database whether it moved
 ```

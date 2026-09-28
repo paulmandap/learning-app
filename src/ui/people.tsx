@@ -3,7 +3,7 @@ import { Pressable, Text, TextInput, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { TextLink } from './legal';
-import { Body, Button, Notice } from './components';
+import { Body, Button, Notice, Rows } from './components';
 import { PersonAvatar } from './avatar';
 import { Sheet, SheetTitle } from './sheet';
 import { INPUT_FONT_SIZE, radius, space, TOUCH_TARGET, type, useTheme } from './theme';
@@ -123,19 +123,23 @@ export function RowButton({
   onPress,
   primary,
   busy,
+  disabled,
 }: {
   label: string;
   onPress: () => void;
   primary?: boolean;
   busy?: boolean;
+  /** Nothing to do yet — Post with nothing written. Dimmed further than busy. */
+  disabled?: boolean;
 }) {
   const t = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled || !!busy }}
       onPress={onPress}
-      disabled={busy}
+      disabled={busy || disabled}
       hitSlop={4}
       style={({ pressed }) => ({
         minHeight: 36,
@@ -147,7 +151,7 @@ export function RowButton({
         borderWidth: 1,
         borderColor: primary ? t.accent : t.border,
         backgroundColor: primary ? t.accent : 'transparent',
-        opacity: pressed || busy ? 0.6 : 1,
+        opacity: disabled ? 0.45 : pressed || busy ? 0.6 : 1,
       })}
     >
       <Text style={[type.label, { color: primary ? t.accentText : t.text, fontWeight: '600' }]}>{label}</Text>
@@ -220,45 +224,58 @@ export function ReportSheet({
     );
   }
 
+  // Send stays at the bottom whatever is scrolled (NOTES §60), as the rules'
+  // "I agree" does: a reason, a box and a link had pushed it off a phone.
   return (
-    <Sheet onClose={onClose}>
-      <SheetTitle>{reportTitle(kind, name)}</SheetTitle>
+    <Sheet
+      onClose={onClose}
+      footer={
+        <>
+          {error ? <Notice tone="error">{error}</Notice> : null}
+          <Button label="Send report" onPress={send} busy={busy} />
+          <Button label="Cancel" variant="secondary" onPress={onClose} disabled={busy} />
+        </>
+      }
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+        <Icon name="report" color={t.danger} size={24} />
+        <View style={{ flex: 1 }}>
+          <SheetTitle>{reportTitle(kind, name)}</SheetTitle>
+        </View>
+      </View>
       <Body muted>What is wrong with it?</Body>
 
-      <View
-        accessibilityRole="radiogroup"
-        style={{ backgroundColor: t.card, borderRadius: radius.md, overflow: 'hidden' }}
-      >
-        {reasonsFor(kind).map((r, i) => {
-          const chosen = reason === r.key;
-          return (
-            <Pressable
-              key={r.key}
-              accessibilityRole="radio"
-              accessibilityState={{ checked: chosen }}
-              accessibilityLabel={r.label}
-              onPress={() => {
-                setReason(r.key);
-                setError(null);
-              }}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: space.md,
-                minHeight: TOUCH_TARGET,
-                paddingHorizontal: space.lg,
-                paddingVertical: space.sm,
-                borderTopWidth: i === 0 ? 0 : 1,
-                borderTopColor: t.border,
-                backgroundColor: pressed ? t.bg : 'transparent',
-              })}
-            >
-              {/* A mark as well as a colour — never hue alone. */}
-              <View style={{ width: 20 }}>{chosen ? <Icon name="check" color={t.accent} size={20} /> : null}</View>
-              <Text style={[chosen ? type.bodyStrong : type.body, { color: t.text, flex: 1 }]}>{r.label}</Text>
-            </Pressable>
-          );
-        })}
+      <View accessibilityRole="radiogroup">
+        <Rows card>
+          {reasonsFor(kind).map((r) => {
+            const chosen = reason === r.key;
+            return (
+              <Pressable
+                key={r.key}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: chosen }}
+                accessibilityLabel={r.label}
+                onPress={() => {
+                  setReason(r.key);
+                  setError(null);
+                }}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: space.md,
+                  minHeight: TOUCH_TARGET,
+                  paddingHorizontal: space.lg,
+                  paddingVertical: space.sm,
+                  backgroundColor: pressed ? t.bg : 'transparent',
+                })}
+              >
+                <Text style={[chosen ? type.bodyStrong : type.body, { color: t.text, flex: 1 }]}>{r.label}</Text>
+                {/* A mark as well as the weight — never one signal alone. */}
+                <View style={{ width: 20 }}>{chosen ? <Icon name="check" color={t.accent} size={20} /> : null}</View>
+              </Pressable>
+            );
+          })}
+        </Rows>
       </View>
 
       <View style={{ gap: 6 }}>
@@ -293,9 +310,6 @@ export function ReportSheet({
           router.push('/rules');
         }}
       />
-      {error ? <Notice tone="error">{error}</Notice> : null}
-      <Button label="Send report" onPress={send} busy={busy} />
-      <Button label="Cancel" variant="secondary" onPress={onClose} disabled={busy} />
     </Sheet>
   );
 }
@@ -343,9 +357,15 @@ export function BlockSheet({
     }
   }
 
+  const t = useTheme();
   return (
     <Sheet onClose={onClose}>
-      <SheetTitle>{`Block ${name}?`}</SheetTitle>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+        <Icon name="block" color={t.danger} size={24} />
+        <View style={{ flex: 1 }}>
+          <SheetTitle>{`Block ${name}?`}</SheetTitle>
+        </View>
+      </View>
       {blockFacts(name).map((fact) => (
         <Body key={fact} muted>
           {fact}
