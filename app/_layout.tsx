@@ -132,6 +132,9 @@ const backable = {
   headerLeft: () => <HeaderBackButton />,
 } as const;
 
+/** Where the floating ✦ is: a set's three study screens, and nowhere else (NOTES §65). */
+const ASSISTANT_SCREENS: readonly string[] = ['flashcards', 'quiz', 'blanks'];
+
 function RootNavigator() {
   const t = useTheme();
   const segments = useSegments();
@@ -141,50 +144,27 @@ function RootNavigator() {
   useHideSplash();
 
   // Mounted once, above the navigator, so it survives navigation and keeps its
-  // panel open across screens. Hidden on sign-in: there are no notes to ask
-  // about yet, and a floating button over a one-field form is clutter. Hidden
-  // on Nomi's own screen too, where the whole screen is the conversation it
-  // would open (NOTES §36), and over the two legal documents, which may be
-  // read before signing in (NOTES §40). And never mounted signed out: it loads
-  // the profile as it mounts, which is how an empty one reached the cache
-  // before the first redirect to sign-in (NOTES §42).
+  // panel open across screens. Never mounted signed out: it loads the profile
+  // as it mounts, which is how an empty one reached the cache before the first
+  // redirect to sign-in (NOTES §42).
   //
-  // Hidden on Community for the Nomi-screen reason and one more (NOTES §47):
-  // the owner, on a phone — *"the gemini icon or chatbot is interfering with
-  // the send button. it looks messy."* The ✦ floats bottom-right and so does a
-  // chat's Send, so they land on each other. Every other screen is a `Screen`,
-  // which reserves FLOAT_CLEARANCE below its content; the chat cannot, because
-  // its composer is pinned rather than scrolled.
+  // ONLY on the three study screens (NOTES §65, the owner's decision). It was
+  // everywhere but a growing list of exceptions — Nomi's own screen, the legal
+  // pages, Community, the rooms, the groups, search, a post — each added
+  // because it landed on a pinned Send or crowded a focused screen. The owner:
+  // *"i'm starting to think that maybe we should remove the gemini chatbot at
+  // the bottom right of the page"*; asked, he kept it where it earns its place:
+  // a card in front of you, where it can see the card and answer "why is this
+  // the answer?". Everywhere else, Nomi is its own tab.
   //
-  // The whole tab rather than the chat pane alone, because the panes are
-  // component state and not routes, so nothing here can see which one is open.
-  // Little is lost: Community is where OTHER people are, Nomi is one tap away
-  // in its own tab, and there is nothing on a stranger's set to ask Nomi about
-  // — it cannot read their notes (NOTES §46).
-  //
-  // `path`, not `segments[1]`. `useSegments()` is typed from the route types
+  // `path`, not `segments[2]`. `useSegments()` is typed from the route types
   // the dev server generates into `.expo/types/`, which is gitignored — so on
   // THIS machine it is a union deep enough to index, and on a clean checkout it
   // is `[string]`, where `segments[1]` is TS2493 and the build fails. That is a
   // typecheck error only CI can see, which is the worst kind: it passed here,
   // passed review, and broke the first run after the push (NOTES §47.8).
   const path = segments as readonly string[];
-  const showAssistant =
-    signedIn &&
-    path[0] !== 'sign-in' &&
-    path[0] !== 'nomi' &&
-    path[1] !== 'community' &&
-    // The rooms (NOTES §53): the same reason as the chat pane had — a pinned
-    // Send where the ✦ floats.
-    path[0] !== 'messages' &&
-    // And the groups (NOTES §58): the same room, the same pinned Send.
-    path[0] !== 'groups' &&
-    // Search (NOTES §59): a focused screen of its own, one thing at a time.
-    path[0] !== 'search' &&
-    // A post's page, and writing one (NOTES §57): the comment box is pinned
-    // to the bottom now, as in the owner's picture, and so is Send.
-    path[0] !== 'post' &&
-    !isPublicRoute(segments[0]);
+  const showAssistant = signedIn && path[0] === 'set' && ASSISTANT_SCREENS.includes(path[2] ?? '');
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>

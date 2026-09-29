@@ -237,7 +237,9 @@ describe('on screen', () => {
     const layout = readFileSync('app/_layout.tsx', 'utf8');
     expect(layout).toContain('<Stack.Screen name="messages/everyone"');
     expect(layout).toContain('<Stack.Screen name="messages/[id]"');
-    expect(layout).toContain("path[0] !== 'messages'");
+    // Since NOTES §65 the ✦ is on a set's three study screens and nowhere else,
+    // so it is off this one by construction.
+    expect(layout).toContain("const showAssistant = signedIn && path[0] === 'set' && ASSISTANT_SCREENS.includes(path[2] ?? '');");
   });
 
   it('the unread badge is on Community alone, from the same count as the inbox', () => {

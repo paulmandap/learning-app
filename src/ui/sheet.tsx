@@ -1,10 +1,11 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { Animated, Easing, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { Animated, Easing, Modal, Platform, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Rows } from './components';
 import { Icon, type IconName } from './glyphs';
 import { useReducedMotion } from './motion';
 import { CONTENT_MAX_WIDTH, elevation, radius, space, type, useTheme } from './theme';
+import { placePopover, type Anchor } from '../core/popover';
 
 /**
  * Everything temporary, in one kind of panel (NOTES §56.3).
@@ -12,8 +13,17 @@ import { CONTENT_MAX_WIDTH, elevation, radius, space, type, useTheme } from './t
  * The owner, on the social screens as they were: *"make it at least the user
  * will only focus there, like there is a background blur when clicked."* So
  * every menu, every choice about a post or a message, report, block and the
- * rules is this: the page behind dimmed and blurred, and a panel risen from the
- * bottom with a grab handle and rounded top corners — one thing at a time.
+ * rules is this: the page behind dimmed and blurred, and a panel over it — one
+ * thing at a time.
+ *
+ * ## In the middle of the screen (NOTES §65)
+ *
+ * It rose from the bottom with a grab handle. The owner, with What's new at
+ * the bottom of a laptop screen: *"i don't want it sitting at the bottom
+ * middle. middle middle is better."* — and asked, on the phone too. So it is a
+ * card in the middle, every corner round, the safe areas and a margin kept
+ * clear all round. No grab handle: nothing here is dragged, and a handle on a
+ * card in the middle points at nothing.
  *
  * ## The backdrop is BESIDE the panel, not around it
  *
@@ -24,18 +34,21 @@ import { CONTENT_MAX_WIDTH, elevation, radius, space, type, useTheme } from './t
  *
  * ## Width
  *
- * A phone gets the whole width. A desktop gets the content column, centred — a
- * panel spanning 1440 px with six emoji at its left end read as broken.
+ * A phone gets the whole width less a margin. A desktop gets the content
+ * column — a panel spanning 1440 px with six emoji at its left end read as
+ * broken.
  *
  * ## Header and footer stay put (NOTES §60)
  *
- * What scrolls is the middle. `header` sits under the grab handle and `footer`
- * at the bottom, outside the scroll — the new post's Cancel · New post · Post
- * and its toolbar, as in the owner's picture, and the one button a long sheet
- * ends in ("I agree", "Send report"), which seven rules had pushed below the
- * fold on a phone. `tall` gives the sheet most of the screen whatever is in
- * it, for writing in.
+ * What scrolls is the middle. `header` sits at the top and `footer` at the
+ * bottom, outside the scroll — the new post's Cancel · New post · Post and its
+ * toolbar, as in the owner's picture, and the one button a long sheet ends in
+ * ("I agree", "Send report"), which seven rules had pushed below the fold on a
+ * phone. `tall` gives the sheet most of the screen whatever is in it, for
+ * writing in.
  */
+/** A tall sheet's height at most: past this, on a big screen, it is a wall rather than a card. */
+const TALL_MAX = 760;
 export function Sheet({
   children,
   onClose,
@@ -51,10 +64,12 @@ export function Sheet({
 }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const reduce = useReducedMotion();
   // 1 is lowered, 0 is in place. The Modal fades the dimmed page in; the panel
-  // also rises a little, which is what says "this came up from the bottom".
+  // also rises a little into place, which is what says "this came up".
   const lowered = useRef(new Animated.Value(1)).current;
+  const room = windowHeight - insets.top - insets.bottom - 2 * space.lg;
 
   useEffect(() => {
     if (reduce) {
@@ -71,7 +86,17 @@ export function Sheet({
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={{ flex: 1, justifyContent: 'flex-end', zIndex: elevation.float + 1 }}>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          paddingTop: insets.top + space.lg,
+          paddingBottom: insets.bottom + space.lg,
+          paddingHorizontal: space.lg,
+          zIndex: elevation.float + 1,
+        }}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Close"
@@ -89,36 +114,27 @@ export function Sheet({
           style={{
             width: '100%',
             maxWidth: CONTENT_MAX_WIDTH + 2 * space.lg,
-            alignSelf: 'center',
-            maxHeight: '90%',
-            height: tall ? '90%' : undefined,
+            maxHeight: '100%',
+            height: tall ? Math.min(room, TALL_MAX) : undefined,
             backgroundColor: t.bg,
-            borderTopLeftRadius: radius.lg,
-            borderTopRightRadius: radius.lg,
-            borderTopWidth: 1,
+            borderRadius: radius.lg,
+            borderWidth: 1,
             borderColor: t.border,
-            paddingBottom: insets.bottom,
-            transform: [{ translateY: lowered.interpolate({ inputRange: [0, 1], outputRange: [0, 48] }) }],
+            overflow: 'hidden',
+            shadowColor: '#000',
+            shadowOpacity: 0.3,
+            shadowRadius: 24,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 12,
+            transform: [{ translateY: lowered.interpolate({ inputRange: [0, 1], outputRange: [0, 16] }) }],
           }}
         >
-          {/* The grab handle: says "this is a panel over the page", where every
-              phone puts one. Drawn, not dragged — tapping outside closes it. */}
-          <View
-            style={{
-              alignSelf: 'center',
-              width: 36,
-              height: 5,
-              borderRadius: 3,
-              marginTop: space.sm,
-              backgroundColor: t.border,
-            }}
-          />
-          {header ? <View style={{ paddingHorizontal: space.lg, paddingTop: space.sm }}>{header}</View> : null}
+          {header ? <View style={{ paddingHorizontal: space.lg, paddingTop: space.md }}>{header}</View> : null}
           <ScrollView
             // Without a header or footer the scroll is as tall as what is in
             // it; with one, it takes what they leave.
             style={header || footer || tall ? { flexShrink: 1, flexGrow: tall ? 1 : 0 } : undefined}
-            contentContainerStyle={{ padding: space.lg, paddingTop: space.md, gap: space.md }}
+            contentContainerStyle={{ padding: space.lg, paddingTop: header ? space.md : space.lg, gap: space.md }}
             keyboardShouldPersistTaps="handled"
           >
             {children}
@@ -139,6 +155,97 @@ export function Sheet({
           ) : null}
         </Animated.View>
       </View>
+    </Modal>
+  );
+}
+
+/**
+ * A small panel beside what opened it — Messenger's reaction bar over a
+ * message (NOTES §65). The owner: the emoji and the ⋯ beside a message
+ * *"serve the same purpose. when i click on emoji, it should look like that
+ * too just like messenger"* — a bar of reactions over the bubble, not a sheet.
+ *
+ * The page is not dimmed: this is a quick pick next to the thing, and the
+ * thing should stay in view. A tap anywhere else closes it, as does Escape.
+ * `anchor` is where the opener is on screen (`measureInWindow`); it opens
+ * above it when `height` fits there, or where there is more room.
+ */
+export function Popover({
+  anchor,
+  width,
+  height,
+  side,
+  label,
+  onClose,
+  children,
+}: {
+  anchor: Anchor;
+  width: number;
+  /** How tall it may grow. */
+  height: number;
+  /** Lined up with the anchor's left edge, or its right. */
+  side: 'start' | 'end';
+  /** What it is, for a screen reader. */
+  label: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const t = useTheme();
+  const insets = useSafeAreaInsets();
+  const window = useWindowDimensions();
+  const at = placePopover(anchor, { width, height }, side, window, {
+    top: insets.top + space.sm,
+    bottom: insets.bottom + space.sm,
+    side: space.sm,
+  });
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, zIndex: elevation.float + 1 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          onPress={onClose}
+          style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+        />
+        <View
+          accessibilityLabel={label}
+          style={{
+            position: 'absolute',
+            left: at.left,
+            top: at.top,
+            bottom: at.bottom,
+            width: at.width,
+            maxHeight: at.maxHeight,
+            padding: space.xs,
+            borderRadius: radius.lg,
+            borderWidth: 1,
+            borderColor: t.border,
+            backgroundColor: t.card,
+            shadowColor: '#000',
+            shadowOpacity: 0.3,
+            shadowRadius: 16,
+            shadowOffset: { width: 0, height: 4 },
+            elevation: 10,
+          }}
+        >
+          {children}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/**
+ * The whole screen, black, for one thing to look at — a post's photo
+ * (NOTES §65). Not a panel over the page, so none of the Sheet's dimming or
+ * margins: what is behind is gone until it closes. Escape and the phone's
+ * back close it.
+ */
+export function FullScreen({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: '#000000', zIndex: elevation.float + 1 }}>{children}</View>
     </Modal>
   );
 }

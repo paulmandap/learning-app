@@ -4,7 +4,8 @@
  *
  * `scripts/isolation-test.ts` proves who can read and write what. This proves
  * the screens, and after every step asks the DATABASE whether it agrees: a
- * friend's post in the feed; a photo actually loading; a reaction and a comment
+ * friend's post in the feed; a photo actually loading, and opening the whole
+ * screen with its heart and share, zoomed (NOTES §65); a reaction and a comment
  * landing; a post written in the composer, for everyone, carrying a shared set
  * whose cards flip right there in the feed; an edit marked; a delete gone; B's
  * posts on B's page.
@@ -240,6 +241,28 @@ async function main() {
     );
     ok('photo', 'loaded through a signed link, as a friend');
     await shot(page, '01-feed.png');
+
+    // ---- the photo, the whole screen, to zoom into (NOTES §65) ----
+    const shares = `[...document.querySelectorAll('[role="button"]')].filter((b) => b.getAttribute('aria-label') === 'Share').length`;
+    const sharesBefore = await page.evaluate<number>(shares);
+    await clickInCard(page, B_PHOTO, 'Open the photo');
+    await page.waitFor(
+      `document.querySelector('[aria-label="Close the photo"]') ? 'y' : ''`,
+      'the photo to open',
+    );
+    await showing(page, '100%');
+    await page.click('Zoom in');
+    await showing(page, '125%');
+    // The post's heart, comments and share still at the bottom.
+    const withViewer = await page.evaluate<number>(shares);
+    const heartInViewer = await page.evaluate<boolean>(
+      `[...document.querySelectorAll('[role="button"]')].filter((b) => ['Heart', 'Remove heart'].includes(b.getAttribute('aria-label'))).length > ${sharesBefore}`,
+    );
+    if (withViewer === sharesBefore + 1 && heartInViewer) ok('photo viewer', 'opened, zoomed to 125%, with the heart and share under it');
+    else fail('photo viewer', `share buttons ${sharesBefore} → ${withViewer}, heart in the viewer: ${heartInViewer}`);
+    await shot(page, '01b-photo-viewer.png');
+    await page.click('Close the photo');
+    await page.waitFor(`document.querySelector('[aria-label="Close the photo"]') ? '' : 'y'`, 'the photo to close');
 
     // ---- react: the heart under the post (NOTES §57; it was React, then Heart) ----
     await clickInCard(page, B_TEXT, 'Heart');

@@ -285,7 +285,10 @@ describe('what the Privacy Policy says is what 0031 does', () => {
 
 describe('on screen', () => {
   it('the ✦ is kept off a post’s page, where the comment box is pinned', () => {
-    expect(readFileSync('app/_layout.tsx', 'utf8')).toContain("path[0] !== 'post'");
+    const layout = readFileSync('app/_layout.tsx', 'utf8');
+    // Since NOTES §65 the ✦ is on a set's three study screens and nowhere else,
+    // so it is off this one by construction.
+    expect(layout).toContain("const showAssistant = signedIn && path[0] === 'set' && ASSISTANT_SCREENS.includes(path[2] ?? '');");
   });
 
   it('Saved is a tab on Profile (§59), and reads posts through the feed’s rule', () => {

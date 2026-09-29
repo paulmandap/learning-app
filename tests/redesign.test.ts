@@ -21,7 +21,8 @@ describe('everything temporary is the one sheet', () => {
   it('no screen or component draws its own panel over the page', () => {
     // The Sheet, and the one-time privacy notice (a full page, not a panel).
     // Nomi's chat history and the folder sheet were the last two, older than
-    // the redesign; both are the Sheet since §60.
+    // the redesign; both are the Sheet since §60. The reaction bar's Popover
+    // and the photo viewer's FullScreen (§65) live beside the Sheet, in its file.
     const allowed = [join('src', 'ui', 'sheet.tsx'), join('src', 'ui', 'privacy.tsx')];
     for (const file of [...tsxUnder('app'), ...tsxUnder(join('src', 'ui'))]) {
       if (allowed.includes(file)) continue;
@@ -29,11 +30,18 @@ describe('everything temporary is the one sheet', () => {
     }
   });
 
-  it('dims and blurs the page, with a grab handle, and keeps its controls out of the backdrop', () => {
+  it('dims and blurs the page, sits in the middle of it, and keeps its controls out of the backdrop', () => {
     const sheet = read('src', 'ui', 'sheet.tsx');
     expect(sheet).toContain("backdropFilter: 'blur(8px)'");
     expect(sheet).toContain("WebkitBackdropFilter: 'blur(8px)'");
-    expect(sheet).toMatch(/width: 36,\s*height: 5/);
+    // In the middle of the screen, on a phone too, with every corner round
+    // (NOTES §65 — the owner: "middle middle is better"). The grab handle went
+    // with the bottom edge: a card in the middle is not dragged anywhere.
+    const sheetOnly = sheet.slice(sheet.indexOf('export function Sheet('), sheet.indexOf('export function Popover('));
+    expect(sheetOnly).toMatch(/flex: 1,\s*justifyContent: 'center',\s*alignItems: 'center'/);
+    expect(sheetOnly).toContain('borderRadius: radius.lg,');
+    expect(sheetOnly).not.toContain('borderTopLeftRadius');
+    expect(sheet).not.toMatch(/width: 36,\s*height: 5/);
     // The backdrop is a sibling that fills the window, not a button wrapped
     // around the panel — which put every control of the sheet inside "Close".
     expect(sheet).toMatch(/accessibilityLabel="Close"[\s\S]*position: 'absolute', top: 0/);

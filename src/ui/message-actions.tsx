@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { Notice } from './components';
-import { Sheet, SheetActions } from './sheet';
+import { Button, Notice } from './components';
+import { Popover, Sheet, SheetActions, SheetTitle } from './sheet';
 import { radius, space, TOUCH_TARGET, type, useTheme } from './theme';
 import { Icon, type IconName } from './glyphs';
 import { EMOJI_GROUPS, REACTIONS, type ReactionTally } from '../core/emoji';
+import type { Anchor } from '../core/popover';
 
 /**
  * What you can do to a message (NOTES §48).
@@ -32,12 +33,21 @@ import { EMOJI_GROUPS, REACTIONS, type ReactionTally } from '../core/emoji';
  * redesign, and 0032 is that model: `reply_to` on each kind of message, the
  * quote in the rooms' views, and a reply that outlives an unsent parent and
  * says "Message removed". The button is the last tenth.
+ *
+ * ## React, Reply, More — three different things (NOTES §65)
+ *
+ * The emoji and the ⋯ both opened this sheet. The owner: they *"serve the
+ * same purpose. when i click on emoji, it should look like that too just like
+ * messenger"*, with Messenger's picture: 😊 ↩ ⋮ beside the bubble. So the
+ * emoji opens a bar of reactions over the message (`ReactionPopover`), the
+ * arrow answers it straight away, and ⋯ opens the sheet of everything else —
+ * without the reactions, which the emoji has. A long press on a phone still
+ * opens the sheet with the reactions at the top: it is the one way in there.
  */
 
-export type MessageAction = 'react' | 'edit' | 'unsend-everyone' | 'unsend-me';
-
 /**
- * The bar that appears beside a bubble on a pointer device.
+ * The bar that appears beside a bubble on a pointer device: 😊 ↩ ⋯ reading
+ * outwards from the bubble, on either side, as Messenger draws it.
  *
  * `hovered` is decided by the row, because the hover belongs to the whole
  * message and not to these three buttons — controls that appeared only while
@@ -46,22 +56,26 @@ export type MessageAction = 'react' | 'edit' | 'unsend-everyone' | 'unsend-me';
 export function HoverActions({
   visible,
   mine,
-  canEdit,
-  onPick,
+  onReact,
+  onReply,
+  onMore,
 }: {
   visible: boolean;
   mine: boolean;
-  canEdit: boolean;
-  onPick: (action: MessageAction) => void;
+  onReact: () => void;
+  /** Absent where nothing can be sent — a closed conversation. */
+  onReply?: () => void;
+  onMore: () => void;
 }) {
-  const t = useTheme();
   // Kept mounted and made invisible rather than unmounted: a row that appears
   // on hover must not change the layout when it does, or every message shifts
   // sideways as the mouse moves down the page.
   return (
     <View
       style={{
-        flexDirection: 'row',
+        // Yours sit to the left of your bubble, so the order turns round:
+        // the emoji is always the one nearest the words.
+        flexDirection: mine ? 'row-reverse' : 'row',
         alignItems: 'center',
         gap: space.hair,
         opacity: visible ? 1 : 0,
@@ -70,11 +84,42 @@ export function HoverActions({
         pointerEvents: visible ? 'auto' : 'none',
       }}
     >
-      <ActionButton label="React" icon="emoji" onPress={() => onPick('react')} />
-      {mine && canEdit ? <ActionButton label="Edit" icon="edit" onPress={() => onPick('edit')} /> : null}
-      <ActionButton label="More" icon="more" onPress={() => onPick(mine ? 'unsend-everyone' : 'unsend-me')} />
-      <View style={{ width: 0, borderColor: t.border }} />
+      <ActionButton label="React" icon="emoji" onPress={onReact} />
+      {onReply ? <ActionButton label="Reply" icon="reply" onPress={onReply} /> : null}
+      <ActionButton label="More" icon="more" onPress={onMore} />
     </View>
+  );
+}
+
+/**
+ * Messenger's reaction bar: the six over the message, and "+" for every other
+ * emoji (NOTES §65). Opened by the 😊 beside a bubble; closes on a pick.
+ */
+export const REACTION_BAR_WIDTH = (REACTIONS.length + 1) * 40 + 2 * space.xs + 2;
+
+export function ReactionPopover({
+  anchor,
+  mine,
+  onReact,
+  onClose,
+}: {
+  anchor: Anchor;
+  /** Your message: the bar lines up with the bubble's right edge. */
+  mine: boolean;
+  onReact: (emoji: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Popover
+      anchor={anchor}
+      width={REACTION_BAR_WIDTH}
+      height={260}
+      side={mine ? 'end' : 'start'}
+      label="Reactions"
+      onClose={onClose}
+    >
+      <ReactionRow onReact={onReact} more compact />
+    </Popover>
   );
 }
 
@@ -111,8 +156,19 @@ function ActionButton({
 /**
  * The sheet a long press opens, and what "More" opens on a pointer.
  *
- * The reaction row is at the top, where Messenger puts it and where a thumb
- * reaches first, with "+" opening every emoji the app knows.
+ * With `reactions` (a long press), the reaction row is at the top, where
+ * Messenger puts it and where a thumb reaches first, with "+" opening every
+ * emoji the app knows. From ⋯ it is left out: the 😊 beside it has them.
+ *
+ * ## One Unsend, then who for (NOTES §65)
+ *
+ * It offered "Unsend for everyone" and "Unsend for me only" side by side, and
+ * "Hide this from my screen" on somebody else's message. The owner: *"it's
+ * better if it's just unsend. then after clicking unsend, it has two options:
+ * unsend for me, or unsend for everyone (this only applicable to me as the
+ * sender of my message -- just like messenger)."* So one Unsend in the list,
+ * and the choice on the next page of the same sheet — which is also the
+ * confirming step, so nothing is gone on one tap.
  */
 export function MessageSheet({
   mine,
@@ -120,6 +176,7 @@ export function MessageSheet({
   editWindowMinutes,
   busy,
   error,
+  reactions = true,
   onReact,
   onReply,
   onEdit,
@@ -137,13 +194,15 @@ export function MessageSheet({
   editWindowMinutes: number;
   busy: boolean;
   error: string | null;
+  /** The reaction row at the top — for a long press, not for ⋯. */
+  reactions?: boolean;
   onReact: (emoji: string) => void;
   /** Answer it (NOTES §58). Absent where nothing can be sent — a closed conversation. */
   onReply?: () => void;
   onEdit: () => void;
   onUnsendEveryone: () => void;
   onUnsendMe: () => void;
-  /** What hiding does, in the words of the room it is in (NOTES §53). */
+  /** Under "Unsend for me" on somebody else's message, in the room's words (NOTES §53). */
   hideDetail?: string;
   /** Who sent it, for "Block Paul". Somebody else's message only (NOTES §51). */
   name?: string;
@@ -153,27 +212,57 @@ export function MessageSheet({
   onClose: () => void;
 }) {
   const t = useTheme();
+  const [unsending, setUnsending] = useState(false);
+
+  if (unsending) {
+    return (
+      <Sheet onClose={onClose}>
+        <SheetTitle>{mine ? 'Who do you want to unsend this for?' : 'Unsend this message?'}</SheetTitle>
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        <SheetActions
+          actions={[
+            mine
+              ? {
+                  icon: 'trash',
+                  label: 'Unsend for everyone',
+                  detail: 'Nobody in the chat sees it any more.',
+                  onPress: onUnsendEveryone,
+                  destructive: true,
+                  disabled: busy,
+                }
+              : null,
+            {
+              icon: 'hide',
+              label: 'Unsend for me',
+              detail: mine ? 'Gone from your screen. Everyone else still sees it.' : hideDetail,
+              onPress: onUnsendMe,
+              disabled: busy,
+            },
+          ]}
+        />
+        <Button label="Cancel" variant="secondary" onPress={onClose} disabled={busy} />
+      </Sheet>
+    );
+  }
 
   // The owner's picture: the reactions in a row of their own, then one list of
   // what can be done, each with its icon — no stack of full-width buttons.
-  // Report and Block in the danger colour; Hide first among somebody else's,
-  // the gentle option and the one most people want (NOTES §51).
+  // Report and Block in the danger colour (NOTES §51).
   return (
     <Sheet onClose={onClose}>
       {error ? <Notice tone="error">{error}</Notice> : null}
-      <ReactionRow onReact={onReact} disabled={busy} more />
+      {reactions ? <ReactionRow onReact={onReact} disabled={busy} more /> : null}
       <SheetActions
         actions={
           mine
             ? [
                 onReply ? { icon: 'reply', label: 'Reply', onPress: onReply, disabled: busy } : null,
                 canEdit ? { icon: 'edit', label: 'Edit message', onPress: onEdit, disabled: busy } : null,
-                { icon: 'trash', label: 'Unsend for everyone', onPress: onUnsendEveryone, disabled: busy },
-                { icon: 'hide', label: 'Unsend for me only', onPress: onUnsendMe, disabled: busy },
+                { icon: 'trash', label: 'Unsend', onPress: () => setUnsending(true), disabled: busy },
               ]
             : [
                 onReply ? { icon: 'reply', label: 'Reply', onPress: onReply, disabled: busy } : null,
-                { icon: 'hide', label: 'Hide this from my screen', detail: hideDetail, onPress: onUnsendMe, disabled: busy },
+                { icon: 'trash', label: 'Unsend', onPress: () => setUnsending(true), disabled: busy },
                 onViewProfile && name
                   ? { icon: 'person', label: `See ${name}'s profile`, onPress: onViewProfile, disabled: busy }
                   : null,
@@ -200,23 +289,24 @@ export function MessageSheet({
  * and with `more`, a "+" that opens every emoji the app knows.
  *
  * Each takes an equal share of the row rather than a fixed 46 pt, so all seven
- * fit a 320 pt phone without wrapping to a second line.
+ * fit a 320 pt phone without wrapping to a second line. `compact` is the bar
+ * over a message (`ReactionPopover`): 40 pt each, on the popover's own card.
  */
 export function ReactionRow({
   onReact,
   disabled,
   more,
+  compact = false,
 }: {
   onReact: (emoji: string) => void;
   disabled?: boolean;
   more?: boolean;
+  compact?: boolean;
 }) {
   const t = useTheme();
   const [picking, setPicking] = useState(false);
   const cell = ({ pressed }: { pressed: boolean }) => ({
-    flex: 1,
-    height: TOUCH_TARGET,
-    borderRadius: TOUCH_TARGET / 2,
+    ...(compact ? { width: 40, height: 40, borderRadius: 20 } : { flex: 1, height: TOUCH_TARGET, borderRadius: TOUCH_TARGET / 2 }),
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     backgroundColor: pressed ? t.bg : 'transparent',
@@ -228,8 +318,8 @@ export function ReactionRow({
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          paddingHorizontal: space.xs,
-          paddingVertical: space.xs,
+          paddingHorizontal: compact ? 0 : space.xs,
+          paddingVertical: compact ? 0 : space.xs,
           borderRadius: radius.pill,
           backgroundColor: t.card,
         }}
@@ -243,7 +333,7 @@ export function ReactionRow({
             disabled={disabled}
             style={cell}
           >
-            <Text style={{ fontSize: 26 }}>{r.emoji}</Text>
+            <Text style={{ fontSize: compact ? 24 : 26 }}>{r.emoji}</Text>
           </Pressable>
         ))}
         {more ? (
@@ -260,7 +350,11 @@ export function ReactionRow({
       </View>
 
       {picking ? (
-        <ScrollView style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          style={{ maxHeight: 180 }}
+          contentContainerStyle={compact ? { paddingHorizontal: space.xs } : undefined}
+          keyboardShouldPersistTaps="handled"
+        >
           {EMOJI_GROUPS.map((group) => (
             <View key={group.label} style={{ gap: space.hair, marginBottom: space.sm }}>
               <Text style={[type.caption, { color: t.textMuted }]}>{group.label}</Text>
@@ -286,20 +380,35 @@ export function ReactionRow({
   );
 }
 
+/** A reaction chip's height, and how far it tucks up under the bubble's edge. */
+export const CHIP_HEIGHT = 22;
+export const CHIP_OVERLAP = 6;
+/** How far a message with reactions reaches below its bubble. */
+export const CHIP_DROP = CHIP_HEIGHT - CHIP_OVERLAP;
+
 /**
- * The reaction chips under a bubble.
+ * The reaction chips on a bubble's bottom edge.
  *
  * One chip per distinct emoji with a count, the way a messenger shows them —
  * six hearts is "❤️ 6", and it is the count that says how a room felt. Tapping
  * one you left takes it back; tapping one you did not adds yours.
+ *
+ * ## Which corner (NOTES §65)
+ *
+ * They sat at the page's edge — under your bubble's right end, and under their
+ * face on the left. The owner: *"it should be opposite. just like
+ * messenger."* So they hang from the bubble's inner corner, the one towards
+ * the middle of the screen: the left of yours, the right of theirs, tucked up
+ * over its edge.
  */
 export function ReactionChips({
   tallies,
-  alignEnd,
+  side,
   onToggle,
 }: {
   tallies: ReactionTally[];
-  alignEnd: boolean;
+  /** The bubble's corner they hang from: 'start' is its left. */
+  side: 'start' | 'end';
   onToggle: (emoji: string, on: boolean) => void;
 }) {
   const t = useTheme();
@@ -309,10 +418,11 @@ export function ReactionChips({
     <View
       style={{
         flexDirection: 'row',
-        flexWrap: 'wrap',
         gap: space.hair,
-        justifyContent: alignEnd ? 'flex-end' : 'flex-start',
-        marginTop: -2,
+        alignSelf: side === 'start' ? 'flex-start' : 'flex-end',
+        marginTop: -CHIP_OVERLAP,
+        marginHorizontal: space.sm,
+        zIndex: 1,
       }}
     >
       {tallies.map((tally) => (
@@ -328,8 +438,8 @@ export function ReactionChips({
             flexDirection: 'row',
             alignItems: 'center',
             gap: 3,
+            height: CHIP_HEIGHT,
             paddingHorizontal: 7,
-            paddingVertical: 2,
             borderRadius: radius.pill,
             borderWidth: 1,
             // Yours is outlined in the accent, so a glance says whether you

@@ -4,9 +4,11 @@
  * The isolation test proves who can read and write what in a group. This
  * proves the screens, and asks the DATABASE after every step whether it agrees:
  * a group made from the pencil in Chat, with a friend ticked; a message sent
- * from its box; B's message arriving; a reply to it from the message's sheet,
- * saved as a reply to that message; the group renamed from who is in it; and
- * leaving it, which hands it to B.
+ * from its box; B's message arriving; a reply to it from the ↩ beside it,
+ * saved as a reply to that message; a 😂 from the bar the 😊 opens over it
+ * (NOTES §65); ⋯ → Unsend offering "for everyone" on A's own message and not
+ * on B's, then cancelled; the group renamed from who is in it; and leaving it,
+ * which hands it to B.
  *
  * Run:
  *   npx expo export --platform web
@@ -197,9 +199,9 @@ async function main() {
     await showing(page, FROM_B, 20_000);
     ok("B's message", 'arrives in the room');
 
-    await clickNear(page, FROM_B, 'More');
-    await showing(page, 'Hide this from my screen');
-    await page.click('Reply');
+    // The ↩ beside B's message, as Messenger has it (NOTES §65) — not the
+    // sheet any more, whose Reply shares a label with every message's arrow.
+    await clickNear(page, FROM_B, 'Reply');
     await showing(page, 'Replying to Probe B');
     await typeInto(page, 'Message the group', REPLY);
     await page.click('Send');
@@ -208,7 +210,50 @@ async function main() {
     if ((replied.data as { reply_to?: string } | null)?.reply_to === bSent.data) {
       ok('reply', "saved as an answer to B's message, and shown with it");
     } else fail('reply', `the database has ${JSON.stringify(replied.data)}`);
+
+    // ---- the 😊 beside a message: a bar of reactions over it (NOTES §65) ----
+    await clickNear(page, FROM_B, 'React');
+    await page.waitFor(
+      `document.querySelector('[aria-label="Reactions"]') ? 'y' : ''`,
+      'the reaction bar over the message',
+    );
+    await page.click('Haha');
+    await page.waitFor(`document.querySelector('[aria-label="Reactions"]') ? '' : 'y'`, 'the bar to close');
+    let reacted = false;
+    for (let i = 0; i < 20 && !reacted; i++) {
+      const r = await A.client
+        .from('group_message_reactions')
+        .select('emoji')
+        .eq('message_id', bSent.data as string)
+        .eq('user_id', A.userId);
+      reacted = (r.data ?? []).some((row) => (row as { emoji: string }).emoji === '😂');
+      if (!reacted) await new Promise((res) => setTimeout(res, 500));
+    }
+    if (reacted) ok('react', "from the bar over B's message, saved as 😂");
+    else fail('react', 'no 😂 from A in the database');
+    await showing(page, '😂');
     await shot(page, '02-group-room.png');
+
+    // ---- ⋯: one Unsend, then who for (NOTES §65) — looked at, then cancelled ----
+    const unsendChoices = async (words: string) => {
+      await clickNear(page, words, 'More');
+      await showing(page, 'Unsend');
+      await page.click('Unsend');
+      await showing(page, 'Unsend for me');
+      const everyone = await page.evaluate<string>(
+        `document.body.innerText.includes('Unsend for everyone') ? 'y' : 'n'`,
+      );
+      await page.click('Cancel');
+      await page.waitFor(`document.body.innerText.includes('Unsend for me') ? '' : 'y'`, 'the sheet to close');
+      return everyone === 'y';
+    };
+    if (await unsendChoices(FROM_A)) ok('unsend (mine)', 'for everyone, or for me');
+    else fail('unsend (mine)', '"Unsend for everyone" was not offered on my own message');
+    if (!(await unsendChoices(FROM_B))) ok("unsend (B's)", 'for me only');
+    else fail("unsend (B's)", '"Unsend for everyone" was offered on somebody else\'s message');
+    const still = await A.client.from('group_messages').select('id').eq('group_id', groupId).in('body', [FROM_A, FROM_B]);
+    if ((still.data ?? []).length === 2) ok('cancel', 'both messages still there');
+    else fail('cancel', `the database has ${JSON.stringify(still.data)}`);
 
     // ---- rename, from who is in it ----
     await page.click(`${TITLE}, 2 people. Who is in it`);

@@ -7,7 +7,15 @@ import { StatePanel } from './states';
 import { Composer } from './nomi';
 import { PersonAvatar } from './avatar';
 import { BlockSheet, ReportSheet } from './people';
-import { HoverActions, MessageSheet, ReactionChips, useLongPress } from './message-actions';
+import {
+  CHIP_DROP,
+  HoverActions,
+  MessageSheet,
+  ReactionChips,
+  ReactionPopover,
+  useLongPress,
+} from './message-actions';
+import type { Anchor } from '../core/popover';
 import { Icon } from './glyphs';
 import { CONTENT_MAX_WIDTH, radius, space, type, useTheme } from './theme';
 import { authorName, canEdit, EDIT_WINDOW_MINUTES, MESSAGE_MAX_LENGTH } from '../core/community';
@@ -85,7 +93,7 @@ export function ChatRoom({
   seenId?: string | null;
   /** Why nothing can be sent here, in place of the box to type in. */
   closed?: string | null;
-  /** Under "Hide this from my screen", on somebody else's message. */
+  /** Under "Unsend for me", on somebody else's message. */
   hideDetail: string;
   /** Under the edit box: who will see the "edited" mark. */
   editNote: string;
@@ -101,9 +109,16 @@ export function ChatRoom({
   /**
    * Which message the menu is open on. The owner: *"delete button is just one
    * click, what if i accidentally clicked it?"* — so nothing destructive is a
-   * tap on the bubble; it is a choice in this sheet (NOTES §47).
+   * tap on the bubble; it is a choice in this sheet (NOTES §47). `reactions`:
+   * opened by a long press, which is the phone's only way to react; from ⋯,
+   * the 😊 beside it has them (NOTES §65).
    */
-  const [acting, setActing] = useState<RoomMessage | null>(null);
+  const [actingOn, setActingOn] = useState<{ message: RoomMessage; reactions: boolean } | null>(null);
+  const acting = actingOn?.message ?? null;
+  const setActing = (message: RoomMessage | null, reactions = true) =>
+    setActingOn(message ? { message, reactions } : null);
+  /** The message whose reaction bar is open, and where its bubble is (NOTES §65). */
+  const [picking, setPicking] = useState<{ message: RoomMessage; anchor: Anchor } | null>(null);
   /** The message being edited, as a draft (NOTES §48). */
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
   /** Somebody else's message being reported, or its sender being blocked (NOTES §51). */
@@ -156,6 +171,15 @@ export function ChatRoom({
   });
 
   const nameOf = (m: RoomMessage) => authorName(m.author_name);
+  /** Adds yours, or takes it back if it is already there — Messenger's toggle. */
+  const react = (m: RoomMessage, emoji: string) => {
+    const already = (byMessage.get(m.id) ?? []).some((r) => r.user_id === myId && r.emoji === emoji);
+    toggle.mutate({ id: m.id, emoji, on: !already });
+  };
+  const replyTo = (m: RoomMessage) => {
+    setReplying(m);
+    setFocus((f) => f + 1);
+  };
 
   return (
     <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: space.lg }}>
@@ -194,15 +218,31 @@ export function ChatRoom({
                 edited={!!m.edited_at}
                 quote={m.quote ?? null}
                 seen={m.id === seenId}
-                canEdit={canEdit(m, myId, now)}
                 tallies={tallyReactions(byMessage.get(m.id) ?? [], myId)}
                 onAct={() => setActing(m)}
+                onMore={() => setActing(m, false)}
+                onReact={(anchor) => setPicking({ message: m, anchor })}
+                // Not in a closed conversation: there is no box to answer in.
+                onReply={closed ? undefined : () => replyTo(m)}
                 onOpenPerson={() => router.push(`/person/${m.author_id}`)}
                 onToggleReaction={(emoji, on) => toggle.mutate({ id: m.id, emoji, on })}
               />
             ))
           )}
         </ScrollView>
+
+        {/* Messenger's bar of reactions over the bubble, from its 😊 (NOTES §65). */}
+        {picking ? (
+          <ReactionPopover
+            anchor={picking.anchor}
+            mine={picking.message.author_id === myId}
+            onReact={(emoji) => {
+              react(picking.message, emoji);
+              setPicking(null);
+            }}
+            onClose={() => setPicking(null)}
+          />
+        ) : null}
 
         {/* Everything you can do to a message, from a long press on a phone or
             the ⋯ on a laptop (NOTES §48). */}
@@ -219,22 +259,18 @@ export function ChatRoom({
                   ? (toggle.error as Error).message
                   : null
             }
-            onReact={(emoji) => {
-              const already = (byMessage.get(acting.id) ?? []).some((r) => r.user_id === myId && r.emoji === emoji);
-              toggle.mutate({ id: acting.id, emoji, on: !already });
-            }}
+            reactions={actingOn?.reactions ?? true}
+            onReact={(emoji) => react(acting, emoji)}
             onEdit={() => {
               setEditing({ id: acting.id, body: acting.body });
               setActing(null);
             }}
-            // Not in a closed conversation: there is no box to answer in.
             onReply={
               closed
                 ? undefined
                 : () => {
-                    setReplying(acting);
+                    replyTo(acting);
                     setActing(null);
-                    setFocus((f) => f + 1);
                   }
             }
             onUnsendEveryone={() => unsend.mutate({ id: acting.id, everyone: true })}
@@ -302,6 +338,13 @@ export function ChatRoom({
         {send.isError ? (
           <View style={{ paddingBottom: space.sm }}>
             <Notice tone="error">{(send.error as Error).message}</Notice>
+          </View>
+        ) : null}
+        {/* A reaction from the bar or a chip that did not land: no sheet is
+            open to say so, so it is said here. */}
+        {toggle.isError && !acting ? (
+          <View style={{ paddingBottom: space.sm }}>
+            <Notice tone="error">{(toggle.error as Error).message}</Notice>
           </View>
         ) : null}
 
@@ -393,9 +436,11 @@ function Message({
   edited,
   quote,
   seen,
-  canEdit: editable,
   tallies,
   onAct,
+  onMore,
+  onReact,
+  onReply,
   onOpenPerson,
   onToggleReaction,
 }: {
@@ -413,15 +458,25 @@ function Message({
   quote: Quote | null;
   /** "Seen" under this one — the last of mine they have read (NOTES §53). */
   seen: boolean;
-  canEdit: boolean;
   tallies: ReactionTally[];
+  /** A long press: the sheet, reactions and all. */
   onAct: () => void;
+  /** The ⋯ beside it: the sheet, without the reactions (NOTES §65). */
+  onMore: () => void;
+  /** The 😊 beside it: the reaction bar, over the bubble at this place on screen. */
+  onReact: (anchor: Anchor) => void;
+  /** The ↩ beside it. Absent in a closed conversation. */
+  onReply?: () => void;
   /** Their page, from their name or their face (NOTES §51). */
   onOpenPerson: () => void;
   onToggleReaction: (emoji: string, on: boolean) => void;
 }) {
   const t = useTheme();
   const AVATAR = 28;
+  const bubble = useRef<View>(null);
+  // Hanging chips reach below the bubble; the face and the hover buttons are
+  // lifted by as much, so they still line up with the bubble and not the chips.
+  const drop = tallies.length > 0 ? CHIP_DROP : 0;
 
   /**
    * Hover, on a pointer device only.
@@ -462,14 +517,17 @@ function Message({
     >
       {/* Their name, once, above the first bubble of a run. Never on yours —
           "You" over every message you send is a label nobody needs — and not
-          between two people, where it could only ever be the same name. */}
+          between two people, where it could only ever be the same name.
+          In line with the WORDS, not the bubble's edge (NOTES §65 — the owner:
+          "the N in newbie should sit above a in 'aightttsss'"), so the
+          bubble's own padding and border are added to the face's room. */}
       {showName && startsRun && !mine ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${name}'s profile`}
           onPress={onOpenPerson}
           hitSlop={6}
-          style={{ marginLeft: AVATAR + space.sm }}
+          style={{ marginLeft: AVATAR + space.sm + space.md + 1 }}
         >
           <Text style={[type.caption, { color: t.textMuted, fontWeight: '700' }]}>{name}</Text>
         </Pressable>
@@ -492,7 +550,12 @@ function Message({
             it, with a spacer holding the line on the others. */}
         {!mine ? (
           endsRun ? (
-            <Pressable accessibilityRole="button" accessibilityLabel={`${name}'s profile`} onPress={onOpenPerson}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${name}'s profile`}
+              onPress={onOpenPerson}
+              style={{ marginBottom: drop }}
+            >
               <PersonAvatar avatar={avatar} userId={userId} name={name} size={AVATAR} />
             </Pressable>
           ) : (
@@ -500,74 +563,86 @@ function Message({
           )
         ) : null}
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${mine ? 'You' : name}${
-            quote ? (quote.removed ? ', replying to a removed message,' : `, replying to ${quote.who}: ${quote.text},`) : ''
-          } said ${said}. ${when}${edited ? ', edited' : ''}. Hold for reactions and more.`}
-          // A long press on a touch screen; the ⋯ beside it on a pointer. The
-          // bubble is no longer a one-tap unsend — the owner unsent something by
-          // accident that way (NOTES §47), and this is the fix he asked for.
-          onLongPress={onAct}
-          delayLongPress={450}
-          {...longPress}
-          style={({ pressed }) => ({
-            flexShrink: 1,
-            paddingHorizontal: space.md,
-            paddingVertical: space.sm,
-            borderRadius: radius.lg,
-            // The squarer corner points at whoever said it, on the last bubble
-            // of their run — which is what makes a stack read as a direction
-            // rather than as a column of lozenges.
-            borderBottomRightRadius: mine && endsRun ? radius.sm : radius.lg,
-            borderBottomLeftRadius: !mine && endsRun ? radius.sm : radius.lg,
-            backgroundColor: mine ? t.accent : t.card,
-            borderWidth: mine ? 0 : 1,
-            borderColor: t.border,
-            opacity: pressed ? 0.75 : 1,
-          })}
-        >
-          {/* The message answered, inside the reply's own bubble, with a bar
-              down its side — the owner's picture, and Messenger. "Message
-              removed" when it was unsent, never an empty box. */}
-          {quote ? (
-            <View
-              style={{
-                marginBottom: space.xs,
-                paddingLeft: space.sm,
-                borderLeftWidth: 3,
-                borderLeftColor: mine ? t.accentText : t.accent,
-                opacity: 0.85,
-              }}
-            >
-              {quote.who ? (
-                <Text style={[type.caption, { color: mine ? t.accentText : t.text, fontWeight: '700' }]} numberOfLines={1}>
-                  {quote.who}
-                </Text>
-              ) : null}
-              <Text
-                style={[
-                  type.caption,
-                  { color: mine ? t.accentText : t.textMuted, fontStyle: quote.removed ? 'italic' : 'normal' },
-                ]}
-                numberOfLines={2}
+        {/* The bubble with its reactions hanging from its inner corner. */}
+        <View style={{ flexShrink: 1, alignItems: mine ? 'flex-end' : 'flex-start' }}>
+          <Pressable
+            ref={bubble}
+            accessibilityRole="button"
+            accessibilityLabel={`${mine ? 'You' : name}${
+              quote ? (quote.removed ? ', replying to a removed message,' : `, replying to ${quote.who}: ${quote.text},`) : ''
+            } said ${said}. ${when}${edited ? ', edited' : ''}. Hold for reactions and more.`}
+            // A long press on a touch screen; the ⋯ beside it on a pointer. The
+            // bubble is no longer a one-tap unsend — the owner unsent something by
+            // accident that way (NOTES §47), and this is the fix he asked for.
+            onLongPress={onAct}
+            delayLongPress={450}
+            {...longPress}
+            style={({ pressed }) => ({
+              maxWidth: '100%',
+              paddingHorizontal: space.md,
+              paddingVertical: space.sm,
+              borderRadius: radius.lg,
+              // The squarer corner points at whoever said it, on the last bubble
+              // of their run — which is what makes a stack read as a direction
+              // rather than as a column of lozenges.
+              borderBottomRightRadius: mine && endsRun ? radius.sm : radius.lg,
+              borderBottomLeftRadius: !mine && endsRun ? radius.sm : radius.lg,
+              backgroundColor: mine ? t.accent : t.card,
+              borderWidth: mine ? 0 : 1,
+              borderColor: t.border,
+              opacity: pressed ? 0.75 : 1,
+            })}
+          >
+            {/* The message answered, inside the reply's own bubble, with a bar
+                down its side — the owner's picture, and Messenger. "Message
+                removed" when it was unsent, never an empty box. */}
+            {quote ? (
+              <View
+                style={{
+                  marginBottom: space.xs,
+                  paddingLeft: space.sm,
+                  borderLeftWidth: 3,
+                  borderLeftColor: mine ? t.accentText : t.accent,
+                  opacity: 0.85,
+                }}
               >
-                {quote.text}
+                {quote.who ? (
+                  <Text style={[type.caption, { color: mine ? t.accentText : t.text, fontWeight: '700' }]} numberOfLines={1}>
+                    {quote.who}
+                  </Text>
+                ) : null}
+                <Text
+                  style={[
+                    type.caption,
+                    { color: mine ? t.accentText : t.textMuted, fontStyle: quote.removed ? 'italic' : 'normal' },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {quote.text}
+                </Text>
+              </View>
+            ) : null}
+            {words ? (
+              <Text style={[type.body, { color: mine ? t.accentText : t.text }]} selectable>
+                {words}
               </Text>
-            </View>
-          ) : null}
-          {words ? (
-            <Text style={[type.body, { color: mine ? t.accentText : t.text }]} selectable>
-              {words}
-            </Text>
-          ) : null}
-          {carried && sent.data ? <SentPostCard post={sent.data} /> : null}
-        </Pressable>
+            ) : null}
+            {carried && sent.data ? <SentPostCard post={sent.data} /> : null}
+          </Pressable>
+          {/* The inner corner: the left of yours, the right of theirs (NOTES §65). */}
+          <ReactionChips tallies={tallies} side={mine ? 'start' : 'end'} onToggle={onToggleReaction} />
+        </View>
 
-        <HoverActions visible={hovered} mine={mine} canEdit={editable} onPick={onAct} />
+        <View style={{ marginBottom: drop }}>
+          <HoverActions
+            visible={hovered}
+            mine={mine}
+            onReact={() => bubble.current?.measureInWindow((x, y, width, height) => onReact({ x, y, width, height }))}
+            onReply={onReply}
+            onMore={onMore}
+          />
+        </View>
       </View>
-
-      <ReactionChips tallies={tallies} alignEnd={mine} onToggle={onToggleReaction} />
 
       {/* Once per run, not once per message. Six timestamps down a page of one
           person talking is six times as much furniture as the information in

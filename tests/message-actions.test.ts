@@ -162,3 +162,54 @@ describe('the actions on a message', () => {
     }
   });
 });
+
+describe('like Messenger (NOTES §65)', () => {
+  const source = readFileSync('src/ui/message-actions.tsx', 'utf8');
+  const chat = readFileSync('src/ui/chat-room.tsx', 'utf8');
+  const sheet = source.slice(source.indexOf('export function MessageSheet('), source.indexOf('export function ReactionRow('));
+
+  it('beside a bubble: the emoji, Reply and ⋯, each doing its own thing', () => {
+    // The emoji and the ⋯ both opened the same sheet — "they serve the same purpose".
+    const hover = source.slice(source.indexOf('export function HoverActions('), source.indexOf('export const REACTION_BAR_WIDTH'));
+    expect(hover).toContain('<ActionButton label="React" icon="emoji" onPress={onReact} />');
+    expect(hover).toContain('<ActionButton label="Reply" icon="reply" onPress={onReply} />');
+    expect(hover).toContain('<ActionButton label="More" icon="more" onPress={onMore} />');
+    // The emoji nearest the words on both sides.
+    expect(hover).toContain("flexDirection: mine ? 'row-reverse' : 'row'");
+  });
+
+  it('the emoji opens a bar of reactions over the message, not a sheet', () => {
+    expect(chat).toContain('bubble.current?.measureInWindow((x, y, width, height) => onReact({ x, y, width, height }))');
+    expect(chat).toContain('<ReactionPopover');
+    expect(source).toMatch(/<Popover[\s\S]*?<ReactionRow onReact=\{onReact\} more compact \/>/);
+    // From ⋯ the sheet leaves the reactions out; a long press keeps them.
+    expect(chat).toContain('onMore={() => setActing(m, false)}');
+    expect(chat).toContain('onAct={() => setActing(m)}');
+  });
+
+  it('one Unsend, then who for — and only the sender can unsend for everyone', () => {
+    expect(source).not.toContain("label: 'Hide this from my screen'");
+    expect(source).not.toContain("label: 'Unsend for me only'");
+    // The sheet's first page is its last `<Sheet`; the choice comes before it.
+    const firstPage = sheet.slice(sheet.lastIndexOf('<Sheet onClose={onClose}>'));
+    expect((firstPage.match(/label: 'Unsend',/g) ?? []).length).toBe(2);
+    expect(firstPage).not.toMatch(/label: 'Unsend for/);
+    const second = sheet.slice(sheet.indexOf('if (unsending)'), sheet.lastIndexOf('<Sheet onClose={onClose}>'));
+    expect(second).toMatch(/mine\s*\?\s*\{\s*icon: 'trash',\s*label: 'Unsend for everyone'/);
+    expect(second).toContain("label: 'Unsend for me'");
+    expect(second).toContain('<Button label="Cancel"');
+  });
+
+  it('reactions hang from the bubble’s inner corner: the left of yours, the right of theirs', () => {
+    expect(chat).toContain("<ReactionChips tallies={tallies} side={mine ? 'start' : 'end'}");
+    expect(source).toContain("alignSelf: side === 'start' ? 'flex-start' : 'flex-end'");
+    expect(source).toContain('marginTop: -CHIP_OVERLAP');
+  });
+
+  it('a name over a bubble lines up with the words inside it', () => {
+    // "the N in newbie should sit above a in 'aightttsss'" — the face's room,
+    // plus the bubble's padding and border.
+    expect(chat).toContain('style={{ marginLeft: AVATAR + space.sm + space.md + 1 }}');
+    expect(chat).toMatch(/paddingHorizontal: space\.md,\s*paddingVertical: space\.sm,\s*borderRadius: radius\.lg/);
+  });
+});

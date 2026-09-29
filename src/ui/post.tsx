@@ -11,6 +11,7 @@ import { useReducedMotion } from './motion';
 import { petFrame } from './pet';
 import { Icon, type IconName } from './glyphs';
 import { ShareSheet } from './share-sheet';
+import { PhotoViewer } from './photo-viewer';
 import { radius, space, TOUCH_TARGET, type, useTheme } from './theme';
 import type { Reaction } from '../core/emoji';
 import {
@@ -85,10 +86,15 @@ export function PostList({
     [posts],
   );
 
+  // A repost's original too: its photo opens with its own heart (NOTES §65).
+  const reactionIds = useMemo(
+    () => [...new Set([...ids, ...posts.map((p) => p.shared_post_id).filter((id): id is string => !!id)])],
+    [ids, posts],
+  );
   const { data: reactions = [] } = useQuery({
-    queryKey: ['post-reactions', ids],
-    queryFn: () => listPostReactions(ids),
-    enabled: ids.length > 0,
+    queryKey: ['post-reactions', reactionIds],
+    queryFn: () => listPostReactions(reactionIds),
+    enabled: reactionIds.length > 0,
   });
   const { data: links = {} } = useQuery({
     queryKey: ['post-images', paths],
@@ -122,6 +128,8 @@ export function PostList({
   const [reporting, setReporting] = useState<FeedPost | null>(null);
   const [blocking, setBlocking] = useState<{ id: string; name: string } | null>(null);
   const [sharing, setSharing] = useState<FeedPost | null>(null);
+  /** The post whose photo is open, the whole screen (NOTES §65) — a repost's original, when it is that photo. */
+  const [viewing, setViewing] = useState<FeedPost | null>(null);
   const [failed, setFailed] = useState<{ id: string; message: string } | null>(null);
 
   const refresh = async () => {
@@ -188,6 +196,8 @@ export function PostList({
               originalWhen={original ? agoShort(Date.parse(original.created_at), now) : ''}
               originalImageUrl={original?.image_path ? links[original.image_path] ?? null : null}
               onOpenOriginal={original ? () => router.push(`/post/${original.id}`) : undefined}
+              onOpenPhoto={() => setViewing(post)}
+              onOpenOriginalPhoto={original ? () => setViewing(original) : undefined}
               hearts={hearts}
               saved={isSaved}
               failed={failed?.id === post.id ? failed.message : null}
@@ -211,6 +221,32 @@ export function PostList({
           );
         })}
       </Rows>
+
+      {/* Before the sheets, so Share from inside it opens over it. */}
+      {viewing ? (
+        <PostPhotoViewer
+          post={viewing}
+          uri={viewing.image_path ? links[viewing.image_path] ?? null : null}
+          when={agoShort(Date.parse(viewing.created_at), now)}
+          hearts={heartsOf(byPost.get(viewing.id) ?? [], myId)}
+          failed={failed?.id === viewing.id ? failed.message : null}
+          onHeart={(mine) => {
+            setFailed(null);
+            toggle.mutate({ id: viewing.id, emoji: HEART, on: !mine });
+          }}
+          onComment={() => {
+            setViewing(null);
+            // On the post's own page the comment box is right there.
+            if (only?.id === viewing.id && onComment) onComment();
+            else router.push(`/post/${viewing.id}`);
+          }}
+          onShare={() => {
+            setFailed(null);
+            setSharing(viewing);
+          }}
+          onClose={() => setViewing(null)}
+        />
+      ) : null}
 
       {acting ? (
         <PostSheet
@@ -293,6 +329,8 @@ function PostCard({
   originalWhen,
   originalImageUrl,
   onOpenOriginal,
+  onOpenPhoto,
+  onOpenOriginalPhoto,
   hearts,
   saved,
   failed,
@@ -312,6 +350,9 @@ function PostCard({
   originalWhen: string;
   originalImageUrl: string | null;
   onOpenOriginal?: () => void;
+  /** Its photo, the whole screen (NOTES §65); and the original's, in a repost. */
+  onOpenPhoto: () => void;
+  onOpenOriginalPhoto?: () => void;
   hearts: { count: number; mine: boolean };
   saved: boolean;
   failed: string | null;
@@ -382,9 +423,15 @@ function PostCard({
         </Text>
       ) : null}
 
-      <PostAttachment post={post} imageUrl={imageUrl} />
+      <PostAttachment post={post} imageUrl={imageUrl} onOpenPhoto={onOpenPhoto} />
       {original ? (
-        <EmbeddedPost post={original} when={originalWhen} imageUrl={originalImageUrl} onOpen={onOpenOriginal} />
+        <EmbeddedPost
+          post={original}
+          when={originalWhen}
+          imageUrl={originalImageUrl}
+          onOpen={onOpenOriginal}
+          onOpenPhoto={onOpenOriginalPhoto}
+        />
       ) : null}
 
       {/* The actions: heart, comments and share together, save at the far end
@@ -428,11 +475,14 @@ function HeartButton({
   mine,
   count,
   failed,
+  tint,
   onPress,
 }: {
   mine: boolean;
   count: number;
   failed: string | null;
+  /** The colour when not given, and of the count — white over a photo (NOTES §65). */
+  tint?: string;
   onPress: () => void;
 }) {
   const t = useTheme();
@@ -459,7 +509,7 @@ function HeartButton({
     onPress();
   };
 
-  const color = on ? t.danger : t.textMuted;
+  const color = on ? t.danger : tint ?? t.textMuted;
   return (
     <Pressable
       accessibilityRole="button"
@@ -496,7 +546,7 @@ function HeartButton({
           <Icon name="heart" color={color} size={22} filled={on} />
         </Animated.View>
       </View>
-      {shown ? <Text style={[type.label, { color: t.textMuted }]}>{shown}</Text> : null}
+      {shown ? <Text style={[type.label, { color: tint ?? t.textMuted }]}>{shown}</Text> : null}
     </Pressable>
   );
 }
@@ -511,6 +561,7 @@ function ActionIcon({
   count,
   on = false,
   onColor,
+  tint,
   onPress,
 }: {
   icon: IconName;
@@ -518,10 +569,12 @@ function ActionIcon({
   count?: number;
   on?: boolean;
   onColor?: string;
+  /** In place of the muted grey — white over a photo (NOTES §65). */
+  tint?: string;
   onPress: () => void;
 }) {
   const t = useTheme();
-  const color = on && onColor ? onColor : t.textMuted;
+  const color = on && onColor ? onColor : tint ?? t.textMuted;
   return (
     <Pressable
       accessibilityRole="button"
@@ -541,8 +594,73 @@ function ActionIcon({
       })}
     >
       <Icon name={icon} color={color} size={22} filled={on} />
-      {count ? <Text style={[type.label, { color: t.textMuted }]}>{count}</Text> : null}
+      {count ? <Text style={[type.label, { color: tint ?? t.textMuted }]}>{count}</Text> : null}
     </Pressable>
+  );
+}
+
+/** White on the viewer's black, whatever the app's theme. */
+const ON_PHOTO = 'rgba(255, 255, 255, 0.9)';
+
+/**
+ * A post's photo, the whole screen, with the post's own heart, comments and
+ * share at the bottom (NOTES §65 — the owner: *"the like comment share can
+ * still be seen at the bottom part"*). The same buttons as under the post, so
+ * a heart given here is the heart there.
+ */
+function PostPhotoViewer({
+  post,
+  uri,
+  when,
+  hearts,
+  failed,
+  onHeart,
+  onComment,
+  onShare,
+  onClose,
+}: {
+  post: FeedPost;
+  uri: string | null;
+  when: string;
+  hearts: { count: number; mine: boolean };
+  failed: string | null;
+  onHeart: (mine: boolean) => void;
+  onComment: () => void;
+  onShare: () => void;
+  onClose: () => void;
+}) {
+  if (!uri) return null;
+  const name = nameOf(post);
+  const handle = atUsername(post.author_username);
+  return (
+    <PhotoViewer
+      uri={uri}
+      width={post.image_width}
+      height={post.image_height}
+      name={name}
+      detail={[handle && handle !== name ? handle : null, when].filter(Boolean).join(' · ')}
+      words={post.body}
+      onClose={onClose}
+      actions={
+        <>
+          <HeartButton
+            mine={hearts.mine}
+            count={hearts.count}
+            failed={failed}
+            tint={ON_PHOTO}
+            onPress={() => onHeart(hearts.mine)}
+          />
+          <ActionIcon
+            icon="comment"
+            label={commentLabel(post.comments)}
+            count={post.comments}
+            tint={ON_PHOTO}
+            onPress={onComment}
+          />
+          <ActionIcon icon="share" label="Share" tint={ON_PHOTO} onPress={onShare} />
+        </>
+      }
+    />
   );
 }
 
@@ -559,11 +677,13 @@ function EmbeddedPost({
   when,
   imageUrl,
   onOpen,
+  onOpenPhoto,
 }: {
   post: FeedPost;
   when: string;
   imageUrl: string | null;
   onOpen?: () => void;
+  onOpenPhoto?: () => void;
 }) {
   const t = useTheme();
   const name = nameOf(post);
@@ -594,7 +714,7 @@ function EmbeddedPost({
           </Text>
         ) : null}
       </Pressable>
-      <PostAttachment post={post} imageUrl={imageUrl} />
+      <PostAttachment post={post} imageUrl={imageUrl} onOpenPhoto={onOpenPhoto} />
     </View>
   );
 }
@@ -620,38 +740,64 @@ function HiddenPost({ onShow }: { onShow: () => void }) {
 }
 
 /** A photo, a set, or a streak — at most one, as 0027 allows. */
-function PostAttachment({ post, imageUrl }: { post: FeedPost; imageUrl: string | null }) {
+function PostAttachment({
+  post,
+  imageUrl,
+  onOpenPhoto,
+}: {
+  post: FeedPost;
+  imageUrl: string | null;
+  onOpenPhoto?: () => void;
+}) {
   if (post.image_path) {
-    return <PostPhoto uri={imageUrl} width={post.image_width ?? 4} height={post.image_height ?? 3} />;
+    return (
+      <PostPhoto uri={imageUrl} width={post.image_width ?? 4} height={post.image_height ?? 3} onOpen={onOpenPhoto} />
+    );
   }
   if (post.set_id) return <SetPeek setId={post.set_id} title={post.set_title} cards={post.set_cards} />;
   if (post.streak_days) return <StreakBrag days={post.streak_days} pet={post.pet} />;
   return null;
 }
 
-/** The photo at its own shape, with that space held while it loads. */
-export function PostPhoto({ uri, width, height }: { uri: string | null; width: number; height: number }) {
+/**
+ * The photo at its own shape, with that space held while it loads. With
+ * `onOpen`, a tap opens it the whole screen (NOTES §65) — once it has loaded,
+ * so there is something to open.
+ */
+export function PostPhoto({
+  uri,
+  width,
+  height,
+  onOpen,
+}: {
+  uri: string | null;
+  width: number;
+  height: number;
+  onOpen?: () => void;
+}) {
   const t = useTheme();
   const ratio = Math.min(PHOTO_RATIO_MAX, Math.max(PHOTO_RATIO_MIN, width / Math.max(1, height)));
+  const box = {
+    width: '100%' as const,
+    aspectRatio: ratio,
+    borderRadius: radius.md,
+    overflow: 'hidden' as const,
+    backgroundColor: t.card,
+  };
+  const photo = uri ? (
+    <Image source={{ uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" accessibilityLabel="Photo" />
+  ) : null;
+  if (!onOpen) return <View style={box}>{photo}</View>;
   return (
-    <View
-      style={{
-        width: '100%',
-        aspectRatio: ratio,
-        borderRadius: radius.md,
-        overflow: 'hidden',
-        backgroundColor: t.card,
-      }}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Open the photo"
+      onPress={onOpen}
+      disabled={!uri}
+      style={({ pressed }) => [box, { opacity: pressed ? 0.85 : 1 }]}
     >
-      {uri ? (
-        <Image
-          source={{ uri }}
-          style={{ width: '100%', height: '100%' }}
-          resizeMode="cover"
-          accessibilityLabel="Photo"
-        />
-      ) : null}
-    </View>
+      {photo}
+    </Pressable>
   );
 }
 

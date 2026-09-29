@@ -409,7 +409,9 @@ describe('on screen', () => {
     for (const name of ['groups/new', 'groups/[id]/index', 'groups/[id]/info']) {
       expect(layout, name).toContain(`<Stack.Screen name="${name}" options={{ title: '', ...backable }} />`);
     }
-    expect(layout).toContain("path[0] !== 'groups'");
+    // Since NOTES §65 the ✦ is on a set's three study screens and nowhere else,
+    // so it is off this one by construction.
+    expect(layout).toContain("const showAssistant = signedIn && path[0] === 'set' && ASSISTANT_SCREENS.includes(path[2] ?? '');");
   });
 
   it('a group is the same ChatRoom, reported as a group message', () => {

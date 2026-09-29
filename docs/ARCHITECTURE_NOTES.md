@@ -8943,6 +8943,102 @@ post."*
   was a second row and `maybeSingle` read two rows as none. It reads the
   newest now.
 
+## 65. A photo to zoom into, pop-ups in the middle, the ✦ on study screens only, and chats like Messenger (2026-09-29)
+
+The owner, with four screenshots: a post's photo *"i can't click on the
+picture. i want it to work like facebook"* with zoom and the like, comment and
+share still at the bottom; What's new *"sitting at the bottom middle. middle
+middle is better"*; in chats the reactions on the wrong side and a name not
+lined up with the words; the emoji and the ⋯ beside a message *"serve the same
+purpose"*; and *"remove that 'Hide this from my screen'. it's better if it's
+just unsend"*, with the who-for choice after it. And: *"i'm starting to think
+that maybe we should remove the gemini chatbot at the bottom right"*. Two
+things were put to him: the ✦ — he chose **only on the study screens**; and
+the pop-ups — **in the middle everywhere**, the phone too. No database change.
+
+### 65.1 The photo, the whole screen
+
+- A post's photo is a button ("Open the photo"), and so is a repost's
+  original. `PhotoViewer` (`src/ui/photo-viewer.tsx`): black, ✕ top left, − 100% +
+  top right, the photo whole in the middle, and at the bottom the name, "@user ·
+  2h", the words (two lines, a tap for all) and **the post's own heart,
+  comments and share** — `HeartButton` and `ActionIcon` with a white `tint`,
+  so a heart given there is the heart under the post. Comments opens the post
+  (or the box, on its own page); Share opens the in-app share sheet over it.
+- Zoom: pinch (about the fingers' midpoint), the wheel (about the pointer,
+  non-passive so the page does not scroll), − and +, the keys − + 0, and a
+  double tap (in to 2.5× where tapped, or back out). Zoomed, a drag moves it;
+  at 1×, a drag of 110 pt up or down puts it away. `touch-action: none`.
+- The numbers are `src/core/photo-view.ts` (`tests/photo-view.test.ts`): fit at
+  1×, 1–4×, never moved so far that its edge leaves the frame's, the point under
+  the fingers kept. The original's heart needs its reactions, so `PostList`
+  fetches them for `shared_post_id` too.
+- `FullScreen` (a black Modal) lives in `sheet.tsx`, so "no Modal outside the
+  sheet's file" (`tests/redesign.test.ts`) still holds.
+
+### 65.2 The Sheet is a card in the middle
+
+Every Sheet — What's new, every ⋯, report, block, the rules, the composer —
+sits in the middle of the screen with every corner round, a margin and the
+safe areas all round; no grab handle. A `tall` sheet is the room there is, at
+most 760 pt. The Modal rule and the blur are unchanged.
+
+### 65.3 The ✦, on flashcards, quiz and blanks only
+
+`showAssistant = signedIn && path[0] === 'set' && ASSISTANT_SCREENS.includes(path[2])`
+— an allow-list of three, replacing a list of eight exceptions. The tests that
+held each exception (post, groups, messages, search, Nomi, Community,
+sign-in) now hold the rule. `FLOAT_CLEARANCE` is left on `Screen`.
+
+### 65.4 Chats, like Messenger
+
+- **Beside a bubble, on a pointer: 😊 ↩ ⋯**, the emoji nearest the words on
+  both sides (reversed for yours). Edit left the hover bar for the ⋯ sheet.
+- **😊 opens a bar of reactions over the message** (`ReactionPopover`, a
+  `Popover` in `sheet.tsx`, placed by `src/core/popover.ts`): above the bubble
+  when it fits or when there is more room above, lined up with theirs' left
+  edge and yours' right, moved in from the window's sides; "+" grows it upward
+  into every emoji. A pick adds or takes back yours and closes it. A reaction
+  that fails with no sheet open is said over the box.
+- **↩ answers straight away. ⋯ opens the sheet without the reactions**; a long
+  press on a phone still opens it with them — the phone's only way to react.
+- **One "Unsend"** on every message, then a second page: yours — "Who do you
+  want to unsend this for?", Unsend for everyone / Unsend for me; theirs —
+  "Unsend this message?", Unsend for me with the room's words under it; and
+  Cancel. "Hide this from my screen" is gone. Same `hideForMe` and
+  `unsendEveryone` underneath.
+- **Reactions hang from the bubble's inner corner** — the left of yours, the
+  right of theirs — tucked 6 pt over its edge (`CHIP_HEIGHT` 22, fixed); the
+  face and the hover bar are lifted by the 16 pt they hang below, so they still
+  line up with the bubble.
+- **A name over a bubble lines up with the words**: `AVATAR + space.sm +
+  space.md + 1` (the bubble's padding and border).
+
+### 65.5 Measured (2026-09-29)
+
+- typecheck clean with and without `.expo/` · **1628 tests**, 3 skipped
+  (`tests/photo-view.test.ts` 10, `tests/popover.test.ts` 6, five new in
+  `tests/message-actions.test.ts`) · built and booted.
+- **Photographed as test account A**, 393 and 1280 wide, dark: the viewer at
+  100% and zoomed to 195% by + (phone and desktop, from a friends-only photo
+  post A made and deleted — A has no friends at the moment, so nobody else saw
+  it); a post's ⋯ as a card in the middle of a phone; the Everyone room with
+  "Newbie" over the words, ❤️ and 😂 on the right corner of others' bubbles,
+  😊 ↩ ⋯ on hover, the bar over the message, "+" open, the ⋯ sheet without
+  reactions, and "Unsend this message?" with only Unsend for me. Nothing sent
+  or reacted in the room.
+- **`groups-probe` and `posts-probe` could not run: test account B is
+  restricted** — `send_friend_request` as B answers `RSTRC Your account is
+  restricted.`, so the probes' setup cannot make A and B friends (the setup
+  does not check that call; the group screen then has no "Probe B" to tick).
+  The owner lifts it in the SQL editor (HANDOFF). Both probes are updated for
+  this round: `groups-probe` replies from the ↩, reacts 😂 from the bar and
+  asks the database, and opens ⋯ → Unsend on A's message (for everyone offered)
+  and on B's (not offered), cancelling both; `posts-probe` opens B's photo,
+  zooms to 125%, and counts one more heart and share while it is open.
+- Headless Chrome drew one emoji in the "+" panel as an empty box — a font on
+  the test machine, not the app.
+
 
 ## Sources
 

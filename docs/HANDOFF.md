@@ -98,7 +98,15 @@ iPhone lost the old one — confirmed fixed on the owner's phone); sharing insid
 Nomi — to your feed (migration 0034) or to a friend or group as a message; a
 reported post folded away for the reporter; What's new as a sheet; a profile
 photo editor with a circle and zoom; the heart pops, and posts have no other
-reactions. **Probe reports pile up:** each run
+reactions. **Then (NOTES §65, not yet deployed):** a post's photo opens the
+whole screen to zoom into, with its heart, comments and share at the bottom;
+every Sheet is a card in the middle of the screen; the ✦ is on the three study
+screens only; and chats like Messenger — 😊 ↩ ⋯ beside a bubble, a reaction bar
+over the message, one Unsend then who for, reactions on the bubble's inner
+corner, names lined up with the words. **Test account B was found restricted**
+on 2026-09-29 (the owner trying `/moderation`), so `groups-probe` and
+`posts-probe` stop at their setup until he lifts it — both were updated for
+§65 and have not run since. **Probe reports pile up:** each run
 of `friends-probe` and the isolation test leaves marked reports, and at 20 in
 a day test account B hits the report limit (§58.4) — clear them with the SQL
 the probes print. A report left open also makes a later identical report hand
@@ -536,6 +544,12 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
     rules agreed, not restricted. A new function that lets one person reach
     another adds the same one line, and `tests/moderation.test.ts` gains it.
     The test accounts must never be in `app_admins`.
+55. **The ✦ is on flashcards, quiz and blanks, and nowhere else** (NOTES §65,
+    the owner's decision — he was close to removing it). An allow-list, not a
+    list of exceptions; Nomi is its own tab everywhere else.
+56. **Every Sheet sits in the middle of the screen, on the phone too** (NOTES
+    §65, the owner's decision: *"middle middle is better"*), with no grab
+    handle. Bottom sheets were the redesign's; do not bring them back.
 
 ## Hard-won gotchas — do not rediscover these
 

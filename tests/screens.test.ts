@@ -317,9 +317,22 @@ describe('the existing assistant still works, and is now called Nomi', () => {
     const layout = read('app', '_layout.tsx');
     expect(layout).toContain('<StudyAssistant />');
     // `path`, not `segments`, since NOTES §47.8 — the segments tuple cannot be
-    // indexed past 0 on a clean checkout. What is asserted is the rule, not the
-    // spelling: hidden on sign-in.
-    expect(layout).toContain("path[0] !== 'sign-in'");
+    // indexed past 0 on a clean checkout.
+    expect(layout).toContain('const path = segments as readonly string[];');
+  });
+
+  it('is on the three study screens and nowhere else (NOTES §65, the owner’s decision)', () => {
+    // It was everywhere but a list of exceptions — sign-in, Nomi's own screen,
+    // the legal pages, Community, the rooms, groups, search, a post — each one
+    // added after it landed on something. Now the rule is where it belongs: a
+    // card in front of you, which it can see.
+    const layout = read('app', '_layout.tsx');
+    expect(layout).toContain("const ASSISTANT_SCREENS: readonly string[] = ['flashcards', 'quiz', 'blanks'];");
+    expect(layout).toContain(
+      "const showAssistant = signedIn && path[0] === 'set' && ASSISTANT_SCREENS.includes(path[2] ?? '');",
+    );
+    // The flashcards still tell it which card is open.
+    expect(read('app', 'set', '[id]', 'flashcards.tsx')).toContain('useAssistantContext');
   });
 
   it('the ✦ panel and Nomi’s screen are one conversation, not two AIs', () => {
@@ -328,18 +341,6 @@ describe('the existing assistant still works, and is now called Nomi', () => {
     // chat (NOTES §36).
     expect(code(read('src', 'ui', 'assistant.tsx'))).toContain('useNomiConversation(context)');
     expect(code(read('app', 'nomi.tsx'))).toContain('useNomiConversation(context)');
-  });
-
-  it('is hidden on Nomi’s own screen, where the whole screen is the conversation', () => {
-    expect(read('app', '_layout.tsx')).toContain("path[0] !== 'nomi'");
-  });
-
-  it('is hidden on Community, where it would land on the Send button', () => {
-    // The owner, on a phone: "the gemini icon or chatbot is interfering with
-    // the send button. it looks messy." Every other screen is a `Screen`, which
-    // reserves FLOAT_CLEARANCE; the chat cannot, because its composer is pinned
-    // rather than scrolled (NOTES §47.2).
-    expect(read('app', '_layout.tsx')).toContain("path[1] !== 'community'");
   });
 
   it('shows the same owl on both surfaces, and keeps ✦ on the floating button', () => {
