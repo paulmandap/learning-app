@@ -21,10 +21,12 @@ import {
   isRetryableStatus,
 } from '../core/ai-errors';
 import { parseRetryAfter, RateLimitedError } from '../core/queue';
+import { chatLadder, nextCallTimeout, type Served } from '../core/chat-ladder';
 import { MAX_REPLY_TOKENS, type AssistantContext } from '../core/chat';
 import {
   buildGeneratePrompt,
   buildGradePrompt,
+  buildHintPrompt,
   buildPointQaPrompt,
   buildReviewerPrompt,
   buildRubricCheckPrompt,
@@ -40,6 +42,8 @@ import {
   parsePointedPairs,
   parseReadResult,
   parseChatResult,
+  parseHintResult,
+  HINT_RESPONSE_SCHEMA,
   POINT_QA_RESPONSE_SCHEMA,
   parseReviewerResult,
   parseRubricCheck,
@@ -105,6 +109,17 @@ const TEST_TIMEOUT_MS = 15_000;
  * the entire set.
  */
 const CALL_TIMEOUT_MS = 100_000;
+
+/**
+ * The model that answered the last chat message, and when (NOTES §67) — tried
+ * first next time. Module-wide, because a provider is made per message.
+ */
+let lastChatServed: Served | null = null;
+
+/** Start the next chat from the top of the ladder — for tests, which share this module. */
+export function forgetLastChatModel(): void {
+  lastChatServed = null;
+}
 
 export class GeminiBrowserProvider implements AIProvider {
   readonly #apiKey: string;
@@ -292,12 +307,25 @@ export class GeminiBrowserProvider implements AIProvider {
    * immediately: trying three more models with the same bad key just makes a
    * typo take four times as long to report.
    */
-  async #generateContentWithFallback(models: readonly string[], body: unknown): Promise<unknown> {
+  async #generateContentWithFallback(
+    models: readonly string[],
+    body: unknown,
+    /**
+     * A chat message's limits (NOTES §67): each model's deadline from what is
+     * left of the whole message's, and who answered, to go first next time.
+     * Without them, a call has the generous `CALL_TIMEOUT_MS` a model.
+     */
+    chat?: { startedAt: number; onServed: (model: string) => void },
+  ): Promise<unknown> {
     let lastRateLimit: RateLimitedError | null = null;
 
     for (const [i, model] of models.entries()) {
+      const timeout = chat ? nextCallTimeout(chat.startedAt, Date.now()) : CALL_TIMEOUT_MS;
+      // The message's time is up: "busy" now, not after the rest of the ladder.
+      if (timeout <= 0) break;
       try {
-        const result = await this.#generateContent(model, body);
+        const result = await this.#generateContent(model, body, timeout);
+        chat?.onServed(model);
         // A fallback is not a neutral event: the rungs differ in capability, so
         // a run served by the last one can produce fewer and weaker cards than
         // the same run served by the first. Without this, that difference is
@@ -316,11 +344,11 @@ export class GeminiBrowserProvider implements AIProvider {
     throw lastRateLimit ?? new RateLimitedError(null);
   }
 
-  async #generateContent(model: string, body: unknown): Promise<unknown> {
+  async #generateContent(model: string, body: unknown, timeoutMs = CALL_TIMEOUT_MS): Promise<unknown> {
     // An overloaded model can sit for well over a minute before returning 503,
     // so a call without a deadline can stall a whole run indefinitely.
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     let response: Response;
     try {
@@ -533,23 +561,57 @@ export class GeminiBrowserProvider implements AIProvider {
     // A conversation now (NOTES §36): the standing instruction as the system
     // instruction, and the thread as alternating turns, so the model sees what
     // was said rather than one pasted block. Nomi's replies are "model" turns.
-    const payload = await this.#generateContentWithFallback(LIGHT_LADDER, {
-      systemInstruction: { parts: [{ text: input.system }] },
-      contents: input.turns.map((turn) => ({
-        role: turn.role === 'nomi' ? 'model' : 'user',
-        parts: [{ text: turn.text }],
-      })),
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: CHAT_RESPONSE_SCHEMA,
-        maxOutputTokens: MAX_REPLY_TOKENS,
-        // Warmer than the 0.3 a one-shot explanation used: this is a chat,
-        // and a friend who answers "hi" identically every time is a machine.
-        temperature: 0.6,
+    //
+    // A chat's own limits (NOTES §67): 15 s a model and 45 s in all, starting
+    // with the model that answered last — not card-making's 100 s a model.
+    const startedAt = Date.now();
+    const payload = await this.#generateContentWithFallback(
+      chatLadder(LIGHT_LADDER, lastChatServed, startedAt),
+      {
+        systemInstruction: { parts: [{ text: input.system }] },
+        contents: input.turns.map((turn) => ({
+          role: turn.role === 'nomi' ? 'model' : 'user',
+          parts: [{ text: turn.text }],
+        })),
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: CHAT_RESPONSE_SCHEMA,
+          maxOutputTokens: MAX_REPLY_TOKENS,
+          // Warmer than the 0.3 a one-shot explanation used: this is a chat,
+          // and a friend who answers "hi" identically every time is a machine.
+          temperature: 0.6,
+        },
       },
-    });
+      { startedAt, onServed: (model) => (lastChatServed = { model, at: Date.now() }) },
+    );
 
     return parseChatResult(payload);
+  }
+
+  /**
+   * A hint towards a card's answer, for a stuck student (NOTES §69).
+   *
+   * On a chat's limits, not card-making's: a student is sitting on the card
+   * waiting for it, so 15 s a model and 45 s in all, starting with the model
+   * that last answered (NOTES §67). Null when nothing usable came back; whether
+   * it gives the answer away is the caller's check (`givesAway`).
+   */
+  async hint(input: { question: string; answer: string; source: string }): Promise<string | null> {
+    const startedAt = Date.now();
+    const payload = await this.#generateContentWithFallback(
+      chatLadder(LIGHT_LADDER, lastChatServed, startedAt),
+      {
+        contents: [{ role: 'user', parts: [{ text: buildHintPrompt(input) }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: HINT_RESPONSE_SCHEMA,
+          maxOutputTokens: MAX_REPLY_TOKENS,
+          temperature: 0.5,
+        },
+      },
+      { startedAt, onServed: (model) => (lastChatServed = { model, at: Date.now() }) },
+    );
+    return parseHintResult(payload);
   }
 
   /**

@@ -28,6 +28,7 @@ import { useStudySession } from '../../../src/data/study-session';
 import { addQuizChoices } from '../../../src/data/quiz-options';
 import { deal, startingLevel } from '../../../src/core/deck';
 import { choicesFor, isWritten, needsChoices, type Option } from '../../../src/core/quiz';
+import { crossedClue, crossOut, pointsClue } from '../../../src/core/hints';
 import { GeminiBrowserProvider } from '../../../src/ai/gemini';
 import { reasonToMessage } from '../../../src/core/ai-errors';
 import { GeminiCallError } from '../../../src/ai/gemini';
@@ -91,6 +92,8 @@ export default function Quiz() {
   const [error, setError] = useState<string | null>(null);
   const [answered, setAnswered] = useState<Answered[]>([]);
   const [current, setCurrent] = useState<GradedAnswer | null>(null);
+  /** A hint was shown for the question on screen (NOTES §69). */
+  const [hintShown, setHintShown] = useState(false);
 
   const { data: profile, isSuccess: profileLoaded } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile });
 
@@ -204,6 +207,7 @@ export default function Quiz() {
     setCurrent(null);
     setTyped('');
     setChosen(null);
+    setHintShown(false);
     submitting.current = false;
   }
 
@@ -217,6 +221,12 @@ export default function Quiz() {
   const options: Option[] = useMemo(
     () => (item && !isWritten(item) ? shuffleOptions(choicesById.get(item.id) ?? [], item.id) : []),
     [item, choicesById],
+  );
+  // A choice's hint (NOTES §69): every wrong choice but one crossed out. The
+  // same ones for the same question, so asking again reveals nothing more.
+  const crossed = useMemo(
+    () => (item && hintShown && options.length > 0 ? crossOut(options, item.id) : new Set<number>()),
+    [item, hintShown, options],
   );
 
   /**
@@ -300,6 +310,7 @@ export default function Quiz() {
         maxScore: graded.maxScore > 0 ? graded.maxScore : null,
         answerText: !isWritten(item) ? (options[chosen ?? 0]?.text ?? null) : typed,
         feedback: graded.feedback || null,
+        hinted: hintShown,
       });
     } catch {
       // A logging failure must not lose the user's answer on screen.
@@ -322,6 +333,7 @@ export default function Quiz() {
     setCurrent(null);
     setTyped('');
     setChosen(null);
+    setHintShown(false);
     setIndex((i) => i + 1);
   }
 
@@ -452,11 +464,27 @@ export default function Quiz() {
         </Card>
       ) : item ? (
         <>
-          {/* With Nomi reading beside the count (NOTES §45). */}
+          {/* With Nomi reading beside the count (NOTES §45), and a hint when the
+              question has been up a while unanswered (§69): two wrong choices
+              crossed out, or how many points a written answer should make. */}
           <StudyProgress
             value={index}
             total={items.length}
             right={answered.filter((a) => a.graded.result === 'correct').length}
+            hint={{
+              key: `${round}-${level}-${index}-${item.id}`,
+              active: current === null,
+              clue: isWritten(item)
+                ? pointsClue(item.rubric?.expected_concepts.length ?? 0)
+                : crossedClue(crossOut(options, item.id).size),
+              bigger: { question: promptFor(item), answer: item.answer, source: item.source_excerpt },
+              apiKey: profile?.gemini_api_key ?? '',
+              onShown: () => {
+                setHintShown(true);
+                // A crossed-out choice cannot stay picked.
+                if (chosen !== null && crossOut(options, item.id).has(chosen)) setChosen(null);
+              },
+            }}
           />
 
           <Card>
@@ -473,6 +501,9 @@ export default function Quiz() {
                   const isChosen = chosen === i;
                   const showRight = answeredNow && o.correct;
                   const showWrong = answeredNow && isChosen && !o.correct;
+                  // Crossed out by a hint (NOTES §69): struck through and not
+                  // pickable, until the answer marks every choice.
+                  const out = crossed.has(i) && !answeredNow;
 
                   const borderColor = showRight
                     ? t.ok
@@ -483,7 +514,13 @@ export default function Quiz() {
                         : t.border;
 
                   return (
-                    <Pressable key={o.text} onPress={() => !current && setChosen(i)}>
+                    <Pressable
+                      key={o.text}
+                      onPress={() => !current && !out && setChosen(i)}
+                      disabled={out}
+                      accessibilityState={{ disabled: out }}
+                      accessibilityLabel={out ? `${o.text}, crossed out by the hint` : undefined}
+                    >
                       <View
                         style={{
                           flexDirection: 'row',
@@ -495,9 +532,17 @@ export default function Quiz() {
                           minHeight: 44,
                           borderColor,
                           backgroundColor: isChosen ? t.bg : 'transparent',
+                          opacity: out ? 0.45 : 1,
                         }}
                       >
-                        <Text style={[type.body, { color: t.text, flex: 1 }]}>{o.text}</Text>
+                        <Text
+                          style={[
+                            type.body,
+                            { color: out ? t.textMuted : t.text, flex: 1, textDecorationLine: out ? 'line-through' : 'none' },
+                          ]}
+                        >
+                          {o.text}
+                        </Text>
                         {/* A mark as well as a colour: roughly one man in twelve
                             cannot separate the green from the red, and the
                             verdict must not live in hue alone. */}

@@ -82,6 +82,11 @@ export async function recordAttempt(input: {
    * pass one simply never triggers it.
    */
   apiKey?: string;
+  /**
+   * A hint was shown before this answer (NOTES §69). A right answer still
+   * counts as right; only the schedule brings the card back sooner.
+   */
+  hinted?: boolean;
 }, db: Db = supabase): Promise<void> {
   const user_id = await currentUserId(db);
 
@@ -139,7 +144,7 @@ export async function recordAttempt(input: {
   // truth and the missed pile (D8) is built from it, so it must land first.
   try {
     const prev = await currentState(input.studyItemId, db);
-    const next = nextState(prev, input.result, Date.now());
+    const next = nextState(prev, input.result, Date.now(), { hinted: input.hinted });
     await saveSchedule({
       userId: user_id,
       studyItemId: input.studyItemId,

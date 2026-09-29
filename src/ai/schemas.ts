@@ -459,6 +459,21 @@ export function parsePointedPairs(payload: unknown): { page_index: number; quest
 // -------------------------------------------------------------- reviewer --
 
 /** A reviewer on a topic (NOTES §39): the notes, as one plain-text field. */
+/** A hint towards a card's answer (NOTES §69). Whether it gives the answer away is `givesAway`'s call. */
+export const HINT_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: { hint: { type: 'string' } },
+  required: ['hint'],
+} as const;
+
+const hintResultSchema = z.object({ hint: z.string() });
+
+export function parseHintResult(payload: unknown): string | null {
+  const parsed = hintResultSchema.safeParse(payload);
+  const hint = parsed.success ? parsed.data.hint.trim().replace(/^hint:\s*/i, '') : '';
+  return hint || null;
+}
+
 export const REVIEWER_RESPONSE_SCHEMA = {
   type: 'object',
   properties: { notes: { type: 'string' } },

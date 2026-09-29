@@ -58,8 +58,16 @@ import {
  * `conversationId` stays null so nothing pretends to have been saved.
  */
 
-/** Its own queue, for the reason assistant.ts gave: chat must never stand in generation's way. */
-const queue = new CallQueue();
+/**
+ * Its own queue, for the reason assistant.ts gave: chat must never stand in
+ * generation's way.
+ *
+ * One attempt, not the queue's three (NOTES §67). The four-model ladder under a
+ * 45-second deadline (`src/core/chat-ladder.ts`) is a chat message's retry;
+ * waiting 10 s and then 20 s to walk it again left the owner looking at "Nomi
+ * is thinking…" for minutes. After that, Nomi says Gemini is busy.
+ */
+const queue = new CallQueue({ maxAttempts: 1 });
 
 export interface Conversation {
   id: string;
@@ -166,7 +174,7 @@ async function saveMessage(conversationId: string, role: 'user' | 'nomi', conten
  * (migration 0010), and a missing RPC means "answer uncapped" rather than
  * refusing, because the cap is a courtesy to the quota, not a correctness rule.
  */
-async function claimMessage(db: Db): Promise<number | null> {
+export async function claimMessage(db: Db = supabase): Promise<number | null> {
   const { data, error } = await db.rpc('claim_chat_message', { daily_limit: DAILY_MESSAGE_LIMIT });
   if (error) {
     console.warn(`[nomi] could not claim a reply (${error.message}) — answering uncapped.`);

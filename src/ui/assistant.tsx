@@ -226,7 +226,11 @@ export function StudyAssistant() {
           </ScrollView>
         ) : null}
 
-        {chat.busy ? <Text style={[type.label, { color: t.textMuted }]}>Nomi is thinking…</Text> : null}
+        {chat.busy ? (
+          <Text style={[type.label, { color: t.textMuted }]}>
+            {chat.slow ? 'Still thinking — Gemini is slow right now.' : 'Nomi is thinking…'}
+          </Text>
+        ) : null}
         {/* The same offer as the full chat — one conversation, two windows. */}
         {chat.pending && !chat.busy ? (
           <ActionCard

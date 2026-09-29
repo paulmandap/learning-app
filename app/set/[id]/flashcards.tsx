@@ -27,6 +27,7 @@ import { fetchProfile } from '../../../src/data/profile';
 import { useAssistantContext } from '../../../src/data/assistant-context';
 import { reviewStatesForSet } from '../../../src/data/review';
 import { isDue, studyOrder } from '../../../src/core/schedule';
+import { quickClue } from '../../../src/core/hints';
 import { listDocuments, signedUrlFor } from '../../../src/data/documents';
 import { NomiFinish } from '../../../src/ui/nomi-finish';
 import { StudyProgress } from '../../../src/ui/nomi-studying';
@@ -76,6 +77,8 @@ export default function Flashcards() {
     setIndexByLevel((prev) => ({ ...prev, [level]: next(prev[level]) }));
 
   const [revealed, setRevealed] = useState(false);
+  /** Cards this round the student saw a hint for (NOTES §69): right still counts, sooner back. */
+  const [hinted, setHinted] = useState<Set<string>>(new Set());
   const [missed, setMissed] = useState<Set<string>>(new Set());
   // Right answers this round, for Nomi's nod beside the count (NOTES §49).
   const [rights, setRights] = useState(0);
@@ -297,6 +300,7 @@ export default function Flashcards() {
       mode: 'flashcards',
       result: gotIt ? 'correct' : 'incorrect',
       apiKey: profile?.gemini_api_key ?? undefined,
+      hinted: hinted.has(card.id),
     }).catch(() => {
       // Losing a log entry must not interrupt studying.
     });
@@ -463,14 +467,29 @@ export default function Flashcards() {
               setIndex(() => 0);
               setRevealed(false);
               setMissed(new Set());
+              setHinted(new Set());
             }}
           />
           <Button label="Back to set" variant="secondary" onPress={() => router.back()} />
         </Card>
       ) : card ? (
         <>
-          {/* With Nomi reading beside the count (NOTES §45), nodding at each right answer (§49). */}
-          <StudyProgress value={index} total={items.length} right={rights} />
+          {/* With Nomi reading beside the count (NOTES §45), nodding at each right
+              answer (§49), and offering a hint when the card has been up a while
+              unturned (§69). */}
+          <StudyProgress
+            value={index}
+            total={items.length}
+            right={rights}
+            hint={{
+              key: `${level}-${index}-${card.id}`,
+              active: !revealed,
+              clue: quickClue(card.answer),
+              bigger: { question: promptFor(card), answer: card.answer, source: card.source_excerpt },
+              apiKey: profile?.gemini_api_key ?? '',
+              onShown: () => setHinted((prev) => new Set(prev).add(card.id)),
+            }}
+          />
           {dueNow > 0 ? (
             <Body muted>
               {dueNow} due for review today — those come first.

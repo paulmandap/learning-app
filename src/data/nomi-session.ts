@@ -12,6 +12,7 @@ import { GeminiBusyError } from '../core/queue';
 import { EMPTY_SNAPSHOT } from '../core/nomi-brain';
 import { compactForChat, type NomiAction } from '../core/nomi-actions';
 import { messageToKeep, type AssistantContext, type ChatTurn } from '../core/chat';
+import { CHAT_SLOW_MS } from '../core/chat-ladder';
 
 /**
  * The conversation the student is having with Nomi, wherever they are.
@@ -89,6 +90,8 @@ export function useNomiConversation(context: AssistantContext) {
 
   /** The student's message while the reply is on its way. */
   const [waiting, setWaiting] = useState<string | null>(null);
+  /** The reply is taking a while — Gemini's models are busy (NOTES §67). */
+  const [slow, setSlow] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
   // A ref, set synchronously: the same double-tap that once spent two of a
@@ -106,6 +109,9 @@ export function useNomiConversation(context: AssistantContext) {
       inFlight.current = true;
       setWaiting(compactForChat(text));
       setNote(null);
+      // "Thinking…" alone for half a minute reads as stuck, which is how the
+      // owner reported it. After a few seconds the screen says it is still trying.
+      const slowTimer = setTimeout(() => setSlow(true), CHAT_SLOW_MS);
       try {
         const reply = await sendToNomi({
           text,
@@ -156,6 +162,8 @@ export function useNomiConversation(context: AssistantContext) {
         setNote(reply.ok ? reply.note : reply.message);
         return reply;
       } finally {
+        clearTimeout(slowTimer);
+        setSlow(false);
         setWaiting(null);
         inFlight.current = false;
       }
@@ -240,6 +248,8 @@ export function useNomiConversation(context: AssistantContext) {
     conversationId,
     turns: shown,
     busy: waiting !== null,
+    /** Busy for a while: "still trying", not only "thinking". */
+    slow: waiting !== null && slow,
     loading: conversationId !== null && isLoading,
     note,
     snapshot,

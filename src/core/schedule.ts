@@ -106,9 +106,30 @@ export function startOfUtcDay(ms: number): number {
  * @param prev   Current state, or NEW_CARD for a card never reviewed.
  * @param result What the user scored on this review.
  * @param now    Epoch ms of the review.
+ * @param hinted The student asked for a hint first (NOTES §69).
  */
-export function nextState(prev: ReviewState, result: AttemptResult, now: number): Scheduled {
+export function nextState(
+  prev: ReviewState,
+  result: AttemptResult,
+  now: number,
+  { hinted = false }: { hinted?: boolean } = {},
+): Scheduled {
   const today = startOfUtcDay(now);
+
+  if (result === 'correct' && hinted) {
+    // Right after a hint (NOTES §69, the owner's choice): it counts as right —
+    // the attempt and `last_result` say correct, so Progress calls it known —
+    // but it comes back sooner. Half the interval, as a partial, with the
+    // streak and the ease left where they were: you got it, with help.
+    const halved = Math.max(FIRST_INTERVAL_DAYS, Math.round(prev.intervalDays / 2));
+    const state: ReviewState = {
+      reps: prev.reps,
+      intervalDays: Math.min(halved, MAX_INTERVAL_DAYS),
+      ease: prev.ease,
+      lapses: prev.lapses,
+    };
+    return { ...state, dueAt: today + state.intervalDays * DAY_MS };
+  }
 
   if (result === 'incorrect') {
     // A lapse resets the streak and brings the card back tomorrow. Ease drops

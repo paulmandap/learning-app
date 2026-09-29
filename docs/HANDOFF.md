@@ -105,7 +105,16 @@ screens only; and chats like Messenger — 😊 ↩ ⋯ beside a bubble, a react
 over the message, one Unsend then who for, reactions on the bubble's inner
 corner, names lined up with the words. **And (NOTES §66, not yet deployed):
 icons are SVG now**, at the owner's choice — the View-drawn ones looked "like
-144p" on his laptop; `icon-geometry.ts` is gone. **Test account B was found restricted**
+144p" on his laptop; `icon-geometry.ts` is gone. **Then (NOTES §67–§68, not
+yet deployed):** the chat's own limits — 15 s a model, 45 s a message, the last
+model that answered first, "still thinking" after 8 s — after "Nomi is
+thinking…" sat for minutes on busy Gemini models; and Nomi's animations
+reviewed frame by frame: hats worn at the head's 10° tilt, held things kept in
+still wings, floating things clear of hats, eyes that reopen without a ghost.
+**And hints (NOTES §69, not yet deployed):** after 20 s on a card Nomi asks
+"Want a hint?"; a tap shows a quick clue, then an optional Gemini hint checked by
+`givesAway`; right after a hint counts as right and comes back sooner.
+**Test account B was found restricted**
 on 2026-09-29 (the owner trying `/moderation`), so `groups-probe` and
 `posts-probe` stop at their setup until he lifts it — both were updated for
 §65 and have not run since. **Probe reports pile up:** each run
@@ -787,6 +796,7 @@ npx tsx --env-file=.env scripts/generation-probe.ts --file notes.txt --count 60 
 npx tsx --env-file=.env scripts/avatar-probe.ts       # save faces and photos twice, print the real errors, restore
 npx tsx --env-file=.env scripts/photo-probe.ts [--out <dir>]   # a 4032×3024 photo through Settings' "Use a photo" and the editor (zoom, Save), and a new post's Photo, via the page's own file box (NOTES §61, §63); restores
 npx tsx --env-file=.env scripts/label-cover-probe.ts [--runs=3] [--model=<id>] [--only=alu-block]   # can a model place labels well enough to cover an answer? drawn diagrams, known truth
+npx tsx --env-file=.env scripts/hint-probe.ts [--cards 12]   # a bigger hint from Gemini for real cards of A's, and how many givesAway keeps off (NOTES §69); writes nothing
 npx tsx scripts/palette-check.ts              # contrast + colour-blindness gate, both modes
 npx tsx --env-file=.env scripts/verify-phase2.ts --pdf <file>
 npx tsx --env-file=.env scripts/splash-probe.ts [--runs 3] [--phone]   # what is on screen when the splash goes; --phone throttles (NOTES §45)

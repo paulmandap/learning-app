@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { useIsFocused } from 'expo-router';
 import { NomiCharacter } from './nomi-character';
 import { ProgressBar } from './components';
+import { HintOffer, type HintSpec } from './hint';
 import { space } from './theme';
 
 /**
@@ -19,10 +20,25 @@ import { space } from './theme';
  * after a single answer" — which still holds for the celebration proper:
  * `success` and `encouraging` are the round's end, and only `NomiFinish` asks
  * for them. `right` only has to go up; a round starting again leaves it be.
+ *
+ * And it offers a hint when the student is stuck (NOTES §69): after twenty
+ * seconds on a card, "Want a hint?" under it, and Nomi has an idea — its
+ * lightbulb, `explaining` once — then goes back to reading.
  */
-export function StudyProgress({ value, total, right = 0 }: { value: number; total: number; right?: number }) {
+export function StudyProgress({
+  value,
+  total,
+  right = 0,
+  hint,
+}: {
+  value: number;
+  total: number;
+  right?: number;
+  hint?: HintSpec;
+}) {
   const focused = useIsFocused();
   const [nodding, setNodding] = useState(false);
+  const [idea, setIdea] = useState(false);
   const last = useRef(right);
   useEffect(() => {
     if (right > last.current) setNodding(true);
@@ -30,21 +46,25 @@ export function StudyProgress({ value, total, right = 0 }: { value: number; tota
   }, [right]);
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-      <NomiCharacter
-        state={nodding ? 'nod' : 'studying'}
-        settle="studying"
-        // Reading its book, as the reference sheet's studying Nomi does (§50).
-        prop="book"
-        size={56}
-        active={focused}
-        onDone={(done) => {
-          if (done === 'nod') setNodding(false);
-        }}
-      />
-      <View style={{ flex: 1 }}>
-        <ProgressBar value={value} total={total} />
+    <View style={{ gap: space.xs }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+        <NomiCharacter
+          state={nodding ? 'nod' : idea ? 'explaining' : 'studying'}
+          settle="studying"
+          // Reading its book, as the reference sheet's studying Nomi does (§50).
+          prop="book"
+          size={56}
+          active={focused}
+          onDone={(done) => {
+            if (done === 'nod') setNodding(false);
+            if (done === 'explaining') setIdea(false);
+          }}
+        />
+        <View style={{ flex: 1 }}>
+          <ProgressBar value={value} total={total} />
+        </View>
       </View>
+      {hint ? <HintOffer key={hint.key} spec={hint} onOffered={() => setIdea(true)} /> : null}
     </View>
   );
 }

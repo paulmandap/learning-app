@@ -99,7 +99,7 @@ export default function Nomi() {
               />
             ))
           )}
-          {chat.busy ? <ThinkingBubble /> : null}
+          {chat.busy ? <ThinkingBubble slow={chat.slow} /> : null}
           {/* What Nomi offered to do, and the tap that does it (NOTES §37).
               A set's cards are made on its own screen, so that is where a
               confirmed set goes. */}

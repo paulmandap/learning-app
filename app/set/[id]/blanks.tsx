@@ -26,6 +26,7 @@ import { fetchProfile } from '../../../src/data/profile';
 import { reviewStatesForSet } from '../../../src/data/review';
 import { studyOrder } from '../../../src/core/schedule';
 import { gradeTypedAnswer, makeCloze, type Cloze } from '../../../src/core/cloze';
+import { quickClue } from '../../../src/core/hints';
 import type { Level } from '../../../src/core/planner';
 
 /**
@@ -90,6 +91,8 @@ export default function Blanks() {
   const [phase, setPhase] = useState<Phase>({ state: 'asking' });
   const [got, setGot] = useState(0);
   const [answered, setAnswered] = useState(0);
+  /** A hint was shown for the blank on screen (NOTES §69). */
+  const [hintShown, setHintShown] = useState(false);
 
   // Whose set this is — see the longer note in flashcards.tsx. It decides which
   // relation the cards come from, and `owned` is in the key so the first render
@@ -211,6 +214,7 @@ export default function Blanks() {
     setPhase({ state: 'asking' });
     setGot(0);
     setAnswered(0);
+    setHintShown(false);
   }, [level, retryOnly]);
 
   useEffect(() => {
@@ -231,6 +235,7 @@ export default function Blanks() {
       result,
       answerText: typed,
       apiKey: profile?.gemini_api_key ?? undefined,
+      hinted: hintShown,
     }).catch(() => {
       // Losing a log entry must not interrupt studying.
     });
@@ -263,6 +268,7 @@ export default function Blanks() {
   function next() {
     setTyped('');
     setPhase({ state: 'asking' });
+    setHintShown(false);
     setIndex((i) => i + 1);
   }
 
@@ -317,14 +323,30 @@ export default function Blanks() {
               setPhase({ state: 'asking' });
               setGot(0);
               setAnswered(0);
+              setHintShown(false);
             }}
           />
           <Button label="Back to set" variant="secondary" onPress={() => router.back()} />
         </Card>
       ) : current ? (
         <>
-          {/* With Nomi reading beside the count (NOTES §45). */}
-          <StudyProgress value={index} total={queue.length} right={got} />
+          {/* With Nomi reading beside the count (NOTES §45), and a hint when the
+              blank has been up a while unfilled (§69). The bigger hint is asked
+              about the sentence with its gap, never with the notes' own
+              sentence, which IS the answer. */}
+          <StudyProgress
+            value={index}
+            total={queue.length}
+            right={got}
+            hint={{
+              key: `${level}-${index}-${current.item.id}`,
+              active: phase.state === 'asking',
+              clue: quickClue(current.cloze.answer),
+              bigger: { question: current.cloze.text, answer: current.cloze.answer, source: '' },
+              apiKey: profile?.gemini_api_key ?? '',
+              onShown: () => setHintShown(true),
+            }}
+          />
 
           <Card>
             {/* The sentence, from the notes, with the gap in it. This IS the

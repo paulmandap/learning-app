@@ -9074,6 +9074,182 @@ round, even curves; 21 icons on the page, all `<svg>`, no errors. Profile on a
 clean. A filled heart and a saved bookmark on a friends-only post A made,
 hearted, saved and deleted — nobody else could see it.
 
+## 67. "Nomi is thinking…" for minutes: a chat on card-making's limits (2026-09-29)
+
+The owner, with the ✦ panel over a flashcard and his message unanswered: *"nomi
+is taking way too much time to respond. it's stuck in 'Nomi is thinking...' i
+think there's a bug."*
+
+**Measured first**, the same hour, one tiny request to each model on
+`LIGHT_LADDER`, twice (`generateContent`, the chat's own key header):
+
+```
+gemini-3.6-flash       503 in 14.2 s   then 503 in 2.6 s   "high demand"
+gemini-3.7-flash       503 in 3.4 s    then 503 in 0.5 s
+gemini-3.8-flash       no answer in 60 s (aborted)   then 503 in 2.9 s
+gemini-3.5-flash-lite  200 in 3.5 s    then 200 in 2.3 s
+```
+
+**The cause.** A chat message rode card-making's limits: `CALL_TIMEOUT_MS`
+100 s a model, four models, and the queue's `MAX_ATTEMPTS` 3 walking the whole
+ladder again after 10 s and 20 s. With one model silent, that is well over a
+minute before the one working model is asked, and up to ~20 minutes in the
+worst case — with "Nomi is thinking…" and nothing else on screen. Not a hang in
+the app; limits built for reading a PDF.
+
+**The fix** (`src/core/chat-ladder.ts`, pure, `tests/chat-ladder.test.ts` 12):
+
+- **15 s a model, 45 s for the whole message**, then "Gemini is busy right now —
+  try again in a minute." `#generateContentWithFallback` takes the chat's
+  start time and gives each rung `min(15 s, what is left)`; card-making keeps
+  its 100 s (`nextCallTimeout` only when the caller is the chat).
+- **The model that answered last goes first**, for ten minutes (`chatLadder`,
+  remembered module-wide in `gemini.ts` since a provider is made per message),
+  so once one rung is found the next reply does not wait on the busy ones.
+  After ten minutes it goes back to the usual order, in case the first recovered.
+- **The chat queue makes one attempt** (`new CallQueue({ maxAttempts: 1 })`): the
+  ladder under its deadline is the chat's retry.
+- **"Still thinking — Gemini is slow right now."** after 8 s (`CHAT_SLOW_MS`), in
+  the ✦ panel and under the dots on Nomi's screen (`ThinkingBubble slow`).
+
+**Measured after**, with the ladder still in the same state,
+`nomi-chat-probe --ask` twice: **22.7 s** for the first message (past the three
+busy rungs, "still trying" on screen from 8 s), **2.3 s** for the second (the
+remembered rung). Before, the same first message could not be under a minute.
+Tests use fake timers: a silent third model given up at 15 s; every model
+silent is "busy" at 45 s with the fourth never started; the last good model
+asked first next time.
+
+## 68. Nomi's animations reviewed: hats worn, held things held, eyes that open cleanly (2026-09-29)
+
+The owner: *"ultra review the animations of Nomi. some are awkward most
+especially the hat ones. nomi isn't wearing it. the hat is on nomi it looks
+awkward. fix animations. if needed, create a prompt that i can send to gemini
+so that it will look more accurate if it's your limitations to do animation by
+code."*
+
+**How it was reviewed.** A temporary page rendered one `NomiCharacter` at a
+state and prop; a script froze the page's clock (`Date.now` and
+`requestAnimationFrame`, which react-native-web's `Animated` runs on), stepped
+it 16 ms at a time, and photographed every state — alone, and with each prop
+it is ever given — as rows of frames. The page was deleted after. Nomi's head
+was measured from `assets/nomi-body.webp`: the ear tufts' tips at (68, 2) and
+(356, 56) of 367 × 493 — **the head leans about 10°** — and the brow over the
+eyes at 13°.
+
+**What was awkward, and what changed** (`src/core/nomi-props.ts`,
+`src/ui/nomi-character.tsx`):
+
+- **The cap was turned 6° the wrong way**, against the head's 10°, and perched on
+  the crown. Now `rotate: HEAD_TILT_DEG` (10), a little lower and wider — it
+  sits on the head at its angle.
+- **The nightcap was too small and sat high**: 0.8 of the owl's width, the right
+  ear tuft sticking out from under it and its left brim past the head. Now 1.02
+  wide, down over the whole crown with both tufts inside, the brim along the
+  brow (the picture's brim already slopes 10.6°; `rotate: 2` meets the brow).
+  Five places were drawn side by side and this one chosen.
+- **Floating things landed on the hats** — sparkles on the cap's tassel, the
+  heart on the nightcap. `placeOf` floats them higher and further out while a
+  hat is on (`ABOVE_A_HAT`), and where they were without one. The "z"s moved
+  out past the pompom.
+- **A mug floated in the air** when Home's Nomi stretched or hopped in the
+  morning: both wings went out and the mug stayed in front of nothing. A prop now
+  says what holds it (`hand: 'both' | 'right'`), and `holding(motion, prop)`
+  drops the wing tracks that would let go — a stretch with a mug is up on its
+  toes, eyes closed, wings still round the mug. Book and mug: both wings;
+  pencil and magnifying glass: the right. A hat holds nothing, so a wave is
+  still a wave.
+- **Opening happy eyes was a ghost**: the "^" arcs faded out while the iris faded
+  in and grew, so for a tenth of a second both were half there (the hop's 900 ms
+  frame). The handover is now the middle fifth of `happy` only, and the iris is
+  a slit (0.12) by the time the arcs are half there — an arc that becomes a slit
+  that opens, like a blink.
+
+**Looked at and left:** greeting, goodbye, explaining, encouraging, success,
+stretch, lookAround, nod, shy, thinking, studying and sleepy move as intended;
+the book, pencil and magnifying glass sit well. **What code cannot do** with one
+picture per wing: wrap a wing round the mug or the book, as the reference
+sheet's studying Nomi does — props sit in front of the belly. A Gemini prompt
+for wings that hold things was offered to the owner, not needed for what he
+reported.
+
+**Measured:** typecheck clean with and without `.expo/` · **1638 tests**, 3
+skipped (`tests/nomi-props.test.ts` +5: hats at the head's tilt, the nightcap
+over both tufts, still wings, a stretch holding a mug, floating props clear of
+a hat) · built and booted · `nomi-moves-probe` **5/5**. Photographed again
+frame by frame: the cap through `success` with sparkles clear of the tassel,
+the nightcap through `hop` (heart clear), `sleepy` ("z"s clear), greeting,
+stretch and shy; the mug through `stretch` and `hop` with the wings still.
+Home as test account A at 23:00 (nightcap inside the card, "z"s between Nomi
+and the bubble) and 07:00 (the mug), by time zone.
+
+## 69. Hints when stuck on a card (2026-09-29)
+
+The owner: *"another good feature, maybe when the user is stuck for some
+seconds on the flashcard, quiz, fill in the blanks, nomi can give hints."* Four
+choices were put to him and he took each recommendation: **after 20 seconds**;
+**Nomi asks and the hint shows on a tap** (never on its own — it would spoil a
+card he was about to get); **a quick clue first, then a bigger hint from
+Gemini** if wanted; a right answer after a hint **counts as right but comes
+back sooner**.
+
+### 69.1 How it works
+
+- **`StudyProgress` gained `hint`** (`src/ui/nomi-studying.tsx`, `src/ui/hint.tsx`).
+  After `HINT_AFTER_MS` (20 s) on one card while it is unturned, unanswered or
+  unfilled, "Want a hint? Tap for a clue" appears under Nomi, and Nomi has an
+  idea — `explaining` once, the lightbulb over the book (its wings stay on the
+  book, §68). A new card starts the wait again.
+- **The tap shows the quick clue** (`src/core/hints.ts`, pure) and is the only
+  thing that tells the screen a hint was seen (`onShown`):
+  - a short answer (four words or fewer, past a leading "the"/"a"): "It starts
+    with “M”. One word, 9 letters.";
+  - a longer one: "The first letter of each word: I, s, a, t, p, p, o." (twelve
+    at most);
+  - a choice: every wrong choice but one crossed out, struck through and not
+    pickable — the same ones for the same card (`crossOut`, seeded);
+  - a written answer: "A good answer covers 3 points."
+- **"Ask Nomi for a bigger hint"** (`askForHint`, `src/data/hints.ts`): a key
+  needed; one of the day's chat replies claimed first (the same allowance as
+  the chat — `claimMessage`, now exported); the chat's limits from §67 (15 s a
+  model, 45 s in all, the last good model first, one attempt);
+  `GeminiBrowserProvider.hint` with `buildHintPrompt`. A blank's bigger hint is
+  asked about the sentence with its gap and never given the notes' sentence,
+  which is the answer.
+- **The check behind the prompt:** `givesAway` keeps a hint off the screen when
+  it holds the whole answer, two of its key words side by side, a key word of a
+  short answer (by stem, so "mitochondrion" for "Mitochondria"), or a long
+  distinctive word (8+ letters) of a longer one. Then Nomi says it can't think
+  of a hint that doesn't give it away.
+- **Scoring:** `recordAttempt` takes `hinted`; the attempt and `last_result`
+  still say correct (so Progress calls the card known), and `nextState(…,
+  { hinted })` gives a right-after-a-hint half the interval with the streak and
+  ease held — as a partial is scheduled, without the ease penalty. Wrong is
+  wrong either way. Not stored on the attempt row (that would be a migration);
+  the schedule is where it counts.
+
+### 69.2 Measured, and changed by it
+
+`scripts/hint-probe.ts` (new): real cards from test account A's sets, a bigger
+hint asked for each with `GEMINI_API_KEY`, and how many `givesAway` keeps off.
+**First run, 12 cards: 0 kept off — and one hint said the answer**: "The root
+collar marks this transition area." for "The root collar, marked by a dashed
+line." — a longer answer was only checked whole. And the quick clues were weak:
+"The mesophyll." gave "It starts with “T”", and sentence answers gave "It
+starts with “It serves…”". The model, shown the clue, repeated it or carried on
+from it. Changed: the two-key-words and distinctive-word checks; articles
+skipped and first letters for sentences; the clue no longer in the prompt, and
+rule 2 asks for a pointer, not the answer in other words. **Second run, same
+12: 1 kept off** ("…sits right on that dashed line" — part of that answer's
+words; the safe side), the rest pointing at the idea ("Think about the part of
+the plant that forms after a flower blooms…" for "The fruit."). First hint
+12.4 s with three models busy, then 1.3–3.5 s each.
+
+typecheck clean with and without `.expo/` · **1666 tests**, 3 skipped
+(`tests/hints.test.ts` 28) · built and booted. Photographed as test account A
+at 393 px, dark, after the 20 s: the offer and the clue on flashcards, the
+quiz's two choices crossed out, and a blank's letter clue. Nothing answered.
+
 
 ## Sources
 

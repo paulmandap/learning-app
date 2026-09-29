@@ -328,6 +328,41 @@ export function buildWrongOptionsPrompt(input: {
 }
 
 /**
+ * A nudge towards a card's answer that does not say it (NOTES §69).
+ *
+ * `givesAway` in `src/core/hints.ts` checks what comes back — the whole answer,
+ * two of its key words together, a key word of a short one — and it is not
+ * shown, so rule 1 has a check behind it. Rule 2 has none: a hint that is the
+ * answer in other words cannot be told from a good one by comparing strings.
+ * The notes' sentence is given so the hint can point at the idea around the
+ * answer, as a teacher would.
+ *
+ * The quick clue on screen is NOT given: on the first run of
+ * `scripts/hint-probe.ts` the model repeated it ("It starts with T…") or
+ * carried on from its words rather than adding anything.
+ */
+export function buildHintPrompt(input: { question: string; answer: string; source: string }): string {
+  return [
+    'A student is stuck on this flashcard and asked for a hint.',
+    'Write ONE short hint, one or two sentences, that helps them remember the answer themselves.',
+    '',
+    'Rules:',
+    '1. Never say the answer, any word of it, or a word that obviously contains it.',
+    '2. Never say the answer in other words either. Point AT it instead: something it is connected',
+    '   to, part of, or next to in the notes; an example of it; or what it is like. A question back',
+    '   to them is fine.',
+    '3. No letter counts or first letters — they have those already.',
+    '4. Plain, friendly words. No "Hint:" label, no quotation marks around the whole hint.',
+    '',
+    `QUESTION: ${input.question}`,
+    `ANSWER (do not reveal): ${input.answer}`,
+    input.source ? `FROM THEIR NOTES: ${input.source}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
  * Check an Apply-tier marking checklist against its source (D7's second pass).
  *
  * The model NAMES the points it cannot support; `src/core/rubric.ts` decides the

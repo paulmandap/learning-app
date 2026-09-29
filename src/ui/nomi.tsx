@@ -358,25 +358,32 @@ export function ChatBubble({ turn, showOwl }: { turn: ChatTurn; showOwl: boolean
 }
 
 /** Nomi, visibly thinking, while a reply is on its way — with a pencil while it writes (NOTES §50). */
-export function ThinkingBubble({ prop }: { prop?: NomiProp } = {}) {
+export function ThinkingBubble({ prop, slow = false }: { prop?: NomiProp; slow?: boolean } = {}) {
   const t = useTheme();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: space.sm }}>
       <View style={{ width: 30, alignItems: 'center' }}>
         <NomiCharacter state="thinking" size={36} prop={prop} />
       </View>
-      <View
-        style={{
-          paddingVertical: space.sm,
-          paddingHorizontal: space.md,
-          borderRadius: radius.lg,
-          borderBottomLeftRadius: space.xs,
-          backgroundColor: t.card,
-          borderWidth: 1,
-          borderColor: t.border,
-        }}
-      >
-        <ThinkingDots />
+      <View style={{ flexShrink: 1, gap: space.xs }}>
+        <View
+          style={{
+            alignSelf: 'flex-start',
+            paddingVertical: space.sm,
+            paddingHorizontal: space.md,
+            borderRadius: radius.lg,
+            borderBottomLeftRadius: space.xs,
+            backgroundColor: t.card,
+            borderWidth: 1,
+            borderColor: t.border,
+          }}
+        >
+          <ThinkingDots />
+        </View>
+        {/* Past a few seconds, dots alone read as stuck (NOTES §67). */}
+        {slow ? (
+          <Text style={[type.caption, { color: t.textMuted }]}>Still thinking — Gemini is slow right now.</Text>
+        ) : null}
       </View>
     </View>
   );

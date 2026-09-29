@@ -28,7 +28,7 @@ import {
 import { NOMI_RIG } from './nomi-rig';
 import { NOMI_PROP_ART } from './nomi-prop-art';
 import { useReducedMotion } from './motion';
-import { PROP_PLACES, propsFor, type NomiProp } from '../core/nomi-props';
+import { holding, placeOf, propsFor, type NomiProp, type PropPlace } from '../core/nomi-props';
 
 /**
  * Nomi, drawn and moving.
@@ -168,10 +168,12 @@ export function NomiCharacter({
   const settleRef = useRef(settle);
   settleRef.current = settle;
   const firstRun = useRef(true);
+  // What Nomi holds keeps the wings holding it still (NOTES §68).
+  const heldProp = propsFor(playing, prop).held;
 
   useEffect(() => {
     if (!running) return;
-    const motion = motionFor(playing, { reduceMotion: !!reduce });
+    const motion = holding(motionFor(playing, { reduceMotion: !!reduce }), heldProp);
     const pose = entryPose(motion);
     const settleMs = firstRun.current ? 0 : SETTLE_MS;
     firstRun.current = false;
@@ -247,7 +249,7 @@ export function NomiCharacter({
       stopped = true;
       animation.stop();
     };
-  }, [playing, running, reduce, v]);
+  }, [playing, running, reduce, v, heldProp]);
 
   useEffect(() => {
     if (!running || reduce) return;
@@ -298,8 +300,14 @@ export function NomiCharacter({
     const lookX = gaze ? Animated.add(v.lookX, gaze.x) : v.lookX;
     const lookY = gaze ? Animated.add(v.lookY, gaze.y) : v.lookY;
     // Shut by a blink, and squashed away while the eyes are closed happy — the
-    // arcs drawn over them are the eyes then (NOTES §49).
-    const open = Animated.multiply(blink, v.happy.interpolate({ inputRange: [0, 1], outputRange: [1, 0.04] }));
+    // arcs drawn over them are the eyes then (NOTES §49). Squashed by the time
+    // the arcs are half there, so opening happy eyes is an arc that becomes a
+    // slit that opens — not an arc and an open eye faded through each other,
+    // which was a ghostly double face for a tenth of a second (NOTES §68).
+    const open = Animated.multiply(
+      blink,
+      v.happy.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.12, 0.04], extrapolate: 'clamp' }),
+    );
     // One eye: looks with the other, and blinks toward its OWN line.
     const eye = (line: number) => [
       { translateX: lookX.interpolate({ inputRange: [-1, 1], outputRange: [-eyeRadius, eyeRadius] }) },
@@ -328,8 +336,9 @@ export function NomiCharacter({
       eyeLeft: eye(NOMI_RIG.eyeLeftLine),
       eyeRight: eye(NOMI_RIG.eyeRightLine),
       // Gone while closed happy: squashed alone, an iris left a thin dark line
-      // through each "^" (§49, seen in the first screenshot).
-      eyeOpacity: v.happy.interpolate({ inputRange: [0, 0.6, 1], outputRange: [1, 0, 0] }),
+      // through each "^" (§49, seen in the first screenshot). Handed over to
+      // the arcs in the middle fifth only (§68).
+      eyeOpacity: v.happy.interpolate({ inputRange: [0, 0.4, 0.6, 1], outputRange: [1, 1, 0, 0], extrapolate: 'clamp' }),
     };
   }, [W, H, v, blink, gaze]);
 
@@ -364,11 +373,13 @@ export function NomiCharacter({
         </Animated.View>
         {/* Over the wings, as a thing held is. Still under reduced motion: a
             book is not a movement. */}
-        {props.held ? <Prop name={props.held} W={W} H={H} /> : null}
+        {props.held ? <Prop name={props.held} place={placeOf(props.held, null)} W={W} H={H} /> : null}
         {props.floating && running && !reduce ? (
           <FloatingProp
             key={`${props.floating}-${playing}`}
             name={props.floating}
+            // Clear of a hat, when one is on (NOTES §68).
+            place={placeOf(props.floating, props.held)}
             W={W}
             H={H}
             duration={motionFor(playing).duration}
@@ -435,7 +446,8 @@ function Faces({ W, H, v }: { W: number; H: number; v: Record<Channel, Animated.
               borderWidth: Math.max(1, r * 0.22),
               borderBottomWidth: 0,
               borderColor: INK,
-              opacity: v.happy,
+              // Fully there or gone except in the handover with the iris (§68).
+              opacity: v.happy.interpolate({ inputRange: [0, 0.4, 0.6, 1], outputRange: [0, 0, 1, 1], extrapolate: 'clamp' }),
             }}
           />
           {/* Pink in the cheek, below and a little outside the eye. */}
@@ -458,8 +470,7 @@ function Faces({ W, H, v }: { W: number; H: number; v: Record<Channel, Animated.
 }
 
 /** Where a prop's picture goes, in points, from its place on the owl and its own shape. */
-function propBox(name: NomiProp, W: number, H: number) {
-  const place = PROP_PLACES[name];
+function propBox(name: NomiProp, place: PropPlace, W: number, H: number) {
   const art = NOMI_PROP_ART[name];
   const width = place.width * W;
   const height = (width * art.height) / art.width;
@@ -474,8 +485,8 @@ function propBox(name: NomiProp, W: number, H: number) {
 }
 
 /** A prop Nomi holds or wears (NOTES §50). */
-function Prop({ name, W, H }: { name: NomiProp; W: number; H: number }) {
-  const box = propBox(name, W, H);
+function Prop({ name, place, W, H }: { name: NomiProp; place: PropPlace; W: number; H: number }) {
+  const box = propBox(name, place, W, H);
   return <Image source={NOMI_PROP_ART[name].source} style={box} />;
 }
 
@@ -484,14 +495,26 @@ function Prop({ name, W, H }: { name: NomiProp; W: number; H: number }) {
  * by the time the moment is — all inside `duration`, so it never outstays the
  * hop or the line it belongs to.
  */
-function FloatingProp({ name, W, H, duration }: { name: NomiProp; W: number; H: number; duration: number }) {
+function FloatingProp({
+  name,
+  place,
+  W,
+  H,
+  duration,
+}: {
+  name: NomiProp;
+  place: PropPlace;
+  W: number;
+  H: number;
+  duration: number;
+}) {
   const t = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const run = Animated.timing(t, { toValue: 1, duration, easing: RNEasing.linear, useNativeDriver: NATIVE });
     run.start();
     return () => run.stop();
   }, [t, duration]);
-  const { transform, ...box } = propBox(name, W, H);
+  const { transform, ...box } = propBox(name, place, W, H);
   return (
     <Animated.Image
       source={NOMI_PROP_ART[name].source}
@@ -534,9 +557,10 @@ function Zzz({ W, H }: { W: number; H: number }) {
             accessible={false}
             style={{
               position: 'absolute',
-              // Clear of the head and of the nightcap's tip, which droops right.
-              left: W * (0.98 + i * 0.1),
-              top: H * (0.24 - i * 0.08),
+              // Clear of the head and of the nightcap's pompom, which hangs by
+              // the right cheek since the cap came down over the crown (§68).
+              left: W * (1.1 + i * 0.1),
+              top: H * (0.2 - i * 0.08),
               fontSize: Math.max(8, H * (0.13 - i * 0.025)),
               fontWeight: '700',
               color: t.textMuted,
