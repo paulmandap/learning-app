@@ -4,8 +4,8 @@
  *
  * Every icon the app draws, in a 24-unit box, as the shapes a stroke follows:
  * ['p', path] · ['c', cx, cy, r] · ['r', x, y, width, height, corner] ·
- * ['l', x1, y1, x2, y2]. src/core/icon-geometry.ts turns them into straight
- * pieces and src/ui/glyphs.tsx draws those as Views (NOTES §56.2).
+ * ['l', x1, y1, x2, y2]. src/ui/glyphs.tsx draws them as SVG, each shape as
+ * itself (NOTES §66).
  *
  * `nomi` is drawn for this app. The rest are Lucide's (https://lucide.dev),
  * under this notice:

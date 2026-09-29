@@ -103,7 +103,9 @@ whole screen to zoom into, with its heart, comments and share at the bottom;
 every Sheet is a card in the middle of the screen; the ✦ is on the three study
 screens only; and chats like Messenger — 😊 ↩ ⋯ beside a bubble, a reaction bar
 over the message, one Unsend then who for, reactions on the bubble's inner
-corner, names lined up with the words. **Test account B was found restricted**
+corner, names lined up with the words. **And (NOTES §66, not yet deployed):
+icons are SVG now**, at the owner's choice — the View-drawn ones looked "like
+144p" on his laptop; `icon-geometry.ts` is gone. **Test account B was found restricted**
 on 2026-09-29 (the owner trying `/moderation`), so `groups-probe` and
 `posts-probe` stop at their setup until he lifts it — both were updated for
 §65 and have not run since. **Probe reports pile up:** each run
@@ -550,6 +552,9 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 56. **Every Sheet sits in the middle of the screen, on the phone too** (NOTES
     §65, the owner's decision: *"middle middle is better"*), with no grab
     handle. Bottom sheets were the redesign's; do not bring them back.
+57. **Icons are plain `<svg>`, not Views** (NOTES §66, the owner's decision,
+    reversing §56.2's "draw boxes"). Web-only on purpose — the app is a PWA —
+    and no icon package: the shapes stay in `src/core/icon-shapes.ts`.
 
 ## Hard-won gotchas — do not rediscover these
 

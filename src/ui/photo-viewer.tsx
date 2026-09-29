@@ -245,7 +245,7 @@ export function PhotoViewer({
           </BarButton>
           <View style={{ flex: 1 }} />
           <BarButton label="Zoom out" onPress={() => zoomTo(placement.zoom / STEP)} disabled={placement.zoom <= VIEW_ZOOM_MIN}>
-            {/* A minus drawn, like every icon here (NOTES §56.2). */}
+            {/* A minus, drawn: the icon set has none. */}
             <View style={{ width: 16, height: 2, borderRadius: 1, backgroundColor: WHITE }} />
           </BarButton>
           <Text

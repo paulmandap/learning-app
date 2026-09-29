@@ -9039,6 +9039,41 @@ sign-in) now hold the rule. `FLOAT_CLEARANCE` is left on `Screen`.
 - Headless Chrome drew one emoji in the "+" panel as an empty box — a font on
   the test machine, not the app.
 
+## 66. Icons drawn as SVG (2026-09-29)
+
+The owner, with a screenshot of a post's heart, comment, share and bookmark on
+his laptop: *"the icons look bad it looks weird like 144p"*. The comment
+bubble's curve was visibly lumpy.
+
+**Why boxes could not do better.** Each piece of a View-drawn icon (§56.2) is
+anti-aliased by the browser on its own, so wherever two pieces meet the soft
+edge is drawn twice. §57.3 had already tuned the joins; it is a limit of the
+method, worst at 1× — a laptop screen — which is what he was looking at.
+
+**Put to him** — keep the boxes and tweak, or SVG, as measured in §56.1 (+1
+KB, no package) — he chose SVG, reversing §56.2's *"draw boxes"*.
+
+- `Icon` (`src/ui/glyphs.tsx`) is one `<svg viewBox="0 0 24 24">` drawing
+  `ICON_SHAPES` as they are: `<path>`, `<circle>`, `<rect>`, `<line>`, round
+  caps and joins, stroke 1.75 at 24 and never under 1.5 on screen, `fill` the
+  colour when `filled`. Same props, same names; no caller changed.
+  react-native-web renders to the page, so no package; **web-only**, and the
+  app ships only as a PWA — a native build would need this one file changed.
+- **`src/core/icon-geometry.ts` is deleted** (≈500 lines: the path reader,
+  curve flattening, bars, dots, fill bands) — only the Views used it.
+  `tests/icons.test.ts` is rewritten (10): the shapes inside their box, no line
+  at 0,0, paths the browser can read, the licence notice; the `<svg>`, its
+  stroke rule and fill, no box drawing left, no icon package, hidden from
+  screen readers. The generator's and the shapes file's headers say SVG.
+
+**Measured:** typecheck clean with and without `.expo/` · **1621 tests**, 3
+skipped · built and booted. Photographed as test account A at 1× and 2×,
+1280 wide, dark: the feed's action row, and the same row captured at 4× —
+round, even curves; 21 icons on the page, all `<svg>`, no errors. Profile on a
+393 px phone: search, gear, flame, chevron and the tab bar (the owl too)
+clean. A filled heart and a saved bookmark on a friends-only post A made,
+hearted, saved and deleted — nobody else could see it.
+
 
 ## Sources
 

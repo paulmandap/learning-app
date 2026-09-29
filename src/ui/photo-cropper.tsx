@@ -323,7 +323,7 @@ function ZoomSlider({ zoom, disabled, onZoom }: { zoom: number; disabled: boolea
         disabled={disabled}
         style={{ width: TOUCH_TARGET, height: TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' }}
       >
-        {/* A minus drawn, like every icon here (NOTES §56.2). */}
+        {/* A minus, drawn: the icon set has none. */}
         <View style={{ width: 14, height: 2, borderRadius: 1, backgroundColor: t.text }} />
       </Pressable>
       <View

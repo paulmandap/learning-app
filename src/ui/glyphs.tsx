@@ -1,7 +1,6 @@
 import { memo } from 'react';
 import { View } from 'react-native';
-import { iconFill, iconPieces, strokeLayout, type Bar, type Dot, type Polyline } from '../core/icon-geometry';
-import type { IconName } from '../core/icon-shapes';
+import { ICON_SHAPES, type IconName } from '../core/icon-shapes';
 
 export type { IconName };
 
@@ -33,19 +32,23 @@ export const GLYPH = {
 } as const;
 
 /**
- * One icon, drawn with Views (NOTES §56.2).
+ * One icon, drawn as SVG (NOTES §66).
  *
- * The owner chose this over an icon package or SVG: *"try harder. draw
- * boxes."* The shapes are Lucide's (src/core/icon-shapes.ts, generated), and
- * src/core/icon-geometry.ts breaks each into what a View can be — a ring, a
- * rounded frame, a dot, or a bar turned to its angle. Curves are runs of short
- * square-ended bars meeting end to end, with round dots at the ends and sharp
- * corners (`strokeLayout`, and why not round-ended bars: NOTES §57).
+ * The shapes are Lucide's (src/core/icon-shapes.ts, generated), drawn as they
+ * are — a path, a circle, a rectangle, a line — in a 24-unit box, by the
+ * browser. react-native-web renders to the page, so a plain `<svg>` needs no
+ * package (measured in §56.1: about 1 KB).
  *
- * The stroke is 1.75 at 24 and never thinner than 1.5, so a 16 px icon beside
- * a time stamp does not turn to hairlines. `filled` fills a closed shape — a
- * liked heart, a saved bookmark — and still draws the outline over the fill,
- * which is what hides the bands' stepped edges.
+ * They were drawn with Views from §56.2 to §65 — the owner's choice then,
+ * *"try harder. draw boxes."* — every curve a run of short bars. The browser
+ * smooths each bar's edges on its own, so where bars met the edge was drawn
+ * twice, and on a computer screen the curves came out lumpy. The owner, with
+ * a post's heart, comment and share: *"the icons look bad it looks weird like
+ * 144p"*; asked, he chose SVG. It is web-only; the app ships only as a PWA.
+ *
+ * The stroke is 1.75 at 24 and never thinner than 1.5 on screen, so a 16 px
+ * icon beside a time stamp does not turn to hairlines. `filled` fills the
+ * shape — a liked heart, a saved bookmark — under the same outline.
  *
  * Always decorative: the control it sits in carries the words.
  */
@@ -61,10 +64,8 @@ export const Icon = memo(function Icon({
   filled?: boolean;
 }) {
   const k = size / 24;
-  const sw = Math.max(1.5, STROKE * k);
-  const { lines, rings, frames } = iconPieces(name);
-  const strokes = strokesOf(name, lines, sw / k);
-  let key = 0;
+  // In the box's own units, so the line is the same on screen at any size.
+  const stroke = Math.max(1.5, STROKE * k) / k;
 
   return (
     <View
@@ -73,108 +74,34 @@ export const Icon = memo(function Icon({
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      {filled
-        ? iconFill(name).map(([x, y, w, h]) => (
-            <View
-              key={key++}
-              style={{ position: 'absolute', left: x * k, top: y * k, width: w * k, height: h * k, backgroundColor: color }}
-            />
-          ))
-        : null}
-      {frames.map((f) => (
-        <View
-          key={key++}
-          style={{
-            position: 'absolute',
-            left: f.x * k - sw / 2,
-            top: f.y * k - sw / 2,
-            width: f.w * k + sw,
-            height: f.h * k + sw,
-            borderRadius: f.r * k + sw / 2,
-            borderWidth: sw,
-            borderColor: color,
-            backgroundColor: filled ? color : undefined,
-          }}
-        />
-      ))}
-      {rings.map((c) => {
-        const d = 2 * c.r * k + sw;
-        // A circle not much wider than its own line — the three dots of ⋯ —
-        // is a solid dot in SVG, where the stroke covers the middle. As a
-        // border it left a pin-prick hole, and ⋯ read as ∘∘∘ in the first
-        // photograph of the feed.
-        const dot = 2 * c.r * k <= sw * 1.5;
-        return (
-          <View
-            key={key++}
-            style={{
-              position: 'absolute',
-              left: c.cx * k - d / 2,
-              top: c.cy * k - d / 2,
-              width: d,
-              height: d,
-              borderRadius: d / 2,
-              borderWidth: dot ? 0 : sw,
-              borderColor: color,
-              backgroundColor: dot ? color : undefined,
-            }}
-          />
-        );
-      })}
-      {strokes.bars.map((b) => (
-        <View
-          key={key++}
-          style={{
-            position: 'absolute',
-            left: b.cx * k - (b.length * k) / 2,
-            top: b.cy * k - sw / 2,
-            width: b.length * k,
-            height: sw,
-            backgroundColor: color,
-            transform: [{ rotate: `${b.angle}deg` }],
-          }}
-        />
-      ))}
-      {strokes.dots.map((d) => (
-        <View
-          key={key++}
-          style={{
-            position: 'absolute',
-            left: d.cx * k - sw / 2,
-            top: d.cy * k - sw / 2,
-            width: sw,
-            height: sw,
-            borderRadius: sw / 2,
-            backgroundColor: color,
-          }}
-        />
-      ))}
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill={filled ? color : 'none'}
+        stroke={color}
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+        focusable="false"
+        style={{ display: 'block' }}
+      >
+        {ICON_SHAPES[name].map((s, i) =>
+          s[0] === 'p' ? (
+            <path key={i} d={s[1]} />
+          ) : s[0] === 'c' ? (
+            <circle key={i} cx={s[1]} cy={s[2]} r={s[3]} />
+          ) : s[0] === 'r' ? (
+            <rect key={i} x={s[1]} y={s[2]} width={s[3]} height={s[4]} rx={s[5]} />
+          ) : (
+            <line key={i} x1={s[1]} y1={s[2]} x2={s[3]} y2={s[4]} />
+          ),
+        )}
+      </svg>
     </View>
   );
 });
-
-const layoutCache = new Map<string, { bars: Bar[]; dots: Dot[] }>();
-
-/**
- * Every bar and dot of an icon's lines at one stroke, in icon units — worked
- * out once per icon and size, since a feed draws the same heart twenty times.
- */
-function strokesOf(name: IconName, lines: readonly Polyline[], width: number) {
-  const key = `${name}:${width.toFixed(3)}`;
-  let found = layoutCache.get(key);
-  if (!found) {
-    const bars: Bar[] = [];
-    const dots: Dot[] = [];
-    for (const line of lines) {
-      const l = strokeLayout(line, width);
-      bars.push(...l.bars);
-      dots.push(...l.dots);
-    }
-    found = { bars, dots };
-    layoutCache.set(key, found);
-  }
-  return found;
-}
 
 /**
  * Lucide's stroke at 24, a touch lighter than its default 2 — the owner's
