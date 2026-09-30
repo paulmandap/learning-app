@@ -9250,6 +9250,45 @@ typecheck clean with and without `.expo/` · **1666 tests**, 3 skipped
 at 393 px, dark, after the 20 s: the offer and the clue on flashcards, the
 quiz's two choices crossed out, and a blank's letter clue. Nothing answered.
 
+## 70. Chrome's profile folders deleted after every run (2026-09-30)
+
+The owner: the screenshot scripts start Chrome with
+`--user-data-dir=%TEMP%\cdp-<timestamp>` and never delete it — about 575 files
+and 19 MB a run — and the pile made his Windows sign-in take 50 s (the User
+Profile Service walks `%TEMP%` at every logon; 187 folders, 3.77 GB, found from
+the boot trace and deleted by him). All three places that start Chrome
+(`screenshot.ts`, `chrome-canvas.ts`, `large-file-probe.ts`) had their own copy
+of the launch, and all three only `kill()`ed Chrome.
+
+- **`scripts/chrome.ts`, the one place Chrome is started**: `launchChrome(args,
+  label)` makes a fresh folder, `%TEMP%\learning-app-chrome-<label>-XXXXXX`, and
+  `close()` stops Chrome, waits for it to exit (5 s at most), then deletes the
+  folder with `maxRetries` 10 — Windows holds a dead Chrome's files for a moment.
+  **One folder per Chrome, not one shared**: two Chromes cannot use one profile
+  at once, and a probe can hold two pages open.
+- **However a script ends**, an `'exit'` hook stops every Chrome still open and
+  deletes its folder synchronously; Ctrl+C and a terminate request are turned
+  into exits (130, 143) so the hook runs.
+- **A run killed outright** gets neither, so the next launch deletes this
+  project's folders an hour old or more (a younger one may be another script's,
+  still running). Only `learning-app-chrome-*` — nothing else in `%TEMP%`.
+- **`openPage` closes its own Chrome when setup fails.** Found by testing this:
+  a refused sign-in threw before a page was handed back, nobody held a page to
+  close, and the open server and Chrome kept the script running until it was
+  killed — leaving the folder. Now it exits in 4 s with its folder gone.
+- The four `make-*` scripts `await page.close()` (it is async now);
+  `chrome-canvas.ts` no longer falls back to a `chrome` on PATH — `findChrome`
+  names where it looked, as `screenshot.ts` always did.
+
+**Measured**, counting `learning-app-chrome-*` in `%TEMP%` before, during and
+after each: a page opened, used and closed (close 227 ms, 0 left); a sign-in
+refused (exit 1 in 4 s, 0 left); a canvas page (0 left); Ctrl+C mid-run (exit
+130, 0 left); the sweep (a planted two-hour-old folder deleted, a fresh one and a
+20-minute-old one kept); `large-file-probe make` (0 left). No Chrome was left
+running. `tests/chrome-profiles.test.ts` (5) holds that no other script names a
+profile folder or spawns Chrome, and the three ways out. typecheck clean ·
+**1671 tests**, 3 skipped.
+
 
 ## Sources
 

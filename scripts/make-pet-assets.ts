@@ -261,7 +261,7 @@ async function main() {
     }
   }
 
-  page.close();
+  await page.close();
   process.exit(0);
 }
 

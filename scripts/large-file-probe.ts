@@ -28,29 +28,17 @@
  * GEMINI_API_KEY. Test documents are written where you point them and are NOT
  * committed — same rule as verify-phase2.ts, so nobody's notes end up in git.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { GEMINI_API_BASE, LIGHT_LADDER } from '../src/ai/models';
 import { READ_SYSTEM_PROMPT } from '../src/ai/prompts';
 import { READ_RESPONSE_SCHEMA } from '../src/ai/schemas';
+import { launchChrome } from './chrome';
 
 const MB = 1024 * 1024;
 
 /** The provider's own deadline. A read slower than this is a failed read. */
 const CALL_TIMEOUT_MS = 100_000;
-
-const CHROME_CANDIDATES = [
-  process.env.CHROME_PATH,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  `${process.env.LOCALAPPDATA}/Google/Chrome/Application/chrome.exe`,
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-].filter((p): p is string => typeof p === 'string');
 
 // ------------------------------------------------------------------ make --
 
@@ -95,47 +83,21 @@ function pageLines(n: number): string[] {
   ];
 }
 
-function findChrome(): string {
-  const found = CHROME_CANDIDATES.find((p) => existsSync(p));
-  if (!found) throw new Error(`No Chrome or Edge found. Set CHROME_PATH.`);
-  return found;
-}
-
 /**
  * A minimal DevTools session.
  *
  * NOT `openPage` from screenshot.ts: that serves dist/ and signs a user in,
  * which this needs none of, and it does not expose Page.printToPDF. Sharing it
  * would mean widening the harness that catches UI defects for the sake of a
- * one-off document generator.
+ * one-off document generator. Starting Chrome, and deleting its profile folder
+ * after, IS shared (scripts/chrome.ts) — three copies of that leaked it three ways.
  */
 async function withChrome<T>(fn: (
   send: (method: string, params?: unknown) => Promise<Record<string, unknown>>,
 ) => Promise<T>): Promise<T> {
-  const chrome: ChildProcess = spawn(findChrome(), [
-    '--headless=new',
-    '--disable-gpu',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--remote-debugging-port=0',
-    `--user-data-dir=${join(process.env.TEMP ?? '/tmp', `cdp-pdf-${Date.now()}`)}`,
-    'about:blank',
-  ]);
+  const chrome = await launchChrome([], 'pdf');
 
-  const wsUrl = await new Promise<string>((resolve, reject) => {
-    let buffered = '';
-    const timer = setTimeout(() => reject(new Error('Chrome never reported a debug port')), 20_000);
-    chrome.stderr?.on('data', (chunk: Buffer) => {
-      buffered += chunk.toString();
-      const match = buffered.match(/ws:\/\/\S+/);
-      if (match) {
-        clearTimeout(timer);
-        resolve(match[0]);
-      }
-    });
-  });
-
-  const ws = new WebSocket(wsUrl);
+  const ws = new WebSocket(chrome.wsUrl);
   await new Promise((resolve) => (ws.onopen = resolve));
 
   let nextId = 1;
@@ -171,7 +133,8 @@ async function withChrome<T>(fn: (
   try {
     return await fn(send);
   } finally {
-    chrome.kill();
+    ws.close();
+    await chrome.close();
   }
 }
 

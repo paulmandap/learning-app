@@ -11,54 +11,20 @@
  * screenshots. An image library would be a large addition for commands that run
  * a handful of times in the life of the project.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-
-const CHROME_CANDIDATES = [
-  process.env.CHROME_PATH,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  `${process.env.LOCALAPPDATA}/Google/Chrome/Application/chrome.exe`,
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-].filter((p): p is string => typeof p === 'string');
+import { launchChrome } from './chrome';
 
 export interface CanvasPage {
   /** Evaluate an expression in the page, awaiting it, and return its value. */
   evaluate<T>(expression: string): Promise<T>;
-  close(): void;
+  /** Stop Chrome and delete its profile folder (scripts/chrome.ts). */
+  close(): Promise<void>;
 }
 
+/** `profile` names the profile folder, to tell one script's from another's. */
 export async function openCanvasPage(profile: string): Promise<CanvasPage> {
-  const chrome: ChildProcess = spawn(
-    CHROME_CANDIDATES.find((p) => existsSync(p)) ?? 'chrome',
-    [
-      '--headless=new',
-      '--disable-gpu',
-      '--no-first-run',
-      '--remote-debugging-port=0',
-      `--user-data-dir=${join(process.env.TEMP ?? '/tmp', `cdp-${profile}-${Date.now()}`)}`,
-      'about:blank',
-    ],
-  );
+  const chrome = await launchChrome([], profile);
 
-  const wsUrl = await new Promise<string>((resolve, reject) => {
-    let buffered = '';
-    const timer = setTimeout(() => reject(new Error('Chrome never reported a debug port')), 20_000);
-    chrome.stderr?.on('data', (chunk: Buffer) => {
-      buffered += chunk.toString();
-      const match = buffered.match(/ws:\/\/\S+/);
-      if (match) {
-        clearTimeout(timer);
-        resolve(match[0]);
-      }
-    });
-  });
-
-  const ws = new WebSocket(wsUrl);
+  const ws = new WebSocket(chrome.wsUrl);
   await new Promise((resolve) => (ws.onopen = resolve));
 
   let nextId = 1;
@@ -105,9 +71,9 @@ export async function openCanvasPage(profile: string): Promise<CanvasPage> {
       }
       return reply.result.value;
     },
-    close() {
+    async close() {
       ws.close();
-      chrome.kill();
+      await chrome.close();
     },
   };
 }

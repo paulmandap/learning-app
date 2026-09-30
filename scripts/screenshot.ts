@@ -24,27 +24,16 @@
  * TEST USER, never the owner: the app is OTP-only (D10), so the owner's account
  * has no password a script could use.
  *
- * Set CHROME_PATH to override browser discovery.
+ * Set CHROME_PATH to override browser discovery. Chrome's profile folder is
+ * deleted when the page closes (scripts/chrome.ts).
  */
-import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { launchChrome, type Chrome } from './chrome';
 
 const DIST = 'dist';
-
-const CHROME_CANDIDATES = [
-  process.env.CHROME_PATH,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  `${process.env.LOCALAPPDATA}/Google/Chrome/Application/chrome.exe`,
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-].filter((p): p is string => typeof p === 'string');
 
 const MIME: Record<string, string> = {
   '.html': 'text/html',
@@ -115,18 +104,7 @@ function staticServer(): Promise<Server> {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
-function findChrome(): string {
-  const found = CHROME_CANDIDATES.find((p) => existsSync(p));
-  if (!found) {
-    throw new Error(
-      `No Chrome or Edge found. Looked in:\n  ${CHROME_CANDIDATES.join('\n  ')}\n` +
-        'Set CHROME_PATH to point at one.',
-    );
-  }
-  return found;
-}
-
-export async function openPage(options: {
+export interface OpenPageOptions {
   width?: number;
   height?: number;
   /** Sign in as the test user before navigating. Default true. */
@@ -171,43 +149,48 @@ export async function openPage(options: {
    * look at the notice.
    */
   privacyNotice?: 'accepted' | 'unseen';
-} = {}): Promise<Page> {
+}
+
+/** What `setUp` has started so far, for `openPage` to stop if a later step fails. */
+interface Started {
+  server?: Server;
+  chrome?: Chrome;
+  ws?: WebSocket;
+}
+
+export async function openPage(options: OpenPageOptions = {}): Promise<Page> {
+  const started: Started = {};
+  try {
+    return await setUp(options, started);
+  } catch (err) {
+    // A step failed before a page was handed back — a refused sign-in, an app
+    // that never rendered — so nobody holds a page to close. Measured on
+    // 2026-09-30: the open server and Chrome kept the script running until it
+    // was killed, and a killed script leaves Chrome's profile folder behind.
+    started.ws?.close();
+    await started.chrome?.close();
+    started.server?.close();
+    throw err;
+  }
+}
+
+async function setUp(options: OpenPageOptions, started: Started): Promise<Page> {
   const width = options.width ?? 430;
   const height = options.height ?? 900;
   const auth = options.auth ?? true;
 
   const server = await staticServer();
+  started.server = server;
   const address = server.address();
   if (typeof address === 'string' || address === null) throw new Error('server has no port');
   const origin = `http://127.0.0.1:${address.port}`;
 
-  const chrome: ChildProcess = spawn(findChrome(), [
-    '--headless=new',
-    '--disable-gpu',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--remote-debugging-port=0',
-    `--user-data-dir=${join(process.env.TEMP ?? '/tmp', `cdp-${Date.now()}`)}`,
-    `--window-size=${width},${height}`,
-    'about:blank',
-  ]);
+  // A profile folder of its own, deleted by `close()` (scripts/chrome.ts).
+  const chrome = await launchChrome([`--window-size=${width},${height}`]);
+  started.chrome = chrome;
 
-  // Chrome prints its DevTools endpoint on stderr once it is listening. Port 0
-  // means the OS picks one, so there is nothing to guess.
-  const wsUrl = await new Promise<string>((resolve, reject) => {
-    let buffered = '';
-    const timer = setTimeout(() => reject(new Error('Chrome never reported a debug port')), 20_000);
-    chrome.stderr?.on('data', (chunk: Buffer) => {
-      buffered += chunk.toString();
-      const match = buffered.match(/ws:\/\/\S+/);
-      if (match) {
-        clearTimeout(timer);
-        resolve(match[0]);
-      }
-    });
-  });
-
-  const ws = new WebSocket(wsUrl);
+  const ws = new WebSocket(chrome.wsUrl);
+  started.ws = ws;
   await new Promise((resolve) => (ws.onopen = resolve));
 
   let nextId = 1;
@@ -540,7 +523,10 @@ export async function openPage(options: {
     browser: (method, params) => send(method, params),
     origin,
     close: async () => {
-      chrome.kill();
+      ws.close();
+      // Waits for Chrome to exit and deletes its profile folder: `kill()` alone
+      // left ~575 files in %TEMP% on every run (scripts/chrome.ts).
+      await chrome.close();
       server.close();
     },
   };

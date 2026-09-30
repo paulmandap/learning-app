@@ -275,7 +275,7 @@ async function main() {
     }
     console.log('report', JSON.stringify(result.report, null, 2));
   } finally {
-    page.close();
+    await page.close();
   }
   process.exit(0);
 }

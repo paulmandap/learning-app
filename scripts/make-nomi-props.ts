@@ -284,7 +284,7 @@ async function main() {
     );
     console.log(`\n  ${artFile}`);
   } finally {
-    page.close();
+    await page.close();
   }
   process.exit(0);
 }

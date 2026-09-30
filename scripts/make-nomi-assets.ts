@@ -705,7 +705,7 @@ async function main() {
     console.log(`\n  ${rigFile}`);
     console.log('rig', JSON.stringify(rig));
   } finally {
-    page.close();
+    await page.close();
   }
   process.exit(0);
 }
