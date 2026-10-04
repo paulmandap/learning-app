@@ -22,9 +22,10 @@ import { authorName, canEdit, EDIT_WINDOW_MINUTES, MESSAGE_MAX_LENGTH } from '..
 import { describeWhen } from '../core/chat';
 import type { Quote } from '../core/messages';
 import { tallyReactions, type Reaction, type ReactionTally } from '../core/emoji';
-import { postInMessage } from '../core/posts';
+import { messageWords, postInMessage } from '../core/posts';
 import { getPost } from '../data/posts';
 import { SentPostCard } from './sent-post';
+import { copyText } from './share';
 
 /**
  * A room to talk in — the Everyone room, and a conversation with a friend
@@ -272,6 +273,14 @@ export function ChatRoom({
                     replyTo(acting);
                     setActing(null);
                   }
+            }
+            onCopy={
+              messageWords(acting.body)
+                ? () => {
+                    void copyText(messageWords(acting.body));
+                    setActing(null);
+                  }
+                : undefined
             }
             onUnsendEveryone={() => unsend.mutate({ id: acting.id, everyone: true })}
             onUnsendMe={() => unsend.mutate({ id: acting.id, everyone: false })}
@@ -622,11 +631,11 @@ function Message({
                 </Text>
               </View>
             ) : null}
-            {words ? (
-              <Text style={[type.body, { color: mine ? t.accentText : t.text }]} selectable>
-                {words}
-              </Text>
-            ) : null}
+            {/* Not selectable (NOTES §72): holding a bubble is for its menu, as
+                in Messenger. Selectable words turned the hold into "Select /
+                Select All" on an iPhone — the owner: "that's not how it
+                works." The menu's Copy takes the words instead. */}
+            {words ? <Text style={[type.body, { color: mine ? t.accentText : t.text }]}>{words}</Text> : null}
             {carried && sent.data ? <SentPostCard post={sent.data} /> : null}
           </Pressable>
           {/* The inner corner: the left of yours, the right of theirs (NOTES §65). */}

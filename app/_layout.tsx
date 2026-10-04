@@ -5,6 +5,7 @@ import { Platform, useColorScheme, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { startSessionListener, useSessionStore } from '../src/data/session';
 import { forgetSavedScreens, keepSavingScreens, restoreSavedScreens } from '../src/data/saved-screens';
+import { keepBrowserMenusAway } from '../src/ui/app-feel';
 import { HeaderBackButton } from '../src/ui/menu';
 import { StudyAssistant } from '../src/ui/assistant';
 import { PrivacyGate } from '../src/ui/privacy';
@@ -318,6 +319,9 @@ export default function RootLayout() {
     [],
   );
   useEffect(() => keepSavingScreens(queryClient, () => useSessionStore.getState().session?.user.id ?? null), []);
+  // No browser menu over the app — a right click, an Android hold on a picture
+  // (NOTES §72). The iPhone's hold menu is stopped by CSS in public/index.html.
+  useEffect(() => keepBrowserMenusAway(), []);
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -71,13 +71,12 @@ one PR per step. **Everything stays free** (his rule): no paid services, for him
 or for the students. NOTES §65–§70 were written as "not yet deployed"; run
 `scripts/deploy-status.ts` before assuming production is HEAD.
 
-1. **Faster opening: keep data on the phone.** **Built and verified on
-   2026-10-04 (NOTES §71), on branch `step-1-faster-opening`, not deployed.**
-   Home is drawn at 0.19 s instead of 1.2–1.7 s, the splash is gone at 1.35 s
-   instead of 1.76–2.40 s, and a reopen makes 17 database requests instead of
-   34. The owner approved the wording and left the splash minimum to the
-   session: 1000 ms (§71.5). Left to do: merge, deploy, and check `_headers` on
-   the live site with `curl -I`. What was found before building it:
+1. **Faster opening: keep data on the phone.** **Live since 2026-10-04 (NOTES
+   §71, deployed `940d55d`, `_headers` checked on the live site).** Home is
+   drawn at 0.19 s instead of 1.2–1.7 s, the splash is gone at 1.35 s instead of
+   1.76–2.40 s, and a reopen makes 17 database requests instead of 34. The
+   splash minimum is 1000 ms, the session's choice when the owner left it open
+   (§71.5). What was found before building it:
    - Nothing is kept between opens. TanStack Query holds data in memory only
      (`app/_layout.tsx`, `staleTime` 30 s), so every fresh open asks Supabase
      for everything again.
@@ -104,7 +103,16 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
      `--phone`, and record both in NOTES.
    - **Ask him before deploying:** keep the 1.4 s splash minimum or lower it (it
      was 0.7 s before §43.3), and the exact Privacy Policy wording.
-2. **Stop the browser habits.** Long-pressing a message selects text,
+2. **Stop the browser habits.** **Built and verified on 2026-10-04 (NOTES §72),
+   on branch `step-2-app-feel`, not deployed.** Nothing selects or brings up the
+   iPhone's hold menu unless it says so, the browser's menu is kept off the
+   app, and a message's menu has Copy. The owner checks the hold on his iPhone.
+   **Also open:** the nightcap still looks perched rather than worn (the owner,
+   2026-10-04, after §68's re-fit). He was given a Gemini prompt for a nightcap
+   drawn onto this owl's head: first on Nomi, then with Nomi removed. When the
+   pictures come back, cut the hat with `scripts/make-nomi-props.ts` (it reads
+   a 3 × 3 sheet, so it needs a one-picture mode) and place it from the "on
+   Nomi" picture. The original brief, for reference: Long-pressing a message selects text,
    long-pressing a picture opens the browser's save and copy menu, and a right
    click shows the browser's menu. Switch these off the way
    `src/ui/drag-to-folder.tsx` already does for folder rows (`userSelect:

@@ -179,6 +179,7 @@ export function MessageSheet({
   reactions = true,
   onReact,
   onReply,
+  onCopy,
   onEdit,
   onUnsendEveryone,
   onUnsendMe,
@@ -199,6 +200,12 @@ export function MessageSheet({
   onReact: (emoji: string) => void;
   /** Answer it (NOTES §58). Absent where nothing can be sent — a closed conversation. */
   onReply?: () => void;
+  /**
+   * Its words to the clipboard (NOTES §72). A bubble's words are not selectable
+   * any more — holding it is for this sheet — so this is how they are copied.
+   * Absent when the message has no words, only a post.
+   */
+  onCopy?: () => void;
   onEdit: () => void;
   onUnsendEveryone: () => void;
   onUnsendMe: () => void;
@@ -257,11 +264,13 @@ export function MessageSheet({
           mine
             ? [
                 onReply ? { icon: 'reply', label: 'Reply', onPress: onReply, disabled: busy } : null,
+                onCopy ? { icon: 'notes', label: 'Copy', onPress: onCopy, disabled: busy } : null,
                 canEdit ? { icon: 'edit', label: 'Edit message', onPress: onEdit, disabled: busy } : null,
                 { icon: 'trash', label: 'Unsend', onPress: () => setUnsending(true), disabled: busy },
               ]
             : [
                 onReply ? { icon: 'reply', label: 'Reply', onPress: onReply, disabled: busy } : null,
+                onCopy ? { icon: 'notes', label: 'Copy', onPress: onCopy, disabled: busy } : null,
                 { icon: 'trash', label: 'Unsend', onPress: () => setUnsending(true), disabled: busy },
                 onViewProfile && name
                   ? { icon: 'person', label: `See ${name}'s profile`, onPress: onViewProfile, disabled: busy }

@@ -38,3 +38,18 @@ export async function shareLink(title: string, path: string): Promise<ShareOutco
     return 'failed';
   }
 }
+
+/**
+ * Put words on the clipboard — a message's Copy (NOTES §72), now that holding a
+ * bubble opens its menu instead of selecting its words. Whether it worked.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.navigator.clipboard) return false;
+  try {
+    await window.navigator.clipboard.writeText(text);
+    return true;
+  } catch (err) {
+    console.warn(`[share] could not copy: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}

@@ -9432,8 +9432,62 @@ skipped, after a fresh `expo export`. `tests/saved-screens.test.ts` now reads
 `_headers` as either line ending: Git checks it out with CRLF on this machine
 and LF in CI, and the first version only passed because the file was new.
 
-**Next:** deploy, then `curl -I` the live bundle for `immutable` and
-`index.html` for `max-age=0`.
+### 71.6 Live (2026-10-04)
+
+The owner merged `step-1-faster-opening` into `main` and deployed `940d55d`.
+The live bundle is `entry-79ca4f4dc4ab15392ae3cf72baf9f54b.js`, the same as the
+local build. `curl -I`: the bundle answers `Cache-Control: public,
+max-age=31536000, immutable`, and `index.html` still answers `public, max-age=0,
+must-revalidate`.
+
+## 72. Step 2: the app stops acting like a web page (2026-10-04)
+
+The owner, on the installed app: *"when i hold react/message, it's prompting to
+select/select all. that's not how it works. or when i long press an image, it
+will trigger download/copy image just like in website."* Step 2 of the plan.
+
+### 72.1 Why it did
+
+- **A message's words were `selectable`** (`src/ui/chat-room.tsx`), so on an
+  iPhone the hold that opens a bubble's menu (450 ms, NOTES §48) also started
+  a text selection, with "Select / Select All".
+- **Nothing stopped the iPhone's hold menu** on a picture or a link. Every
+  picture, Nomi's layers included, offered Save and Copy.
+- **A right click, and an Android hold on a picture, open the browser's
+  `contextmenu`**: "Save image as…", "Inspect".
+
+### 72.2 What changed
+
+- **`public/index.html`**: `#root` is `user-select: none` and
+  `-webkit-touch-callout: none`. Fields and `[contenteditable='true']` (the
+  note editor) are set back to `text` explicitly, because iOS will not let
+  anyone type into a field inside `-webkit-user-select: none` otherwise.
+  Pictures cannot be dragged out (`-webkit-user-drag: none`).
+- **Text a screen marks `selectable` still selects** (react-native-web gives it
+  `user-select: text`): a post, a comment, a bio, a moderator's report, and
+  Nomi's answers. None of those has a hold gesture to fight with.
+- **`keepBrowserMenusAway`** (`src/ui/app-feel.ts`, from `app/_layout.tsx`)
+  stops `contextmenu` everywhere `browserMenuAllowed` (`src/core/app-feel.ts`,
+  pure) says no. The menu stays in a field, in the note editor, and over
+  selectable text. How text selects is read out from the element to the page,
+  because a word inside a selectable post computes `auto` itself
+  (`usedUserSelect`). On an iPhone a hold sends no `contextmenu`; the CSS above
+  is what stops its menu.
+- **A bubble's words are not selectable any more**, and its menu has **Copy**
+  (`onCopy` on `MessageSheet`, the `notes` icon, after Reply). `messageWords`
+  (`src/core/posts.ts`) copies what the bubble shows, never the link of a post
+  it carries. `copyText` sits beside `shareLink` in `src/ui/share.ts`.
+
+### 72.3 Verified
+
+In the built app in Chrome (a scratch script, test account A), for Home and the
+Everyone room: `#root` selects `none`. A picture selects `none` and a
+`contextmenu` on it is kept away. A bubble's words select `none`, and their menu
+is kept away. The message box is a `textarea` that selects `text` and keeps the
+browser's menu, so paste still works. Chrome cannot show an iPhone's hold menu,
+so the owner checks that on his phone. typecheck clean · **1702 tests**, 2
+skipped (`tests/app-feel.test.ts` 10) · `expo export`, boot 6/6. **Not
+deployed.**
 
 
 ## Sources

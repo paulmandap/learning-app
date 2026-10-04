@@ -166,6 +166,16 @@ export function messagePreview(body: string): string {
 }
 
 /**
+ * What Copy puts on the clipboard for a message (NOTES §72): its words as the
+ * bubble shows them. A post it carries is drawn as a card, not as words, so its
+ * link is left out. Empty when there are no words, and then there is no Copy.
+ */
+export function messageWords(body: string): string {
+  const carried = postInMessage(body);
+  return (carried ? carried.rest : body).trim();
+}
+
+/**
  * May this post be sent in a message? Only one everyone can see — a
  * friends-only post sent to somebody who is not the author's friend would
  * arrive as a hole, which the owner ruled out (§62).
