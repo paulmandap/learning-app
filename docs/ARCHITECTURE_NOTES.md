@@ -9529,17 +9529,31 @@ hat, in `design-reference/nightcap-tryout.png`. **Place A** reads as worn:
 the cuff along the brow and the tip flopping right. The picture's cuff slopes
 about 14°, so it turns −3° to meet the head's 10°.
 
-**Not done, waiting on the owner's yes to the blue look:**
-- Write the hat to `assets/nomi-prop-nightcap.webp`, downscaled to about 360
-  px wide, and its size to `NOMI_PROP_ART`.
-- Set `PROP_PLACES.nightcap` to place A.
-- Update the two `tests/nomi-props.test.ts` bounds written for the old picture:
-  `width ≤ 1.1` for a worn hat (this one's pompom hangs past the head), and
-  `rotate` between 0 and 5 (this picture needs −3).
-- Move the "z"s (`nomi-character.tsx`, `left: W * (1.1 + i * 0.1)`) and
-  `ABOVE_A_HAT` clear of the pompom, which now hangs at about 1.1–1.23 W and
-  0.25 H.
-- Photograph Home at 23:00 (the Home card, the bubble beside Nomi) as §68 did.
+**Done, after the owner's yes to the blue look (same night):**
+- **The right ear tuft.** The owner saw it at place A ("on the right ear, i can
+  see it"). `try-nightcap.ts` now counts the owl's pixels that show through the
+  hat, either between its parts in a column or above its top: old hat 631, A
+  128. **The 128 came through holes in the cut, not past its edge**: pale
+  highlights in the cone that the colour tests had left out. The cut now fills
+  whatever the hat encloses, plus a 3-pixel closing that never paints
+  background in. After that every candidate counts 0. Chosen:
+  **`{ cx: 0.66, cy: 0.2, width: 1.22, rotate: -4 }`**, a little bigger and
+  further right than A, for margin on that ear.
+- `cut-starry-nightcap.ts` writes `assets/nomi-prop-nightcap.webp` (440 × 380,
+  18 KB) and its line in `nomi-prop-art.ts`. `make-nomi-props.ts` no longer
+  writes the nightcap, which is retired from its sheet; it keeps the line.
+- `tests/nomi-props.test.ts`: a worn hat may be 1.25 wide (the pompom); the
+  nightcap turns back, between −8° and 0°.
+- **Home at 23:00** (Asia/Manila, test account A, built app). At first the
+  pompom covered the bubble's tail and a "z" sat on the hat's tip. Now:
+  - The "z"s rise on the **left** (`left: W * (-0.2 - i * 0.09)`).
+  - Floating props clear of the nightcap go on the left too (`CLEAR_OF_A_HAT`
+    is per hat; the cap keeps §68's places on the right).
+  - Home's Nomi column is **116 wide at night**, 84 by day. At 104 the pompom
+    touched the tail.
+  - Measured: the hat's picture ends at x 142, the bubble starts at 156, a 14 px
+    gap; the "z"s sit at x 26–44, inside the card (16) and clear of the hat (55).
+- typecheck clean · **1703 tests**, 2 skipped · built. Not deployed.
 
 
 ## Sources

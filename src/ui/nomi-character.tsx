@@ -557,10 +557,11 @@ function Zzz({ W, H }: { W: number; H: number }) {
             accessible={false}
             style={{
               position: 'absolute',
-              // Clear of the head and of the nightcap's pompom, which hangs by
-              // the right cheek since the cap came down over the crown (§68).
-              left: W * (1.1 + i * 0.1),
-              top: H * (0.2 - i * 0.08),
+              // On the left, rising away from the head (NOTES §72.5): the
+              // starry nightcap's tip and pompom fill the right side, and on
+              // Home its speech bubble starts just past them.
+              left: W * (-0.2 - i * 0.09),
+              top: H * (0.22 - i * 0.08),
               fontSize: Math.max(8, H * (0.13 - i * 0.025)),
               fontWeight: '700',
               color: t.textMuted,

@@ -32,8 +32,10 @@ describe('every prop', () => {
       expect(p.cy, name).toBeLessThan(1);
       expect(p.width, name).toBeGreaterThan(0.2);
       // A hat pulled down over the whole crown is as wide as the head and its
-      // ear tufts (NOTES §68); nothing else is wider than most of the owl.
-      expect(p.width, name).toBeLessThanOrEqual(WORN.has(name) ? 1.1 : 0.9);
+      // ear tufts (NOTES §68) — the starry nightcap a little more, for the
+      // pompom hanging past the cheek (§72.5); nothing else is wider than most
+      // of the owl.
+      expect(p.width, name).toBeLessThanOrEqual(WORN.has(name) ? 1.25 : 0.9);
       expect(Math.abs(p.rotate), name).toBeLessThanOrEqual(15);
     }
   });
@@ -79,9 +81,10 @@ describe('worn and held, not stuck on (NOTES §68)', () => {
     // The head leans about 10° (the right ear tuft lower than the left).
     expect(HEAD_TILT_DEG).toBe(10);
     expect(PROP_PLACES.cap.rotate).toBe(HEAD_TILT_DEG);
-    // The nightcap's picture already slopes ~10.6°; a little more meets the brow.
-    expect(PROP_PLACES.nightcap.rotate).toBeGreaterThan(0);
-    expect(PROP_PLACES.nightcap.rotate).toBeLessThan(5);
+    // The starry nightcap's cuff already slopes ~14°, more than the head's
+    // 10°, so it is turned back a little to meet it (§72.5).
+    expect(PROP_PLACES.nightcap.rotate).toBeLessThan(0);
+    expect(PROP_PLACES.nightcap.rotate).toBeGreaterThan(-8);
   });
 
   it('pulls the nightcap down over both ear tufts, not perched on top', () => {
@@ -115,13 +118,28 @@ describe('worn and held, not stuck on (NOTES §68)', () => {
     for (const floating of FLOATING) {
       expect(placeOf(floating, null)).toEqual(PROP_PLACES[floating]);
       expect(placeOf(floating, 'mug')).toEqual(PROP_PLACES[floating]);
-      for (const hat of WORN) {
-        const above = placeOf(floating, hat);
-        expect(above.cy, `${floating} with ${hat}`).toBeLessThan(PROP_PLACES[floating].cy);
-        expect(above.cx, `${floating} with ${hat}`).toBeGreaterThan(1);
-      }
+      // The cap: higher and out to the right, clear of its tassel (§68).
+      const capped = placeOf(floating, 'cap');
+      expect(capped.cy, `${floating} with the cap`).toBeLessThan(PROP_PLACES[floating].cy);
+      expect(capped.cx, `${floating} with the cap`).toBeGreaterThan(1);
+      // The starry nightcap: on the left, wholly clear of the hat's left end —
+      // its tip and pompom fill the right side (§72.5).
+      const night = placeOf(floating, 'nightcap');
+      const hatLeft = PROP_PLACES.nightcap.cx - PROP_PLACES.nightcap.width / 2;
+      expect(night.cx + night.width / 2, `${floating} with the nightcap`).toBeLessThanOrEqual(hatLeft);
     }
     // A held prop is where it always is.
     expect(placeOf('cap', 'nightcap')).toEqual(PROP_PLACES.cap);
+  });
+
+  it('at night the "z"s rise on the left, and Home makes room for the pompom (§72.5)', () => {
+    const character = readFileSync(join('src', 'ui', 'nomi-character.tsx'), 'utf8');
+    expect(character).toContain('left: W * (-0.2 - i * 0.09),');
+    const home = readFileSync(join('src', 'ui', 'nomi.tsx'), 'utf8');
+    expect(home).toContain("style={{ width: night ? 116 : 84, alignItems: 'center' }}");
+    // 116 holds a Nomi 92 tall (68.5 wide) with the pompom's 1.29 of its width,
+    // and leaves a gap before the bubble's tail (photographed at 104: touching).
+    const w = (92 * 367) / 493;
+    expect((116 - w) / 2 + w * (PROP_PLACES.nightcap.cx + PROP_PLACES.nightcap.width / 2)).toBeLessThanOrEqual(116 - 4);
   });
 });

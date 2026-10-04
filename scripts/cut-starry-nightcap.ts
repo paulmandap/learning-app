@@ -137,6 +137,29 @@ for (let pass = 0; pass < 2; pass++) {
   for (const i of add) hat[i] = 1;
 }
 
+// Holes: whatever the hat encloses is hat — a pale highlight in the cone that
+// the colour tests missed. Then a 3-pixel closing for cracks that open to the
+// edge. Seen as dark specks where the cone hangs over Nomi's head (2026-10-04).
+{
+  const reach = new Uint8Array(N);
+  flood(border.filter((i) => !hat[i]), (j) => !hat[j], reach);
+  for (let i = 0; i < N; i++) if (!hat[i] && !reach[i]) hat[i] = 1;
+  const R = 3, near = [];
+  for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) if (dx * dx + dy * dy <= R * R) near.push([dx, dy]);
+  const grown = new Uint8Array(N);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!hat[y * W + x]) continue;
+    for (const [dx, dy] of near) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) grown[yy * W + xx] = 1; }
+  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (hat[i] || bg[i]) continue;
+    let inside = true;
+    for (const [dx, dy] of near) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H || !grown[yy * W + xx]) { inside = false; break; } }
+    if (inside) hat[i] = 1;
+  }
+}
+
 // Bounding box, the cut, and an overlay to check by eye.
 let x0 = W, y0 = H, x1 = 0, y1 = 0, total = 0;
 for (let i = 0; i < N; i++) if (hat[i]) { const x = i % W, y = (i - x) / W; total++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
@@ -150,7 +173,14 @@ for (let i = 0; i < N; i++) if (hat[i]) { ov.data[i * 4] = Math.min(255, ov.data
 const oc = document.createElement('canvas'); oc.width = W; oc.height = H; oc.getContext('2d').putImageData(ov, 0, 0);
 const small = document.createElement('canvas'); small.width = W / 2; small.height = H / 2;
 small.getContext('2d').drawImage(oc, 0, 0, W / 2, H / 2);
+// The app's picture: 440 wide, about the body art's own resolution at the
+// width the hat is worn at (1.22 of 367). Downscaling also softens the cut edge.
+const asset = document.createElement('canvas');
+asset.width = 440; asset.height = Math.round(cut.height * 440 / cut.width);
+const ac = asset.getContext('2d'); ac.imageSmoothingEnabled = true; ac.imageSmoothingQuality = 'high';
+ac.drawImage(cut, 0, 0, asset.width, asset.height);
 return {
+  asset: asset.toDataURL('image/webp', 0.92), assetSize: [asset.width, asset.height],
   size: [W, H], blue: bestSize, stars, edgeColumns: edge.length, cuffSpan: [cuffMinX, cuffMaxX], cream: creamSize, total,
   box: [x0, y0, x1, y1],
   cut: cut.toDataURL('image/png'), overlay: small.toDataURL('image/png'),
@@ -166,8 +196,18 @@ async function main() {
     );
     writeFileSync(`${OUT}/nightcap-cut.png`, Buffer.from(res.cut.split(',')[1]!, 'base64'));
     writeFileSync(`${OUT}/nightcap-overlay.png`, Buffer.from(res.overlay.split(',')[1]!, 'base64'));
-    const { cut: _c, overlay: _o, ...facts } = res;
+    // The app's picture, and its size in the art file in the same run — the
+    // numbers describe this exact image (as make-nomi-props.ts does for the rest).
+    const [w, h] = res.assetSize as [number, number];
+    writeFileSync('assets/nomi-prop-nightcap.webp', Buffer.from(String(res.asset).split(',')[1]!, 'base64'));
+    const artFile = 'src/ui/nomi-prop-art.ts';
+    const art = readFileSync(artFile, 'utf8');
+    const line = /( {2}nightcap: \{ source: nightcap, width: )\d+(, height: )\d+( \},)/;
+    if (!line.test(art)) throw new Error(`${artFile} has no nightcap line`);
+    writeFileSync(artFile, art.replace(line, `$1${w}$2${h}$3`));
+    const { cut: _c, overlay: _o, asset: _a, ...facts } = res;
     console.log(JSON.stringify(facts));
+    console.log(`wrote assets/nomi-prop-nightcap.webp (${w}×${h}) and its size in ${artFile}`);
   } finally {
     await page.close();
   }

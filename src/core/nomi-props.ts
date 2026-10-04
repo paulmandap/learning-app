@@ -65,11 +65,14 @@ export const PROP_PLACES: Readonly<Record<NomiProp, PropPlace>> = {
   // looks awkward. nomi isn't wearing it."* The cap was turned 6° the wrong
   // way — against the head's 10° — and perched on the crown.
   cap: { cx: 0.5, cy: 0.08, width: 0.76, rotate: HEAD_TILT_DEG },
-  // Down over the whole crown, both ear tufts inside it, the brim along the
-  // brow. The picture's brim already slopes about 10.6°; 2° more meets the
-  // brow's 13°. It was 0.8 wide and sat high, so the right tuft stuck out
-  // from under it.
-  nightcap: { cx: 0.56, cy: 0.11, width: 1.02, rotate: 2 },
+  // The starry nightcap (NOTES §72.5), cut from a picture of an owl wearing it,
+  // so its cuff wraps a head instead of resting on one. Down over the crown,
+  // both ear tufts inside, the cuff along the brow: the picture's cuff slopes
+  // about 14°, and −4° meets the head's 10°. Chosen by counting the owl's
+  // pixels that show through the hat at each place — none here; 128 at the
+  // first try, where the owner saw the right tuft (scripts/try-nightcap.ts).
+  // Wider than the head, because the pompom hangs past the right cheek.
+  nightcap: { cx: 0.66, cy: 0.2, width: 1.22, rotate: -4 },
   // Floating, beside the head.
   lightbulb: { cx: 0.9, cy: 0.06, width: 0.3, rotate: 8 },
   heart: { cx: 0.9, cy: 0.08, width: 0.32, rotate: 6 },
@@ -80,20 +83,32 @@ export const PROP_PLACES: Readonly<Record<NomiProp, PropPlace>> = {
 export const WORN: ReadonlySet<NomiProp> = new Set<NomiProp>(['cap', 'nightcap']);
 
 /**
- * Where a moment's prop floats while a hat is on (NOTES §68): higher and further
- * out, clear of the cap's tassel and the nightcap's tail. In their usual places
- * the sparkles sat on the tassel and the heart on the nightcap. Without a hat
+ * Where a moment's prop floats while a hat is on, clear of it. Without a hat
  * they stay close to the head, where a small Nomi in a heading has room.
+ *
+ * - **The cap** (NOTES §68): higher and further out to the right, clear of its
+ *   tassel. In their usual places the sparkles sat on the tassel.
+ * - **The starry nightcap** (§72.5): on the left. Its tip and pompom fill the
+ *   right side, out to 1.29 of the owl's width, which is also where Home's
+ *   speech bubble starts.
  */
-const ABOVE_A_HAT: Partial<Record<NomiProp, PropPlace>> = {
-  lightbulb: { cx: 1.06, cy: -0.1, width: 0.28, rotate: 8 },
-  heart: { cx: 1.06, cy: -0.08, width: 0.3, rotate: 6 },
-  sparkles: { cx: 1.02, cy: -0.04, width: 0.4, rotate: 0 },
+const CLEAR_OF_A_HAT: Readonly<Record<'cap' | 'nightcap', Partial<Record<NomiProp, PropPlace>>>> = {
+  cap: {
+    lightbulb: { cx: 1.06, cy: -0.1, width: 0.28, rotate: 8 },
+    heart: { cx: 1.06, cy: -0.08, width: 0.3, rotate: 6 },
+    sparkles: { cx: 1.02, cy: -0.04, width: 0.4, rotate: 0 },
+  },
+  nightcap: {
+    lightbulb: { cx: -0.17, cy: 0.04, width: 0.28, rotate: -8 },
+    heart: { cx: -0.17, cy: 0.06, width: 0.3, rotate: -6 },
+    sparkles: { cx: -0.2, cy: 0.08, width: 0.38, rotate: 0 },
+  },
 };
 
 /** Where a prop goes, given what else Nomi has on. */
 export function placeOf(prop: NomiProp, held: NomiProp | null): PropPlace {
-  return (held && WORN.has(held) ? ABOVE_A_HAT[prop] : undefined) ?? PROP_PLACES[prop];
+  const hat = held === 'cap' || held === 'nightcap' ? CLEAR_OF_A_HAT[held] : null;
+  return hat?.[prop] ?? PROP_PLACES[prop];
 }
 
 /** The wing channels a held prop keeps still. */

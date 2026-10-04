@@ -181,7 +181,10 @@ export function NomiCard({
         onPress={tap}
         onLongPress={() => reduce === false && setGesture('shy')}
         delayLongPress={450}
-        style={{ width: 84, alignItems: 'center' }}
+        // Wider at night (NOTES §72.5): the starry nightcap's pompom hangs to
+        // 1.29 of Nomi's width: at 84 it covered the bubble's tail, at 104 touched it. The
+        // "z"s rise on the left, inside the same room.
+        style={{ width: night ? 116 : 84, alignItems: 'center' }}
       >
         <NomiCharacter
           state={owl}

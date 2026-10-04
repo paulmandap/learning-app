@@ -109,9 +109,11 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
    (§72.4), on branch `fix-hold-menu`, not yet deployed when this was written:**
    sheets live outside `#root`, so the rules moved to `body`. Check with
    `scripts/deploy-status.ts`.
-   **The nightcap (§72.5):** a blue starry nightcap, cut from the owner's Gemini
-   picture, reads as worn at place A in `design-reference/nightcap-tryout.png`.
-   It waits on his yes to the blue look; the list of what to do is in §72.5.
+   **The nightcap (§72.5):** the blue starry nightcap is in, with no gaps around
+   the right ear, the "z"s on the left, and room on Home at night. It is on
+   branch `starry-nightcap` (if the owner ran the commands); check
+   `deploy-status.ts` before assuming it is live. The hold-menu fix (§72.4) is
+   live as `f601d10`.
    The original brief, for reference: Long-pressing a message selects text,
    long-pressing a picture opens the browser's save and copy menu, and a right
    click shows the browser's menu. Switch these off the way

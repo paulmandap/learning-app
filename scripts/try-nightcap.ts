@@ -51,11 +51,46 @@ async function main() {
         ctx.fillStyle = '#fff'; ctx.font = '22px sans-serif';
         ctx.fillText(p.label, n * cellW + 12, cellH - 14);
       });
+      // Gaps: the owl's pixels that show between parts of the hat — under a part
+      // of it in the same column, or above its top. A tuft poking out between
+      // the cuff and the hanging tip is the first kind (the owner, 2026-10-04).
+      const gaps = P.map((p) => {
+        const b = document.createElement('canvas'); b.width = W; b.height = H;
+        b.getContext('2d').drawImage(img.body, 0, 0, W, H);
+        const hc = document.createElement('canvas'); hc.width = W; hc.height = H;
+        const hx = hc.getContext('2d');
+        const hat = p.old ? img.oldHat : img.newHat;
+        const w = p.width * W, h = w * hat.naturalHeight / hat.naturalWidth;
+        hx.translate(p.cx * W, p.cy * H); hx.rotate(p.rotate * Math.PI / 180); hx.drawImage(hat, -w / 2, -h / 2, w, h);
+        const bd = b.getContext('2d').getImageData(0, 0, W, H).data, hd = hx.getImageData(0, 0, W, H).data;
+        let between = 0, above = 0;
+        for (let x = 0; x < W; x++) {
+          let top = -1, bottom = -1;
+          for (let y = 0; y < H; y++) if (hd[(y * W + x) * 4 + 3] > 128) { if (top < 0) top = y; bottom = y; }
+          if (top < 0) continue;
+          for (let y = 0; y < bottom; y++) {
+            const i = (y * W + x) * 4;
+            if (bd[i + 3] > 128 && hd[i + 3] <= 128) { if (y < top) above++; else between++; }
+          }
+        }
+        return p.label + ': ' + between + ' between, ' + above + ' above';
+      });
+      const report = gaps.join(' | ');
+      // ZOOM: just the head of each, full size — to check an ear tuft by eye.
+      if (${process.env.ZOOM === '1'}) {
+        const z = document.createElement('canvas'); const zw = 300, zh = 260;
+        z.width = zw * P.length; z.height = zh;
+        const zc = z.getContext('2d');
+        P.forEach((p, n) => zc.drawImage(c, n * cellW + pad + W * 0.35, pad - H * 0.2, zw, zh, n * zw, 0, zw, zh));
+        return JSON.stringify({ report, png: z.toDataURL('image/png') });
+      }
       const small = document.createElement('canvas'); small.width = c.width / 2; small.height = c.height / 2;
       small.getContext('2d').drawImage(c, 0, 0, small.width, small.height);
-      return small.toDataURL('image/png');
+      return JSON.stringify({ report, png: small.toDataURL('image/png') });
     })()`);
-    writeFileSync(`${S}/nightcap-tryout.png`, Buffer.from(out.split(',')[1]!, 'base64'));
+    const { report, png } = JSON.parse(out) as { report: string; png: string };
+    console.log(report);
+    writeFileSync(`${S}/nightcap-tryout.png`, Buffer.from(png.split(',')[1]!, 'base64'));
     console.log('wrote design-reference/nightcap-tryout.png');
   } finally {
     await page.close();
