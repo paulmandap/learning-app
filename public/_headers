@@ -1,0 +1,17 @@
+# Built files whose names change whenever what is in them changes (NOTES §71).
+#
+# Cloudflare's default for every file is "public, max-age=0, must-revalidate",
+# so on every open a phone asked Cloudflare whether the app's code had changed
+# before it could run it — read off the live site on 2026-10-04. These names
+# carry a hash of their contents, so the answer is always "no": a new build
+# ships under new names, and index.html, left on the default so a deploy is
+# seen at once, points at them.
+#
+# Nothing else goes here. The files from public/ keep their names from one
+# build to the next — the splash layers, the icons, sw.js, manifest.json — so
+# they stay on the default.
+/_expo/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

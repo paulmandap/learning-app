@@ -9289,6 +9289,133 @@ running. `tests/chrome-profiles.test.ts` (5) holds that no other script names a
 profile folder or spawns Chrome, and the three ways out. typecheck clean ·
 **1671 tests**, 3 skipped.
 
+## 71. A faster open: the screens kept on the device, and Home asked for once (2026-10-04)
+
+The owner: *"sometimes loading is about 2 seconds. i want my app to be faster
+... at the cost of the user side and minimal effect on my DB side."* Step 1 of
+the plan in HANDOFF's "▶ START HERE".
+
+### 71.1 Measured first
+
+At `50e38fd`, built, as test account A, with `scripts/splash-probe.ts` and a
+request counter (a scratch script reading `performance.getEntriesByType
+('resource')` for `*.supabase.co` after each reload):
+
+```
+desktop, warm        Nomi's line          fade starts           splash gone
+  before             1,207 – 1,726 ms     1,443 – 2,081 ms      1,764 – 2,404 ms
+phone: no cache, 4x CPU, slow 4G
+  before             4,857 – 5,312 ms     5,277 – 5,475 ms      5,599 – 5,794 ms
+```
+
+That is the owner's two seconds. Three causes:
+
+- **Every open asked the database for everything twice: 34 requests where 17
+  were needed**, each pair starting within a millisecond of the other.
+  `useResetCacheOnUserChange` (§42.1) took "nobody yet" turning into the person
+  already signed in for a change of person, and `resetQueries()` refetched
+  every query Home had just started.
+- **Nothing outlived the page.** TanStack Query held answers in memory only, so
+  Home showed nothing it had not just fetched again.
+- **The phone checked the code with Cloudflare on every open.** The live site
+  sent `Cache-Control: public, max-age=0, must-revalidate` for the hashed
+  bundle as well as for `index.html` (read with `curl -I` on 2026-10-04).
+
+The splash also waited for queries no screen draws: the unread badge, and a
+moderator's notice that is two requests one after the other (`restrictions`,
+then `warnings`), still out after Home was complete.
+
+### 71.2 What changed
+
+- **Home is asked for once.** `useResetCacheOnUserChange` starts counting from
+  the first answer about who is signed in (`ready`). A real change of person
+  still resets the cache, as §42.1 needs, and now removes the kept copy too.
+- **The main screens are kept on the device** (`src/core/saved-screens.ts`,
+  pure; `src/data/saved-screens.ts`). One `localStorage` slot,
+  `nomi-saved-screens`, holds `{ v, userId, build, savedAt, state }`, written
+  with TanStack Query's own `dehydrate` a second after a kept answer arrives,
+  and at once when the page is hidden. No new dependency.
+  - **Kept**, by the first part of the key, most needed first: `nomi-brain`,
+    `sets`, `continue`, `folders`, `dashboard`, `my-username`, `my-bio`,
+    `post-count`, `notes`. Over 1,000,000 characters, roots go from the end, so
+    the notes go first.
+  - **Never kept:** `['profile']`, because it holds the Gemini key (D12) and the
+    Privacy Policy does not list the key among what the device holds. A kept
+    answer that mentions `gemini_api_key` is dropped whatever its name. Also
+    never kept: signed picture links (they expire), anything a deck is dealt
+    from (one has `staleTime: Infinity`), and messages.
+  - **Put back** with `hydrate`, through `startSessionListener`'s new
+    `onFirstSession`, before the store hears who is signed in, so Home's
+    guarded queries start from the copy. Only for the same person, the same
+    build (the hash in `entry-<hash>.js`, so a deploy discards every copy once),
+    and no older than a week. Signed out at launch, the copy is removed.
+  - **Removed** on Sign out, on Delete my data, and on a change of person.
+  - Kept roots get `gcTime` of a day, so a screen not opened since launch is
+    still there to be kept.
+- **The splash waits only for what the screen has nothing for**
+  (`holdsSplash`, `src/core/splash.ts`). A refresh of what is already drawn
+  does not hold it, and neither do `dm-unread`, `standing` or `avatar-url`
+  (`SPLASH_IGNORES`). The profile is not kept, so it is still waited for: one
+  request.
+- **`public/_headers`**: `/_expo/static/*` and `/assets/*` are `immutable` for
+  a year. Every file there carries a hash of its contents in its name (checked
+  in `dist/`). Everything else stays on Cloudflare's default, `index.html`
+  above all, or a deploy would never arrive.
+- **The Privacy Policy** says so: *"So that Nomi opens quickly, it also keeps a
+  copy of your profile picture and of what your main screens last showed, such
+  as your sets, notes and progress. Signing out removes both copies."*
+  `EFFECTIVE_DATE` is October 4, 2026. The Terms of Use did not change and keep
+  `TERMS_EFFECTIVE_DATE`, September 29. The What's new card announces it
+  (`faster-2026-10-04`): its icon now comes from `WHATS_NEW.icon`, and "Find
+  friends" went with the sharing notice it belonged to.
+
+### 71.3 Measured after
+
+Same harness, same account:
+
+```
+desktop, warm        Nomi's line          fade starts           splash gone
+  after              184 – 191 ms         1,441 – 1,445 ms      1,767 – 1,771 ms
+phone: no cache, 4x CPU, slow 4G
+  after, a copy      4,178 – 4,217 ms     4,697 – 4,769 ms      5,025 – 5,102 ms
+  after, no copy     5,039 ms             5,221 ms              5,547 ms
+```
+
+- **Requests per open: 17, from 34**, once the copy is older than the 30 s
+  `staleTime`, which is any real reopen. Reopened within 30 s, **5**: the kept
+  answers are still fresh and are not asked for. `study_sets` is still read
+  twice, once for `['sets']` and once inside the `['nomi-brain']` snapshot: a
+  possible later saving.
+- **On a warm open the splash is now held only by `SPLASH_MIN_MS`** (1.4 s,
+  §43.3). Home is complete at about 0.19 s. Lowering the minimum is the
+  owner's call; this makes it the whole of the wait.
+- **Not measurable here:** `_headers` acts only on Cloudflare. After the
+  deploy, `curl -I` on the live bundle must show `immutable`, and `index.html`
+  must still show `max-age=0`.
+
+### 71.4 Verified, not deployed
+
+typecheck clean · `expo export` (`dist/_headers` present) · **1692 tests**, 2
+skipped, boot 6/6 against the new build. `tests/saved-screens.test.ts` (20)
+holds the rules above: what is kept and never kept, that every kept or ignored
+name is a query the app really makes, that the key never reaches the copy,
+only the same person, build and week, the notes going first when too big, the
+wiring, and the policy text.
+
+**The review.** Three reviewers in a Workflow (correctness, privacy,
+regressions) used the owner's weekly Pro limit (about 540k tokens) and returned
+nothing. The risky paths were then read by hand. `PrivacyGate`'s `['profile']`
+is guarded by `enabled: !!session` and never kept, so §42.1 cannot come back
+through the copy. An unguarded kept query mounted before the session is known
+is overwritten by its own fetch, or hydrated into if older. Every kept answer
+is plain JSON: no `Date`, `Map` or `Set` reaches the cache. An old tab asking
+for a chunk a deploy removed can get `index.html` cached under that old name,
+but no current page asks for it. `CLAUDE.md` now says not to spawn subagents
+or workflows unless he asks.
+
+**Waiting on the owner:** the splash minimum, and the Privacy Policy and What's
+new wording. Then deploy, and check `_headers` on the live site.
+
 
 ## Sources
 

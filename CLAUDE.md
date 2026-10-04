@@ -13,6 +13,9 @@ worked on now, and its Rules section is not negotiable.
 - Keep everything free: no paid services, APIs or plans, for him or for the
   students.
 - Look up model, price, release and limit facts before stating them.
+- His plan is Claude Pro. Don't spawn subagents or multi-agent workflows unless
+  he asks for one: on 2026-10-04 a three-reviewer run used his whole weekly
+  limit and returned nothing. Review the risky code yourself instead.
 
 ## Cloud sessions
 

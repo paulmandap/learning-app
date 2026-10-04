@@ -37,7 +37,10 @@ export interface LegalDocument {
 
 export const OPERATOR = 'Paul Christian Mandap';
 export const CONTACT_EMAIL = 'paulmandap16@gmail.com';
-export const EFFECTIVE_DATE = 'September 29, 2026';
+/** The Privacy Policy's date: October 4 added the copy of the main screens kept on the device (NOTES §71). */
+export const EFFECTIVE_DATE = 'October 4, 2026';
+/** The Terms of Use did not change on October 4, so they keep the date they last did. */
+export const TERMS_EFFECTIVE_DATE = 'September 29, 2026';
 export const MINIMUM_AGE = 18;
 /** How long an encrypted backup is kept — `retention-days` in .github/workflows/backup.yml. */
 export const BACKUP_DAYS = 90;
@@ -96,7 +99,7 @@ export const PRIVACY_POLICY: LegalDocument = {
           'A count of how many replies Nomi has given you each day, so the daily limit works.',
           'Standard web server logs kept by our hosting provider, such as IP addresses, browser type and the pages requested.',
         ],
-        "Stored on your device: your signed-in session, whether you have read the privacy notice, a copy of your profile picture so it appears quickly, and — if you turn on reminders — what your browser needs to receive them. Nomi doesn't use cookies or any similar technology for advertising, or to follow you across other websites.",
+        "Stored on your device: your signed-in session, whether you have read the privacy notice, and — if you turn on reminders — what your browser needs to receive them. So that Nomi opens quickly, it also keeps a copy of your profile picture and of what your main screens last showed, such as your sets, notes and progress. Signing out removes both copies. Nomi doesn't use cookies or any similar technology for advertising, or to follow you across other websites.",
       ],
     },
     {
@@ -248,7 +251,7 @@ export const PRIVACY_POLICY: LegalDocument = {
 
 export const TERMS_OF_USE: LegalDocument = {
   title: 'Terms of Use',
-  effective: EFFECTIVE_DATE,
+  effective: TERMS_EFFECTIVE_DATE,
   intro:
     'These Terms of Use are an agreement between you and ' +
     OPERATOR +

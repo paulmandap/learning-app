@@ -90,17 +90,43 @@ export const SPLASH_SETTLE_MS = 150;
 /** Signed in, and nothing has started loading this long after: a screen with nothing to fetch. */
 export const SPLASH_NOTHING_TO_LOAD_MS = 400;
 
+/**
+ * Queries the splash never waits for, by the first part of their key: none of
+ * them draws the first screen (NOTES §71).
+ *
+ *  - `dm-unread`: the number on Community's tab.
+ *  - `standing`: a moderator's warning, which opens a sheet of its own when
+ *    there is one. Two requests, one after the other; measured on 2026-10-04,
+ *    it was still out after Home was complete.
+ *  - `avatar-url`: a profile photo's signed link. The photo kept on this device
+ *    shows meanwhile (NOTES §40).
+ */
+export const SPLASH_IGNORES: readonly string[] = ['dm-unread', 'standing', 'avatar-url'];
+
+/**
+ * Whether a query in flight holds the splash (NOTES §71).
+ *
+ * Only one the screen has nothing for yet. Since screens start from the copy
+ * kept on this device, most requests at launch refresh what is already drawn,
+ * and waiting for those would hide a screen that is ready.
+ */
+export function holdsSplash(queryKey: readonly unknown[], hasData: boolean): boolean {
+  if (hasData) return false;
+  const root = queryKey[0];
+  return !(typeof root === 'string' && SPLASH_IGNORES.includes(root));
+}
+
 export interface SplashMoment {
   /** Milliseconds since the page began loading. */
   sinceLoad: number;
   /** Milliseconds since the app knew whether anyone is signed in; null until it does. */
   sinceReady: number | null;
   signedIn: boolean;
-  /** Requests for the app's data in flight right now. */
+  /** Requests in flight right now that hold the splash — see `holdsSplash`. */
   fetching: number;
-  /** How long nothing has been in flight; 0 while something is. */
+  /** How long nothing that holds the splash has been in flight; 0 while something is. */
   idleFor: number;
-  /** Whether anything has been fetched since the app knew who is signed in. */
+  /** Whether anything at all has been fetched since the app knew who is signed in. */
   sawWork: boolean;
 }
 

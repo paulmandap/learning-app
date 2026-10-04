@@ -39,9 +39,9 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1431 tests pass**, 3 skipped (live Gemini behind `LIVE_GEMINI=1`, and the
-  CI-only build check). Typecheck clean. (447 when this was written on
-  2026-09-06; Phases A-G and the NOTES §35–§55 work added the rest.)
+- **1692 tests pass** on 2026-10-04, 2 skipped (live Gemini behind
+  `LIVE_GEMINI=1`; the build check also skips unless `REQUIRE_BUILD=1` and a
+  built `dist/`). Typecheck clean. (447 when this was written on 2026-09-06.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
   one Zustand store, Zod, Vitest. React pinned to 19.2.3. Node 22.
 
@@ -71,7 +71,12 @@ one PR per step. **Everything stays free** (his rule): no paid services, for him
 or for the students. NOTES §65–§70 were written as "not yet deployed"; run
 `scripts/deploy-status.ts` before assuming production is HEAD.
 
-1. **Faster opening: keep data on the phone.** Found on 2026-10-04:
+1. **Faster opening: keep data on the phone.** **Built and verified on
+   2026-10-04 (NOTES §71), not deployed.** Home is drawn at 0.19 s instead of
+   1.2–1.7 s, and a reopen makes 17 database requests instead of 34. Waiting on
+   the owner for the splash minimum and the Privacy Policy and What's new
+   wording; then deploy, and check `_headers` on the live site with `curl -I`.
+   What was found before building it:
    - Nothing is kept between opens. TanStack Query holds data in memory only
      (`app/_layout.tsx`, `staleTime` 30 s), so every fresh open asks Supabase
      for everything again.

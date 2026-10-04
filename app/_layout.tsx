@@ -4,18 +4,24 @@ import { StatusBar } from 'expo-status-bar';
 import { Platform, useColorScheme, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { startSessionListener, useSessionStore } from '../src/data/session';
+import { forgetSavedScreens, keepSavingScreens, restoreSavedScreens } from '../src/data/saved-screens';
 import { HeaderBackButton } from '../src/ui/menu';
 import { StudyAssistant } from '../src/ui/assistant';
 import { PrivacyGate } from '../src/ui/privacy';
 import { RulesSheet, StandingNotice } from '../src/ui/rules';
 import { useTheme } from '../src/ui/theme';
-import { shouldHideSplash, SPLASH_MIN_MS } from '../src/core/splash';
+import { holdsSplash, shouldHideSplash, SPLASH_MIN_MS } from '../src/core/splash';
+import { KEPT_SCREENS, KEPT_SCREENS_GC_MS } from '../src/core/saved-screens';
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 30_000 },
   },
 });
+
+// What this device keeps (NOTES §71) stays in memory a day rather than five
+// minutes, so a screen nobody opened since launch is still there to be kept.
+for (const root of KEPT_SCREENS) queryClient.setQueryDefaults([root], { gcTime: KEPT_SCREENS_GC_MS });
 
 /**
  * The Terms of Use and the Privacy Policy (NOTES §40). Readable by anyone:
@@ -55,15 +61,27 @@ function useAuthRedirect() {
  * accepted" and opened, until a background refetch found the real profile and
  * closed it. The same cache would have shown one person's data to the next on a
  * shared phone. Token refreshes keep the same person, and keep the cache.
+ *
+ * Counted from the first answer about who is signed in, not from before it
+ * (NOTES §71). Before, "nobody yet" turning into the person already signed in
+ * counted as a change: every open reset the cache the moment it began, and the
+ * reset asked again for everything Home had just asked for — 34 requests where
+ * 17 were needed, measured on 2026-10-04. It would now also throw away the copy
+ * just put back from this device. A real change of person removes that copy.
  */
 function useResetCacheOnUserChange() {
+  const ready = useSessionStore((s) => s.ready);
   const userId = useSessionStore((s) => s.session?.user.id ?? null);
   const previous = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
-    if (previous.current !== undefined && previous.current !== userId) void queryClient.resetQueries();
+    if (!ready) return;
+    if (previous.current !== undefined && previous.current !== userId) {
+      forgetSavedScreens();
+      void queryClient.resetQueries();
+    }
     previous.current = userId;
-  }, [userId]);
+  }, [ready, userId]);
 }
 
 /**
@@ -88,9 +106,13 @@ function useHideSplash() {
     // following every query's events, and it stops the moment the splash goes.
     const watch = setInterval(() => {
       const at = clock();
-      const fetching = queryClient.isFetching();
+      // Only requests the screen is waiting on (NOTES §71): what was put back
+      // from this device is already drawn, and its refresh happens in view.
+      const fetching = queryClient.isFetching({
+        predicate: (query) => holdsSplash(query.queryKey, query.state.data !== undefined),
+      });
+      if (queryClient.isFetching() > 0) sawWork = true;
       if (fetching > 0) {
-        sawWork = true;
         idleSince = null;
       } else if (idleSince === null) {
         idleSince = at;
@@ -285,7 +307,17 @@ function RootNavigator() {
 export default function RootLayout() {
   const scheme = useColorScheme();
 
-  useEffect(() => startSessionListener(), []);
+  // What this person's screens showed last time goes back into the cache with
+  // the first answer about who is signed in, before any screen asks for
+  // anything, and the copy is kept up to date from then on (NOTES §71).
+  useEffect(
+    () =>
+      startSessionListener({
+        onFirstSession: (session) => void restoreSavedScreens(queryClient, session?.user.id ?? null),
+      }),
+    [],
+  );
+  useEffect(() => keepSavingScreens(queryClient, () => useSessionStore.getState().session?.user.id ?? null), []);
 
   return (
     <QueryClientProvider client={queryClient}>

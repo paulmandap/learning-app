@@ -25,19 +25,35 @@ export const useSessionStore = create<SessionState>((set) => ({
   markReady: () => set({ ready: true }),
 }));
 
-/** Wire Supabase auth events into the store. Called once from the root layout. */
-export function startSessionListener(): () => void {
+/**
+ * Wire Supabase auth events into the store. Called once from the root layout.
+ *
+ * `onFirstSession` runs once, with the first answer and before the store hears
+ * it — so whatever it puts in the query cache is there before any screen's
+ * queries are allowed to run (the copy kept on this device, NOTES §71).
+ */
+export function startSessionListener(
+  options: { onFirstSession?: (session: Session | null) => void } = {},
+): () => void {
   const { setSession, markReady } = useSessionStore.getState();
+  let first = true;
 
-  void supabase.auth.getSession().then(({ data }) => {
-    setSession(data.session);
-    markReady();
-  });
-
-  const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+  const settle = (session: Session | null) => {
+    if (first) {
+      first = false;
+      try {
+        options.onFirstSession?.(session);
+      } catch (err) {
+        console.warn(`[session] first-session step failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     setSession(session);
     markReady();
-  });
+  };
+
+  void supabase.auth.getSession().then(({ data }) => settle(data.session));
+
+  const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => settle(session));
 
   return () => sub.subscription.unsubscribe();
 }

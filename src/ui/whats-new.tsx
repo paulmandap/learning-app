@@ -35,23 +35,10 @@ export function WhatsNewSheet({ userId }: { userId: string }) {
     setDismissed(true);
   };
 
+  // One button since §71: "Find friends" belonged to the sharing notice, and the
+  // faster opening has nowhere to send anyone.
   return (
-    <Sheet
-      onClose={dismiss}
-      footer={
-        <>
-          <Button label="Got it" onPress={dismiss} />
-          <Button
-            label="Find friends"
-            variant="secondary"
-            onPress={() => {
-              dismiss();
-              router.push('/search');
-            }}
-          />
-        </>
-      }
-    >
+    <Sheet onClose={dismiss} footer={<Button label="Got it" onPress={dismiss} />}>
       <View
         style={{
           width: 48,
@@ -62,7 +49,7 @@ export function WhatsNewSheet({ userId }: { userId: string }) {
           backgroundColor: t.card,
         }}
       >
-        <Icon name="share" color={t.accent} size={26} />
+        <Icon name={WHATS_NEW.icon} color={t.accent} size={26} />
       </View>
       <SheetTitle>{WHATS_NEW.title}</SheetTitle>
       <Body>{WHATS_NEW.body}</Body>

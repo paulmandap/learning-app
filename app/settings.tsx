@@ -19,6 +19,7 @@ import { PhotoCropSheet } from '../src/ui/photo-cropper';
 import { PrivacyNotice } from '../src/ui/privacy';
 import { TextLink } from '../src/ui/legal';
 import { forgetAvatar } from '../src/data/avatar-cache';
+import { forgetSavedScreens } from '../src/data/saved-screens';
 import { router } from 'expo-router';
 import { parseAvatar } from '../src/core/avatar';
 import { useSessionStore } from '../src/data/session';
@@ -215,6 +216,8 @@ export default function Settings() {
     setDeleting(true);
     try {
       const { setsDeleted } = await deleteAllMyData();
+      // The copy of the screens on this device showed what was just deleted (NOTES §71).
+      forgetSavedScreens();
       setDeleted(
         setsDeleted === 0
           ? 'Nothing left to delete.'
@@ -405,8 +408,10 @@ export default function Settings() {
           variant="secondary"
           onPress={() => {
             // The picture kept on this device leaves with the session, so a
-            // shared phone does not hold someone's photo after they go (NOTES §40).
+            // shared phone does not hold someone's photo after they go (NOTES §40),
+            // and so does the copy of their screens (NOTES §71).
             forgetAvatar(userId);
+            forgetSavedScreens();
             // This device stops getting reminders first: removing it needs
             // the session, and the next person on the phone must not be shown
             // someone else's due cards (NOTES §45).
