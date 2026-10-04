@@ -1,8 +1,8 @@
 # AI Study App — session handoff
 
-> **Latest (2026-09-28): the five social steps are live (NOTES §51–§55); the
-> next job is the redesign. Read "▶ START HERE" below and
-> `docs/REDESIGN_PROMPT.md` before anything else.**
+> **Latest (2026-10-04): the plan is a faster app, then a real Windows and
+> Android app, in five steps. Read "▶ START HERE" below before anything else.
+> Work now also happens in cloud sessions; `CLAUDE.md` at the root says how.**
 
 Written 2026-09-06, at commit `f38671a`. Hand this to the next session as its
 opening prompt. Everything below is either verifiable in the repo or recorded in
@@ -14,8 +14,10 @@ opening prompt. Everything below is either verifiable in the repo or recorded in
 
 - `docs/AI_STUDY_APP_MVP_SPEC.md` — the spec, sections 0–8. Decisions **D1–D14**.
 - `docs/ARCHITECTURE_NOTES.md` — external facts and **every measurement, with
-  dates**. 2,523 lines; read it all. **Sections 15–21 are the most recent work**
-  and where anything else disagrees with them, they win.
+  dates**. Over 9,300 lines and 70 sections by 2026-10-04, which is too much to
+  read whole at the start of every session: read the sections "▶ START HERE"
+  points to, and search it before changing anything else. Where two sections
+  disagree, the later one wins.
 - `docs/ARCHITECTURE_ASSESSMENT.md` — Phase 0 assessment.
 
 These are the source of truth and they outrank this handoff. Do not re-derive
@@ -62,7 +64,64 @@ pushed screen at /settings, reached from Profile's top right and Home's picture.
 is a tab; everything that is a *task* (a deck, a quiz, a note) is pushed above
 the tabs with its own back control.
 
-### ▶ START HERE (2026-09-28): the social side is done; the redesign is next
+### ▶ START HERE (2026-10-04): make it fast, then make it a real app
+
+The owner agreed this plan on 2026-10-04, in this order: one step per session,
+one PR per step. **Everything stays free** (his rule): no paid services, for him
+or for the students. NOTES §65–§70 were written as "not yet deployed"; run
+`scripts/deploy-status.ts` before assuming production is HEAD.
+
+1. **Faster opening: keep data on the phone.** Found on 2026-10-04:
+   - Nothing is kept between opens. TanStack Query holds data in memory only
+     (`app/_layout.tsx`, `staleTime` 30 s), so every fresh open asks Supabase
+     for everything again.
+   - The live site sends `Cache-Control: public, max-age=0, must-revalidate`
+     for the hashed bundle (`/_expo/static/js/web/entry-<hash>.js`) as well as
+     for `index.html`, so every open checks the code with Cloudflare before it
+     can run. A `public/_headers` file marking `/_expo/static/*` immutable
+     fixes that. `index.html` must stay revalidated, or a deploy never arrives.
+   - The splash stays at least 1.4 s (`SPLASH_MIN_MS`, NOTES §43.3) and then
+     waits for `queryClient.isFetching()` to settle (§45.2). With saved data on
+     screen it must stop waiting for the background refresh, or nothing feels
+     faster.
+   - The plan: save the query cache to `localStorage` with TanStack Query's
+     own `dehydrate` and `hydrate` (no new dependency), keyed by user id;
+     restore it at start; refresh in the background. Never save
+     `profiles.gemini_api_key` (it is in `['profile']`) or signed picture links
+     (posts use `POST_IMAGE_LINK_SECONDS`, 600 s; avatars have their own cache
+     already). Wipe it on sign-out and when the person changes: extend
+     `useResetCacheOnUserChange`, and read NOTES §42.1 first, the bug a cached
+     empty profile caused once.
+   - The Privacy Policy lists what is stored on the device (`src/core/legal.ts`,
+     "Stored on your device"). It needs a line for this.
+   - Measure before and after with `scripts/splash-probe.ts`, with and without
+     `--phone`, and record both in NOTES.
+   - **Ask him before deploying:** keep the 1.4 s splash minimum or lower it (it
+     was 0.7 s before §43.3), and the exact Privacy Policy wording.
+2. **Stop the browser habits.** Long-pressing a message selects text,
+   long-pressing a picture opens the browser's save and copy menu, and a right
+   click shows the browser's menu. Switch these off the way
+   `src/ui/drag-to-folder.tsx` already does for folder rows (`userSelect:
+   'none'`, `WebkitTouchCallout: 'none'`, `onContextMenu` prevented). Start at
+   `src/ui/chat-room.tsx` (`onLongPress`) and `useLongPress` in
+   `src/ui/message-actions.tsx`, then every picture. Text people need to copy,
+   like notes and a card's answer, stays selectable.
+3. **A Windows app: a real `.exe` installer**, made with Tauri (NSIS). Build it
+   on a GitHub Actions Windows runner, which is free because the repo is
+   public; cloud sessions are Linux. He accepted the "unknown publisher"
+   warning that only a paid certificate removes. The Microsoft Store is free
+   for individuals if he wants it later. He tries the `.exe` on his PC.
+4. **A better PC version.** Ideas he has seen: keyboard shortcuts (Space flips a
+   card, Enter sends), the app's own right-click menus, the chat list beside
+   the open chat, a window that remembers its size. Ask him which come first.
+5. **An Android APK**, the same way (Tauri 2 or Capacitor), installed from a
+   file. From 2027 Android needs Google's free "limited distribution" developer
+   account, up to 20 devices; he accepted that.
+
+**Reading for this plan:** NOTES §42, §43.3 and §45.2, then search NOTES for
+whatever else you touch.
+
+### Earlier (2026-09-28): the social side is done; the redesign is next
 
 The owner asked for friends, a feed, messages, a leaderboard and moderation
 (NOTES §51–§55). **All five steps are built, applied and live** (`c71e515` and
