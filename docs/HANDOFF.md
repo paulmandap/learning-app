@@ -103,16 +103,16 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
      `--phone`, and record both in NOTES.
    - **Ask him before deploying:** keep the 1.4 s splash minimum or lower it (it
      was 0.7 s before §43.3), and the exact Privacy Policy wording.
-2. **Stop the browser habits.** **Built and verified on 2026-10-04 (NOTES §72),
-   on branch `step-2-app-feel`, not deployed.** Nothing selects or brings up the
-   iPhone's hold menu unless it says so, the browser's menu is kept off the
-   app, and a message's menu has Copy. The owner checks the hold on his iPhone.
-   **Also open:** the nightcap still looks perched rather than worn (the owner,
-   2026-10-04, after §68's re-fit). He was given a Gemini prompt for a nightcap
-   drawn onto this owl's head: first on Nomi, then with Nomi removed. When the
-   pictures come back, cut the hat with `scripts/make-nomi-props.ts` (it reads
-   a 3 × 3 sheet, so it needs a one-picture mode) and place it from the "on
-   Nomi" picture. The original brief, for reference: Long-pressing a message selects text,
+2. **Stop the browser habits.** **Live since 2026-10-04 (NOTES §72, `5a39056`).**
+   Nothing selects or brings up the iPhone's hold menu unless it says so, the
+   browser's menu is kept off the app, and a message's menu has Copy. **A fix
+   (§72.4), on branch `fix-hold-menu`, not yet deployed when this was written:**
+   sheets live outside `#root`, so the rules moved to `body`. Check with
+   `scripts/deploy-status.ts`.
+   **The nightcap (§72.5):** a blue starry nightcap, cut from the owner's Gemini
+   picture, reads as worn at place A in `design-reference/nightcap-tryout.png`.
+   It waits on his yes to the blue look; the list of what to do is in §72.5.
+   The original brief, for reference: Long-pressing a message selects text,
    long-pressing a picture opens the browser's save and copy menu, and a right
    click shows the browser's menu. Switch these off the way
    `src/ui/drag-to-folder.tsx` already does for folder rows (`userSelect:
@@ -125,6 +125,14 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
    public; cloud sessions are Linux. He accepted the "unknown publisher"
    warning that only a paid certificate removes. The Microsoft Store is free
    for individuals if he wants it later. He tries the `.exe` on his PC.
+   **Next, as of 2026-10-04.** Known about his PC: Node 22, Visual Studio Build
+   Tools 2022 (C++), WebView2 154; **no Rust**, and no `gh`. Recommended: the
+   window loads the live site (`https://learning-app-6kk.pages.dev`) rather
+   than a bundled copy, so every deploy updates the app and no installer is
+   needed per change; the screens kept on the device (§71) work the same in
+   WebView2. Build on `windows-latest`, which has Rust and MSVC, and publish
+   the `.exe` as a GitHub Release. A workflow file may need pushing from his PC.
+   The app icon's source is `design-reference/nomi-app-icon.png`.
 4. **A better PC version.** Ideas he has seen: keyboard shortcuts (Space flips a
    card, Enter sends), the app's own right-click menus, the chat list beside
    the open chat, a window that remembers its size. Ask him which come first.

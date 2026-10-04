@@ -57,26 +57,32 @@
       }
       /* An app, not a web page (NOTES §72). The owner: holding a message
          offered "Select / Select All", and holding a picture offered to save or
-         copy it, "just like in a website". So nothing in the app can be
+         copy it, "just like in a website". So nothing on the page can be
          selected, or brings up the iPhone's hold menu, unless it says so: the
          fields and the note editor below, and text a screen marks selectable
          (a post, a bio, Nomi's answers). A right click, and an Android hold on
-         a picture, are kept from the browser's menu in src/ui/app-feel.ts. */
-      #root {
+         a picture, are kept from the browser's menu in src/ui/app-feel.ts.
+
+         The body, not #root (§72.4): every Sheet is a Modal, and
+         react-native-web puts a Modal in its own element at the end of the
+         body, outside #root. Holding a message opened its sheet under the
+         finger, and the iPhone selected the sheet's words instead — "Copy |
+         Look Up | Translate" over the sheet's own Copy. */
+      body {
         -webkit-user-select: none;
         user-select: none;
         -webkit-touch-callout: none;
       }
       /* iOS will not let anyone type into a field inside "user-select: none"
          unless the field says otherwise. */
-      #root input,
-      #root textarea,
-      #root [contenteditable='true'] {
+      input,
+      textarea,
+      [contenteditable='true'] {
         -webkit-user-select: text;
         user-select: text;
         -webkit-touch-callout: default;
       }
-      #root img {
+      img {
         -webkit-user-drag: none;
       }
     </style>

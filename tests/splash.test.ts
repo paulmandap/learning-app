@@ -23,7 +23,9 @@ import {
  * layer it draws must be there, and the variants must be the ones listed.
  */
 
-const html = readFileSync(join('public', 'index.html'), 'utf8');
+// Either line ending (NOTES §72.4): with no .gitattributes, Git on this Windows
+// machine checks files out with CRLF, and the generated rig block is LF.
+const html = readFileSync(join('public', 'index.html'), 'utf8').replace(/\r\n/g, '\n');
 
 describe('the splash', () => {
   it('attaches the moving parts where the app does — the rig block is NOMI_RIG', () => {

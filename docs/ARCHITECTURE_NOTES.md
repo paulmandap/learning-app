@@ -9486,8 +9486,60 @@ Everyone room: `#root` selects `none`. A picture selects `none` and a
 is kept away. The message box is a `textarea` that selects `text` and keeps the
 browser's menu, so paste still works. Chrome cannot show an iPhone's hold menu,
 so the owner checks that on his phone. typecheck clean · **1702 tests**, 2
-skipped (`tests/app-feel.test.ts` 10) · `expo export`, boot 6/6. **Not
-deployed.**
+skipped (`tests/app-feel.test.ts` 10) · `expo export`, boot 6/6. The owner
+deployed it (`5a39056`).
+
+### 72.4 The hold still selected — in the sheet (fixed the same day)
+
+The owner, holding a message on his iPhone after the deploy: the bubble's menu
+opened, and the iPhone's own "Copy | Look Up | Translate" sat over it, with a
+selection handle at the top of the screen. **Every Sheet is a react-native
+`Modal`, and react-native-web's `ModalPortal` appends it to the end of
+`document.body`, outside `#root`.** The rules in §72.2 were scoped to `#root`.
+The hold opened the sheet under the finger, and the iPhone went on to select
+the sheet's own words. The rules now sit on `body`, and fields, `textarea` and
+`[contenteditable='true']` are set back to `text` wherever they are.
+
+Checked in Chrome: the privacy notice's sheet, opened from Settings, is outside
+`#root`, and its words select `none`. A simulated touch hold did not open a
+bubble's sheet in headless Chrome, so a click-opened sheet stood in for it:
+it is the same `Modal`. **Also fixed:** `tests/splash.test.ts` compared
+`index.html` with an LF block, and on this machine Git checks files out with
+CRLF (there is no `.gitattributes`). It passed only while the file was
+untouched since its last LF write. It now reads either ending, as
+`tests/saved-screens.test.ts` already did. **1702 tests**, 2 skipped, against a
+fresh build.
+
+### 72.5 The nightcap, from the owner's picture
+
+The owner, of Home at night: *"the hat is on top forward nomi is not really
+wearing it."* §68 had already re-fitted it. The real limit is the picture:
+`nomi-prop-nightcap.webp` is a hat drawn on its own, at an angle, with a flat
+opening, so no place or turn makes it sit round a wide head with ear tufts.
+
+He was given a Gemini prompt: the hat drawn on Nomi first, then Nomi removed.
+Gemini's image limit stopped him after the first, which came back as
+`design-reference/Sleepy Owl in a Starry Nightcap.png`. It is **a different
+owl**, open-eyed, wearing a **blue nightcap with stars**, cream cuff and
+pompom, worn properly. The owl is unusable; the hat is not.
+`scripts/cut-starry-nightcap.ts` cuts it cleanly (its header says how).
+`scripts/try-nightcap.ts` drew it on our Nomi at three places beside the old
+hat, in `design-reference/nightcap-tryout.png`. **Place A** reads as worn:
+`{ cx: 0.635, cy: 0.206, width: 1.20, rotate: -3 }`, with both tufts inside,
+the cuff along the brow and the tip flopping right. The picture's cuff slopes
+about 14°, so it turns −3° to meet the head's 10°.
+
+**Not done, waiting on the owner's yes to the blue look:**
+- Write the hat to `assets/nomi-prop-nightcap.webp`, downscaled to about 360
+  px wide, and its size to `NOMI_PROP_ART`.
+- Set `PROP_PLACES.nightcap` to place A.
+- Update the two `tests/nomi-props.test.ts` bounds written for the old picture:
+  `width ≤ 1.1` for a worn hat (this one's pompom hangs past the head), and
+  `rotate` between 0 and 5 (this picture needs −3).
+- Move the "z"s (`nomi-character.tsx`, `left: W * (1.1 + i * 0.1)`) and
+  `ABOVE_A_HAT` clear of the pompom, which now hangs at about 1.1–1.23 W and
+  0.25 H.
+- Photograph Home at 23:00 (the Home card, the bubble beside Nomi) as §68 did.
 
 
 ## Sources

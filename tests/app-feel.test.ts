@@ -41,18 +41,21 @@ describe("the browser's menu", () => {
 describe('the page', () => {
   const html = read('public', 'index.html');
 
-  it('nothing in the app selects or brings up the iPhone hold menu unless it says so', () => {
-    expect(html).toMatch(/#root \{\n\s+-webkit-user-select: none;\n\s+user-select: none;\n\s+-webkit-touch-callout: none;\n\s+\}/);
+  it('nothing on the page selects or brings up the iPhone hold menu unless it says so', () => {
+    // The body, not #root (§72.4): a Sheet is a Modal, which react-native-web
+    // puts outside #root, so a rule on #root missed every sheet.
+    expect(html).toMatch(/\n\s+body \{\n\s+-webkit-user-select: none;\n\s+user-select: none;\n\s+-webkit-touch-callout: none;\n\s+\}/);
+    expect(html).not.toMatch(/#root \{\n\s+-webkit-user-select/);
   });
 
   it('fields and the note editor still select, or nobody could type on an iPhone', () => {
     expect(html).toMatch(
-      /#root input,\n\s+#root textarea,\n\s+#root \[contenteditable='true'\] \{\n\s+-webkit-user-select: text;\n\s+user-select: text;/,
+      /\n\s+input,\n\s+textarea,\n\s+\[contenteditable='true'\] \{\n\s+-webkit-user-select: text;\n\s+user-select: text;/,
     );
   });
 
   it('pictures cannot be dragged out', () => {
-    expect(html).toMatch(/#root img \{\n\s+-webkit-user-drag: none;\n\s+\}/);
+    expect(html).toMatch(/\n\s+img \{\n\s+-webkit-user-drag: none;\n\s+\}/);
   });
 
   it('the root layout keeps the browser menu away', () => {
