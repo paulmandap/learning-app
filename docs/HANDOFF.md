@@ -72,11 +72,12 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
 `scripts/deploy-status.ts` before assuming production is HEAD.
 
 1. **Faster opening: keep data on the phone.** **Built and verified on
-   2026-10-04 (NOTES §71), not deployed.** Home is drawn at 0.19 s instead of
-   1.2–1.7 s, and a reopen makes 17 database requests instead of 34. Waiting on
-   the owner for the splash minimum and the Privacy Policy and What's new
-   wording; then deploy, and check `_headers` on the live site with `curl -I`.
-   What was found before building it:
+   2026-10-04 (NOTES §71), on branch `step-1-faster-opening`, not deployed.**
+   Home is drawn at 0.19 s instead of 1.2–1.7 s, the splash is gone at 1.35 s
+   instead of 1.76–2.40 s, and a reopen makes 17 database requests instead of
+   34. The owner approved the wording and left the splash minimum to the
+   session: 1000 ms (§71.5). Left to do: merge, deploy, and check `_headers` on
+   the live site with `curl -I`. What was found before building it:
    - Nothing is kept between opens. TanStack Query holds data in memory only
      (`app/_layout.tsx`, `staleTime` 30 s), so every fresh open asks Supabase
      for everything again.

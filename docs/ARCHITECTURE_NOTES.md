@@ -9413,8 +9413,27 @@ for a chunk a deploy removed can get `index.html` cached under that old name,
 but no current page asks for it. `CLAUDE.md` now says not to spawn subagents
 or workflows unless he asks.
 
-**Waiting on the owner:** the splash minimum, and the Privacy Policy and What's
-new wording. Then deploy, and check `_headers` on the live site.
+### 71.5 The splash minimum, and the wording (decided 2026-10-04)
+
+The owner approved the Privacy Policy line and the What's new card as they are
+above. He left the splash minimum to the session: *"splash, it's up to you."*
+**`SPLASH_MIN_MS` is 1000**, down from 1400. That is still a wave: the keyframes in
+`public/index.html` put the greeting's wing up at 0.67 s and its first wiggle
+at 0.91 s, and the 280 ms fade carries the second rise at 1.15 s. "Explaining"
+points at 0.57 s. Measured as in §71.3, desktop, warm:
+
+```
+                     Nomi's line          fade starts           splash gone
+  1000 ms minimum    190 – 219 ms         1,020 – 1,052 ms      1,350 – 1,379 ms
+```
+
+The open goes from 1.76–2.40 s before §71 to 1.35–1.38 s. **1692 tests**, 2
+skipped, after a fresh `expo export`. `tests/saved-screens.test.ts` now reads
+`_headers` as either line ending: Git checks it out with CRLF on this machine
+and LF in CI, and the first version only passed because the file was new.
+
+**Next:** deploy, then `curl -I` the live bundle for `immutable` and
+`index.html` for `max-age=0`.
 
 
 ## Sources

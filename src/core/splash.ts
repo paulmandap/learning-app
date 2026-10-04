@@ -68,10 +68,16 @@ export function splashRigBlock(rig: SplashRigInput): string {
  *
  * On a cached reload the app knows who is signed in within a few tens of
  * milliseconds, and a splash that blinks for one frame reads as a glitch, not
- * as Nomi saying hello. 1400ms (NOTES §43): long enough for one whole wave or
- * gesture, which peaks a little after a second.
+ * as Nomi saying hello.
+ *
+ * 1000ms since NOTES §71.5, the owner leaving it to the session on 2026-10-04.
+ * It was 1400ms (§43.3) so a whole gesture could play, but with the screens
+ * kept on the device Home is drawn at about 0.19s, and this minimum had become
+ * the whole of the wait. A second still shows the wave's wing going up (0.67s)
+ * and its first wiggle (0.91s) before the 280ms fade, which carries the second
+ * rise (1.15s) — and likewise the point in "explaining" (up at 0.57s).
  */
-export const SPLASH_MIN_MS = 1400;
+export const SPLASH_MIN_MS = 1000;
 
 /**
  * The longest the splash waits for the first screen's data once the app knows

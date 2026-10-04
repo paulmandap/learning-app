@@ -233,7 +233,10 @@ describe('the Privacy Policy says so', () => {
 });
 
 describe('the code is kept by phones (NOTES §71)', () => {
-  const headers = read('public', '_headers');
+  // Line endings as Git checks the file out on this Windows machine (CRLF) or
+  // in CI (LF). Cloudflare reads either; `_redirects` has always been deployed
+  // from here with CRLF.
+  const headers = read('public', '_headers').replace(/\r\n/g, '\n');
 
   it('built files, whose names change with their contents, for a year', () => {
     for (const path of ['/_expo/static/*', '/assets/*']) {
