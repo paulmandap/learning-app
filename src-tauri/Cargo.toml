@@ -1,0 +1,20 @@
+[package]
+name = "nomi"
+version = "0.1.0"
+description = "Nomi for Windows: a window that shows the live site"
+authors = ["Paul Christian Mandap"]
+edition = "2021"
+publish = false
+
+# Built by .github/workflows/windows-app.yml on GitHub's Windows machines. The
+# owner's PC has no Rust (NOTES §73). Keep this version and tauri.conf.json's in
+# step; tests/windows-app.test.ts fails if they differ.
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.1", features = [] }
+# Only its open_url, to hand a link to the person's own browser. The plugin is
+# never registered, so the site cannot call it.
+tauri-plugin-opener = "2.7.0"

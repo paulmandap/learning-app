@@ -1,0 +1,118 @@
+name: Windows app
+
+# Nomi for Windows (NOTES §73): an installer for a window that shows the live
+# site. Built here because the owner's PC has no Rust; GitHub's Windows machine
+# already has Rust and Visual Studio's C++ tools. Free: GitHub's own machines
+# cost nothing for a public repository, Windows ones included.
+#
+# Every run keeps the installer with the run, under Artifacts, to try first.
+# A run on main also publishes it on the Releases page, under the version in
+# src-tauri/tauri.conf.json, where this link always gets the latest one:
+#   https://github.com/paulmandap/learning-app/releases/latest/download/Nomi-Windows-Setup.exe
+# For a new release, raise the version there and in src-tauri/Cargo.toml.
+# A run on main with the same version replaces that release's file.
+#
+# CREDENTIALS: none. The run's own token is allowed to write releases.
+
+on:
+  push:
+    paths:
+      - 'src-tauri/**'
+      - 'assets/icon.png'
+      - '.github/workflows/windows-app.yml'
+  workflow_dispatch:
+
+# A second push to the same branch makes the first build pointless.
+concurrency:
+  group: windows-app-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The same version as the tauri crate in src-tauri/Cargo.toml.
+  # tests/windows-app.test.ts holds the two together.
+  TAURI_CLI: '@tauri-apps/cli@2.12.1'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Icons, from the app's own
+        # One source for the icon: src-tauri/icons is made here, not committed.
+        run: npx --yes "$TAURI_CLI" icon assets/icon.png
+
+      - name: Build the installer
+        run: npx --yes "$TAURI_CLI" build 2>&1 | tee build.log
+
+      - name: Say why the build failed
+        # The log is behind a sign-in, even in a public repository. An
+        # annotation is not: the reason reaches the run's page and the email.
+        if: failure()
+        run: |
+          grep -E -A3 '^error|failed to' build.log | head -n 60 > reasons.txt || true
+          if [ -s reasons.txt ]; then
+            text=$(sed -e 's/%/%25/g' -e 's/\r//g' reasons.txt | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/%0A/g')
+            echo "::error title=Build failed::$text"
+          fi
+
+      - name: Name it for people
+        run: |
+          mkdir -p out
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe out/Nomi-Windows-Setup.exe
+
+      - name: Keep the installer with the run
+        id: exe
+        uses: actions/upload-artifact@v7
+        with:
+          path: out/Nomi-Windows-Setup.exe
+          # The .exe itself, not a zip around it.
+          archive: false
+          overwrite: true
+          if-no-files-found: error
+
+      - name: Keep the exact versions it was built from
+        # No Cargo.lock is committed yet: there is no Rust on the owner's PC to
+        # make one. This is the one to commit after the first good build.
+        uses: actions/upload-artifact@v7
+        with:
+          path: src-tauri/Cargo.lock
+          archive: false
+          overwrite: true
+          if-no-files-found: warn
+
+      - name: Link the installer on the run's page
+        env:
+          URL: ${{ steps.exe.outputs.artifact-url }}
+        run: echo "Installer to try: $URL" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish on the Releases page (main only)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tag="windows-v$version"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" out/Nomi-Windows-Setup.exe --clobber
+          else
+            cat > notes.md <<'EOF'
+          Nomi for Windows.
+
+          Download Nomi-Windows-Setup.exe below and open it. Windows may say it doesn't recognise the app. Choose More info, then Run anyway.
+
+          Nomi opens in its own window. It is the same Nomi as the website, so it is always up to date. Reminders still come to your phone.
+          EOF
+            gh release create "$tag" out/Nomi-Windows-Setup.exe --target "$GITHUB_SHA" --title "Nomi for Windows $version" --notes-file notes.md
+          fi

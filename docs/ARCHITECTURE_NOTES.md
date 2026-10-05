@@ -9555,6 +9555,121 @@ about 14°, so it turns −3° to meet the head's 10°.
     gap; the "z"s sit at x 26–44, inside the card (16) and clear of the hat (55).
 - typecheck clean · **1703 tests**, 2 skipped · built. Not deployed.
 
+### 72.6 Live (2026-10-04)
+
+The owner merged `starry-nightcap` and deployed `4cfec10`. At the start of the
+next session `deploy-status.ts` said *production is exactly HEAD*, and the live
+bundle (`entry-41efd25d8f48…`) was the local build's.
+
+## 73. Step 3: a Windows app (2026-10-04)
+
+Step 3 of the plan in HANDOFF's "▶ START HERE": a real `.exe` installer, made
+with Tauri. The owner's PC has no Rust, so GitHub builds it. The window shows
+the live site, so every deploy reaches it and no installer is needed per change.
+
+### 73.1 Checked first
+
+- **Free.** The repository is public (GitHub's API, `"visibility": "public"`).
+  GitHub's standard runners, Windows included, cost nothing for a public
+  repository (GitHub's billing docs, read on 2026-10-04).
+- **The build machine.** `windows-latest` is Windows Server 2025, image
+  `20260927.275.1`, with Rust 1.98.1, Visual Studio Enterprise 2022, Node 22,
+  Git Bash and the GitHub CLI (the runner-images readme).
+- **Versions.** Tauri 2.12.1 is the current stable, released 2026-09-30 on
+  crates.io. Tauri 3 is in alpha and not used. With it: `@tauri-apps/cli`
+  2.12.1, `tauri-build` 2.7.1, `tauri-plugin-opener` 2.7.0. All need Rust 1.90.
+- **Read in the source, not in summaries.** Nothing here can compile Rust, so
+  every call in `src-tauri/src/main.rs` was checked in the crates' own source,
+  downloaded from crates.io: `WebviewWindowBuilder::new`, `on_navigation`,
+  `on_new_window`, `initialization_script`, `disable_drag_drop_handler`,
+  `NewWindowResponse::Deny`, and `tauri_plugin_opener::open_url`, a plain
+  function that needs no plugin registered.
+- **A new tab does nothing in a Tauri window unless the app answers it.** wry
+  0.57 (`src/webview2/mod.rs`): with no new-window handler it marks the request
+  handled and opens nothing. Nomi opens the Gemini key page, a card's source and
+  email with `Linking.openURL`, which react-native-web turns into
+  `window.open(url, '_blank')`. Unanswered, all three would be dead links.
+- **WebView2 has no push.** Microsoft's "Differences between Microsoft Edge and
+  WebView2" (updated 2026-10-02): *"Push Notifications: This feature isn't
+  implemented in WebView2."* Reminders (§45) cannot reach the Windows app.
+- **No local site and no capabilities are allowed.** With no `frontendDist`,
+  tauri-codegen embeds nothing and the CLI checks nothing. With no
+  `capabilities` folder, tauri-build finds no capability, so the window's page
+  can call no Tauri command.
+
+### 73.2 What was built
+
+- **`src-tauri/`**, a window and nothing else. It opens
+  `https://learning-app-6kk.pages.dev/` at 1100 × 680, centred, at least
+  360 × 560. Navigation inside the site stays. Anywhere else, and every new
+  tab, goes to the person's own browser or mail app, and only `https`, `http`
+  and `mailto` links are ever handed to Windows. Tauri's drag and drop is off,
+  because on Windows it replaces the page's own.
+- **The site learns one thing: that it is in the window.** Before the site's
+  code runs, the window defines `window.nomiApp` as `{ platform: 'windows' }`,
+  on the live origin only. `isWindowsApp` (`src/core/windows-app.ts`) reads it.
+  `reminderSupport()` answers the new `windows-app` before its feature checks,
+  because WebView2 may still say it has `PushManager`. The Reminders card then
+  says *"The Windows app can't show reminders. Turn them on in Nomi on your
+  phone."* (the session's wording, for the owner to confirm).
+- **The identifier is the phone apps'**: `com.paulmandap.studyapp`. It also
+  names the folder WebView2 keeps the site's storage in, under
+  `%LOCALAPPDATA%`, so changing it would sign everyone out and drop the screens
+  kept on the device (§71).
+- **The installer** is NSIS, for the current user, so it needs no
+  administrator. It fetches WebView2 only if the PC has none. It is not signed,
+  so Windows warns about an unrecognised app. The owner accepted that.
+- **The icon** is made from `assets/icon.png` by `tauri icon` in the workflow,
+  and `src-tauri/icons` is not committed, so the app has one icon source.
+- **`.github/workflows/windows-app.yml`** runs on a push that touches
+  `src-tauri/`, the icon or the workflow, and by hand. It keeps the `.exe`
+  with the run, as the file itself rather than a zip, with a link on the run's
+  summary. On `main` it also publishes it as release `windows-v<version>`,
+  named `Nomi-Windows-Setup.exe` so that
+  `https://github.com/paulmandap/learning-app/releases/latest/download/Nomi-Windows-Setup.exe`
+  never changes. A failed build writes its error lines to an annotation,
+  because the log is behind a sign-in even in a public repository.
+- **No `Cargo.lock` yet.** There is no Rust here to make one. Each run keeps the
+  one it used beside the installer, to commit after the first good build.
+- **No npm dependency.** The CLI runs through `npx` in the workflow only.
+
+### 73.3 Verified, and not
+
+- typecheck clean. `expo export`. **1715 tests**, 2 skipped, the boot check
+  against the fresh build.
+- `tests/windows-app.test.ts` (12) runs `main.rs`'s mark as JavaScript on a
+  stand-in page: it marks the live origin and no other, and `isWindowsApp`
+  reads it. It also holds that `SITE` is `deploy-status.ts`'s `LIVE_URL`; that
+  there are no capabilities, no global Tauri object and no window in the
+  config; that only web and email links leave; that the identifier is the phone
+  apps'; that the versions agree, the CLI's with the crate's; that the icon is
+  square, which `tauri icon` requires; and that reminders answer `windows-app`
+  with the mark even where `PushManager` exists, and `ready` without it.
+- Settings in the built app, in Chrome, dark, 1100 × 680, test account A, with
+  the mark added before the app's code ran (DevTools'
+  `addScriptToEvaluateOnNewDocument`, which does what WebView2's
+  `AddScriptToExecuteOnDocumentCreated` does for the window). The card shows
+  the line. Without the mark it shows the three times and "Turn on reminders",
+  as before.
+- **Not verified here: that the Rust compiles, the installer, and the
+  window.** The first is the workflow's first run. The rest is the owner's PC.
+
+### 73.4 What "tried" means
+
+On the owner's PC, from the run's installer:
+
+1. Windows warns about an unrecognised app first: More info, then Run anyway.
+   It installs without asking for an administrator.
+2. Nomi opens in its own window, with its icon in the taskbar and Start.
+3. It starts signed out (its storage is its own). Sign in with the email code.
+4. Close it and open it again: still signed in, and Home comes quickly (§71).
+5. Settings, "Open Google AI Studio" opens in his normal browser, not in Nomi.
+6. Add notes: a PDF or a photo through Windows' file picker uploads.
+7. A set drags into a folder.
+8. A right click does nothing on pictures and buttons, and offers Cut, Copy
+   and Paste in a text field.
+9. After the web deploy: the Reminders card says the Windows app's line.
+10. It uninstalls from Windows Settings, Apps.
 
 ## Sources
 
@@ -9575,3 +9690,9 @@ about 14°, so it turns −3° to meet the head's 10°.
 - [Gemini API — fine-tuning (none available since May 2025)](https://ai.google.dev/gemini-api/docs/model-tuning)
 - [Gemma 4 fine-tuning guide (Unsloth)](https://unsloth.ai/docs/models/gemma-4/train)
 - [Jev AI review — decision models for agent workflows](https://wavect.io/blog/jev-ai-decision-model-review/)
+- [Differences between Microsoft Edge and WebView2 (push is not implemented)](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/browser-features)
+- [GitHub Actions billing (free for public repositories)](https://docs.github.com/billing/managing-billing-for-github-actions/about-billing-for-github-actions)
+- [Windows Server 2025 runner image](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md)
+- [Tauri 2.12.1 WebviewWindowBuilder](https://docs.rs/tauri/2.12.1/tauri/webview/struct.WebviewWindowBuilder.html)
+- [tauri-plugin-opener 2.7.0](https://docs.rs/tauri-plugin-opener/2.7.0/tauri_plugin_opener/)
+- [actions/upload-artifact (archive: false)](https://github.com/actions/upload-artifact)

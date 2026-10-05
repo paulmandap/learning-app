@@ -106,6 +106,8 @@ export function RemindersCard() {
         <Body muted>
           On an iPhone, add Nomi to your Home Screen from the Share menu, then open it from there to turn reminders on.
         </Body>
+      ) : support === 'windows-app' ? (
+        <Body muted>The Windows app can't show reminders. Turn them on in Nomi on your phone.</Body>
       ) : support === 'unsupported' ? (
         <Body muted>This browser can't show reminders.</Body>
       ) : support === 'blocked' ? (
