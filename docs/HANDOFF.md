@@ -130,7 +130,9 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
    `https://github.com/paulmandap/learning-app/releases/latest/download/Nomi-Windows-Setup.exe`.
    Links to other sites open in his browser. Settings says reminders go to the
    phone, because WebView2 has no push. **What is left, in order:**
-   - **The first build.** Nothing here could compile the Rust. Read the run
+   - **The first build.** The first push (`a71509c`) never built: the
+     workflow file did not parse (§73.5). Fixed, and CI passed on it. Nothing
+     here could compile the Rust. Read the run
      without signing in: `https://api.github.com/repos/paulmandap/learning-app/actions/runs?branch=step-3-windows-app`
      for its result, then the failed job's check-run annotations, where the
      workflow writes the error lines.
@@ -756,6 +758,11 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   PowerShell 5.1's `Get-Content -Raw` reads BOM-less UTF-8 as ANSI and
   `Set-Content -Encoding utf8` writes a BOM: every "§" became "Â§" in four files
   (NOTES §56.3). Use the editor; a large `git diff --stat` is the tell.
+- **A workflow file that does not parse fails before anything runs**, with one
+  line on the run's page. A plain YAML value cannot hold a colon followed by a
+  space (`run: echo "a: b"`); use `run: |`. Check every workflow with
+  actionlint (a free download from github.com/rhysd/actionlint) before it is
+  pushed (NOTES §73.5).
 - **Git Bash rewrites a lone `/` argument into a Windows path.** Run
   `scripts/screenshot.ts /` from PowerShell, or set `MSYS_NO_PATHCONV=1`.
 - **`npx` on Windows runs through a `.cmd` shim, and cmd.exe eats `>`.** Any

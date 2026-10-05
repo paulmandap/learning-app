@@ -9671,6 +9671,21 @@ On the owner's PC, from the run's installer:
 9. After the web deploy: the Reminders card says the Windows app's line.
 10. It uninstalls from Windows Settings, Apps.
 
+### 73.5 The first push: GitHub could not read the workflow (2026-10-05)
+
+The owner pushed `a71509c`. CI passed. The Windows build never started:
+GitHub refused the whole file, *"You have an error in your yaml syntax on line
+97"*. That line was `run: echo "Installer to try: $URL" >> …`. A plain YAML
+value cannot hold a colon followed by a space, which YAML reads as a new key.
+It is a block now (`run: |`).
+
+Nothing had parsed the file before it was pushed. Now two things do, and both
+were shown to catch this first. The `yaml` package's parser says *"Nested
+mappings are not allowed in compact mappings at line 97"* of the pushed file
+and reads all ten steps of the fixed one. actionlint 1.7.12, a free download
+run from the session's scratch folder and not added to the repo, reports the
+same line on the pushed file and nothing on the fixed one.
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)

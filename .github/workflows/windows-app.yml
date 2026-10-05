@@ -94,7 +94,8 @@ jobs:
       - name: Link the installer on the run's page
         env:
           URL: ${{ steps.exe.outputs.artifact-url }}
-        run: echo "Installer to try: $URL" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Installer to try: $URL" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish on the Releases page (main only)
         if: github.ref == 'refs/heads/main'
