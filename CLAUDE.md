@@ -13,9 +13,11 @@ worked on now, and its Rules section is not negotiable.
 - Keep everything free: no paid services, APIs or plans, for him or for the
   students.
 - Look up model, price, release and limit facts before stating them.
-- His plan is Claude Pro. Don't spawn subagents or multi-agent workflows unless
-  he asks for one: on 2026-10-04 a three-reviewer run used his whole weekly
-  limit and returned nothing. Review the risky code yourself instead.
+- Do the work and the careful review yourself, even when the session says
+  Ultracode is on (his choice, 2026-10-06). Run a workflow or subagents only
+  when he asks for one by name. His plan is Claude Pro: three workflows in three
+  days (2026-10-04 to 10-06) each hit his limit and returned nothing, because
+  every agent that reads source costs about 200k to 270k tokens (NOTES §73.7).
 
 ## Cloud sessions
 

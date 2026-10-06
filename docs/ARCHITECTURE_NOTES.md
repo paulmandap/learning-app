@@ -9686,6 +9686,45 @@ and reads all ten steps of the fixed one. actionlint 1.7.12, a free download
 run from the session's scratch folder and not added to the repo, reports the
 same line on the pushed file and nothing on the fixed one.
 
+### 73.6 Tried on the owner's PC (2026-10-05)
+
+The fixed push (`abecc7a`) built in about 6 minutes: run 37278064229, the
+build step 303 s, the installer 1.87 MB. The owner downloaded it, installed it
+and signed in: *"it works."* He reported sign-in and the app working, not each
+item of §73.4. On disk afterwards: installed for his account only, with no
+administrator, in `%LOCALAPPDATA%\Nomi` (`nomi.exe`, 8.7 MB, and
+`uninstall.exe`). The window keeps its storage in
+`%LOCALAPPDATA%\com.paulmandap.studyapp\EBWebView`, the folder the identifier
+names (§73.2). He kept the reminders line as written.
+
+### 73.7 The review that did not finish, and what was checked instead
+
+A three-reviewer Workflow (the window, the release path, the web app, then a
+skeptic) ran on 2026-10-05 at the owner's wish to use Ultracode. It used
+**about 795k subagent tokens in 15.6 minutes, hit his session limit, and
+returned nothing**: the third such run (§71.4 was the first). The reviewers
+spent it reading the Tauri and wry sources. Two leads were in their last notes:
+
+- **The permanent link needs the Windows release to be the latest one.**
+  `releases/latest/download/Nomi-Windows-Setup.exe` follows whichever release
+  is newest and not a pre-release. A later release without that file, such as
+  step 5's Android one, would break the link. Step 5 must publish its releases
+  with `gh release create --latest=false`, or put both files in one release.
+- **Minimizing may not hide the page.** wry 0.57's window handler resizes the
+  WebView2 on `WM_SIZE` except when minimized (`wparam != SIZE_MINIMIZED`, in
+  `parent_subclass_proc`), and `SetIsVisible` is called only at creation and
+  from `set_visible`. If WebView2 does not notice the minimized window on its
+  own, which is not checked yet, a minimized Nomi stays "visible". Its
+  animations and TanStack's interval polling go on (they pause in a hidden
+  browser tab), and `refetchOnWindowFocus` never fires on coming back.
+  Measure it in step 4 before fixing it.
+
+Checked inline instead, on 2026-10-06: the publish step's script, taken out of
+the parsed YAML, passes `bash -n`. Run with a stand-in `gh`, it creates
+`windows-v0.1.0` from the commit with the notes file when the release is new,
+and replaces the file with `--clobber` when it exists. The notes come out
+unindented, so the heredoc closes.
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)

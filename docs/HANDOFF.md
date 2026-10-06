@@ -122,8 +122,9 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
    `src/ui/message-actions.tsx`, then every picture. Text people need to copy,
    like notes and a card's answer, stays selectable.
 3. **A Windows app: a real `.exe` installer**, made with Tauri (NSIS).
-   **Built on 2026-10-04, not yet tried (NOTES §73), on branch
-   `step-3-windows-app` if the owner ran the commands.** `src-tauri/` is a
+   **Built on 2026-10-04 on branch `step-3-windows-app`, and tried on his PC
+   on 2026-10-05: it installs and he signed in (NOTES §73.6). Not merged
+   yet.** `src-tauri/` is a
    window on the live site. `.github/workflows/windows-app.yml` builds it on
    GitHub's free Windows machine (his PC has no Rust and no `gh`), keeps the
    `.exe` with the run, and on `main` publishes it at
@@ -136,19 +137,25 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
      without signing in: `https://api.github.com/repos/paulmandap/learning-app/actions/runs?branch=step-3-windows-app`
      for its result, then the failed job's check-run annotations, where the
      workflow writes the error lines.
-   - **He tries the `.exe`**, with the list in NOTES §73.4.
-   - **Commit `src-tauri/Cargo.lock`**, kept with the first good run as an
-     artifact. Until then each build takes the newest matching crates.
-   - **He confirms the reminders line** (§73.2), then merges, which publishes
-     the release, and deploys the site, which brings the line to the window.
+   - **Commit `src-tauri/Cargo.lock`** from the next build's artifacts (step 4
+     builds again). Until then each build takes the newest matching crates.
+   - **He merges**, which publishes the release, **and deploys the site**,
+     which brings the reminders line to the window. He kept its wording.
    He accepted the "unknown publisher" warning that only a paid certificate
    removes. The Microsoft Store is free for individuals if he wants it later.
-4. **A better PC version.** Ideas he has seen: keyboard shortcuts (Space flips a
-   card, Enter sends), the app's own right-click menus, the chat list beside
-   the open chat, a window that remembers its size. Ask him which come first.
+4. **A better PC version.** **He chose all four on 2026-10-05:** keyboard
+   shortcuts (Space flips a card, Enter sends), the app's own right-click
+   menus, the chat list beside the open chat, and a window that remembers its
+   size. The first three are website changes, so they arrive with a deploy and
+   no new installer. The window size is in `src-tauri/`, so it needs a new
+   installer and a raised version (NOTES §73.2). **Also measure first:**
+   whether minimizing the window hides the page (NOTES §73.7). If not, a
+   minimized Nomi keeps animating and polling the database.
 5. **An Android APK**, the same way (Tauri 2 or Capacitor), installed from a
    file. From 2027 Android needs Google's free "limited distribution" developer
-   account, up to 20 devices; he accepted that.
+   account, up to 20 devices; he accepted that. **Publish its releases with
+   `gh release create --latest=false`**, or the Windows app's permanent link
+   (`releases/latest/download/Nomi-Windows-Setup.exe`) breaks (NOTES §73.7).
 
 **Reading for this plan:** NOTES §42, §43.3 and §45.2, then search NOTES for
 whatever else you touch.
