@@ -26,6 +26,7 @@ import { messageWords, postInMessage } from '../core/posts';
 import { getPost } from '../data/posts';
 import { SentPostCard } from './sent-post';
 import { copyText } from './share';
+import { rightClick } from './app-feel';
 
 /**
  * A room to talk in — the Everyone room, and a conversation with a friend
@@ -586,6 +587,8 @@ function Message({
             onLongPress={onAct}
             delayLongPress={450}
             {...longPress}
+            // A right click on a PC opens the same (NOTES §74).
+            {...rightClick(onAct)}
             style={({ pressed }) => ({
               maxWidth: '100%',
               paddingHorizontal: space.md,

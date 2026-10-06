@@ -10,6 +10,7 @@ import { alignmentFor } from '../core/layout';
 import { coverRects, type LabelBox } from '../core/label-cover';
 import { gradeFeedback } from './feedback';
 import { radius, space, swipeTint, type, useTheme } from './theme';
+import { useHasKeyboard } from './study-keys';
 
 /**
  * The flashcard: a real card that flips and can be swiped away.
@@ -86,6 +87,8 @@ export function FlipCard({
   imageCovers,
 }: FlipCardProps) {
   const t = useTheme();
+  // On a PC the first card teaches the arrows, which grade it (NOTES §74).
+  const hasKeyboard = useHasKeyboard();
   const [width, setWidth] = useState(0);
 
   /**
@@ -459,7 +462,9 @@ export function FlipCard({
                   { color: t.textMuted, marginTop: space.lg, textAlign: answerAlign },
                 ]}
               >
-                Swipe right if you got it, left if you missed it
+                {hasKeyboard
+                  ? 'Right arrow if you got it, left arrow if you missed it'
+                  : 'Swipe right if you got it, left if you missed it'}
               </Text>
             ) : null}
           </Animated.View>

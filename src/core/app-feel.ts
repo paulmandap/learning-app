@@ -42,3 +42,15 @@ export function usedUserSelect(values: readonly (string | null | undefined)[]): 
   }
   return 'text';
 }
+
+/**
+ * Whether a right click opens the item's own menu (NOTES §74): on a PC, the
+ * menu a long-press opens on a phone.
+ *
+ * Not for a finger: an Android hold arrives as `contextmenu` too, and the
+ * long-press opens the menu already. And not over words the person has
+ * selected in the item: there the browser's own menu is the one with Copy.
+ */
+export function rightClickOpensMenu(click: { pointerType?: string; selected: boolean }): boolean {
+  return click.pointerType !== 'touch' && !click.selected;
+}

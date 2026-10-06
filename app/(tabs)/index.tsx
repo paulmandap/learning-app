@@ -26,6 +26,9 @@ import {
 import { createFolder, listFolders, moveSetToFolder } from '../../src/data/folders';
 import { FolderSheet } from '../../src/ui/folder-sheet';
 import { DraggableSet, DragToFolderProvider, DropFolder } from '../../src/ui/drag-to-folder';
+import { Sheet, SheetActions, SheetTitle } from '../../src/ui/sheet';
+import { rightClick } from '../../src/ui/app-feel';
+import { setShortcuts } from '../../src/core/set-menu';
 import { StatePanel } from '../../src/ui/states';
 import { NomiCard } from '../../src/ui/nomi';
 import { ContinueCard, GreetingHeader } from '../../src/ui/home';
@@ -95,6 +98,7 @@ export default function Home() {
    * time, so there is nothing to remember between visits.
    */
   const [openFolder, setOpenFolder] = useState<Folder | null>(null);
+  const [menuFor, setMenuFor] = useState<StudySet | null>(null);
   /** The name being typed for a new folder, or null when not making one. */
   const [makingFolder, setMakingFolder] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -259,20 +263,23 @@ export default function Home() {
               return (
                 <DraggableSet key={set.id} setId={set.id} disabled={folders.length === 0}>
                   {(lifted, guard, overFolder) => (
-                    <ListRow
-                      title={formatSetTitle(set.title)}
-                      meta={
-                        lifted
-                          ? overFolder
-                            ? `Let go to put it in ${folders.find((f) => f.id === overFolder)?.name ?? 'this folder'}`
-                            : 'Drop it on a folder'
-                          : describeSet(set, stats?.due ?? 0)
-                      }
-                      progress={cards > 0 && stats ? stats.known / cards : undefined}
-                      // Guarded: letting go of a drag often lands on the row it
-                      // started from, and that must not open the set.
-                      onPress={guard(() => router.push(`/set/${set.id}`))}
-                    />
+                    // A right click on a PC: where this set can take you (NOTES §74).
+                    <View {...rightClick(() => setMenuFor(set))}>
+                      <ListRow
+                        title={formatSetTitle(set.title)}
+                        meta={
+                          lifted
+                            ? overFolder
+                              ? `Let go to put it in ${folders.find((f) => f.id === overFolder)?.name ?? 'this folder'}`
+                              : 'Drop it on a folder'
+                            : describeSet(set, stats?.due ?? 0)
+                        }
+                        progress={cards > 0 && stats ? stats.known / cards : undefined}
+                        // Guarded: letting go of a drag often lands on the row it
+                        // started from, and that must not open the set.
+                        onPress={guard(() => router.push(`/set/${set.id}`))}
+                      />
+                    </View>
                   )}
                 </DraggableSet>
               );
@@ -297,6 +304,27 @@ export default function Home() {
           }}
           onOpenFolder={setOpenFolder}
         />
+      ) : null}
+
+      {menuFor ? (
+        <Sheet onClose={() => setMenuFor(null)}>
+          <SheetTitle>{formatSetTitle(menuFor.title)}</SheetTitle>
+          <SheetActions
+            actions={setShortcuts(menuFor).map((shortcut) => ({
+              icon: shortcut.icon,
+              label: shortcut.label,
+              onPress: () => {
+                // Close first, as OverflowMenu does, so nothing is left behind.
+                setMenuFor(null);
+                const id = menuFor.id;
+                if (shortcut.mode === 'flashcards') router.push(`/set/${id}/flashcards`);
+                else if (shortcut.mode === 'quiz') router.push(`/set/${id}/quiz`);
+                else if (shortcut.mode === 'blanks') router.push(`/set/${id}/blanks`);
+                else router.push(`/set/${id}`);
+              },
+            }))}
+          />
+        </Sheet>
       ) : null}
     </Screen>
   );

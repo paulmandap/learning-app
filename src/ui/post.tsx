@@ -13,6 +13,7 @@ import { Icon, type IconName } from './glyphs';
 import { ShareSheet } from './share-sheet';
 import { PhotoViewer } from './photo-viewer';
 import { radius, space, TOUCH_TARGET, type, useTheme } from './theme';
+import { rightClick } from './app-feel';
 import type { Reaction } from '../core/emoji';
 import {
   agoShort,
@@ -204,6 +205,7 @@ export function PostList({
               onOpenPerson={() => router.push(`/person/${post.author_id}`)}
               onComment={full ? onComment : () => router.push(`/post/${post.id}`)}
               onMore={full ? undefined : () => setActing(post)}
+              onMenu={() => setActing(post)}
               onHeart={() => {
                 setFailed(null);
                 toggle.mutate({ id: post.id, emoji: HEART, on: !hearts.mine });
@@ -337,6 +339,7 @@ function PostCard({
   onOpenPerson,
   onComment,
   onMore,
+  onMenu,
   onHeart,
   onSave,
   onShare,
@@ -359,6 +362,8 @@ function PostCard({
   onOpenPerson: () => void;
   onComment?: () => void;
   onMore?: () => void;
+  /** A right click on the post, on a PC: its menu, even where the ⋯ is in the header (NOTES §74). */
+  onMenu: () => void;
   onHeart: () => void;
   onSave: () => void;
   onShare: () => void;
@@ -369,7 +374,7 @@ function PostCard({
   const everyone = post.audience === 'everyone';
 
   return (
-    <View style={{ gap: space.md, paddingVertical: space.lg }}>
+    <View {...rightClick(onMenu)} style={{ gap: space.md, paddingVertical: space.lg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         <Pressable
           accessibilityRole="button"
