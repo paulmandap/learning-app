@@ -28,6 +28,10 @@ supabase/.branches/
 # from here to cut the owl's parts, and what it writes to assets/ is what ships.
 design-reference/
 
+# The Windows app's installer, when a browser saves it into the project folder
+# to try it (NOTES §73.6). It belongs on the Releases page, never in git.
+*.exe
+
 # Logs / OS cruft
 npm-debug.log*
 yarn-error.log*

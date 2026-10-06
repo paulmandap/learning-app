@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { isMissingTable } from '../core/db-errors';
+import { isWindowsApp } from '../core/windows-app';
 import {
   base64UrlToBytes,
   cleanSlots,
@@ -38,13 +39,17 @@ const isMissingFunction = (error: { code?: string } | null) =>
  *
  *   ready        it can, and has not been refused permission
  *   install      an iPhone or iPad in Safari: Nomi must be on the Home Screen first
+ *   windows-app  the Windows app, whose WebView2 has no push (NOTES §73)
  *   unsupported  this browser cannot receive them
  *   blocked      notifications were refused, and only the device's settings can undo that
  */
-export type ReminderSupport = 'ready' | 'install' | 'unsupported' | 'blocked';
+export type ReminderSupport = 'ready' | 'install' | 'windows-app' | 'unsupported' | 'blocked';
 
 export function reminderSupport(): ReminderSupport {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return 'unsupported';
+  // Before the feature checks: WebView2 may well say it has PushManager, and
+  // subscribing would then fail after the person had already said yes.
+  if (isWindowsApp(window)) return 'windows-app';
   const apple =
     /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const installed =

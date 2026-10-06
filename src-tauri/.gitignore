@@ -1,0 +1,9 @@
+# What Rust builds.
+/target/
+
+# Written by tauri-build on every build.
+/gen/
+
+# Made from assets/icon.png on every build, by `tauri icon` in
+# .github/workflows/windows-app.yml, so the app's icon has one source.
+/icons/

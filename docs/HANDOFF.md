@@ -39,7 +39,7 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1692 tests pass** on 2026-10-04, 2 skipped (live Gemini behind
+- **1715 tests pass** on 2026-10-04, 2 skipped (live Gemini behind
   `LIVE_GEMINI=1`; the build check also skips unless `REQUIRE_BUILD=1` and a
   built `dist/`). Typecheck clean. (447 when this was written on 2026-09-06.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
@@ -110,10 +110,9 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
    sheets live outside `#root`, so the rules moved to `body`. Check with
    `scripts/deploy-status.ts`.
    **The nightcap (§72.5):** the blue starry nightcap is in, with no gaps around
-   the right ear, the "z"s on the left, and room on Home at night. It is on
-   branch `starry-nightcap` (if the owner ran the commands); check
-   `deploy-status.ts` before assuming it is live. The hold-menu fix (§72.4) is
-   live as `f601d10`.
+   the right ear, the "z"s on the left, and room on Home at night. **Live since
+   2026-10-04 (`4cfec10`, NOTES §72.6).** The hold-menu fix (§72.4) is live as
+   `f601d10`.
    The original brief, for reference: Long-pressing a message selects text,
    long-pressing a picture opens the browser's save and copy menu, and a right
    click shows the browser's menu. Switch these off the way
@@ -122,25 +121,41 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
    `src/ui/chat-room.tsx` (`onLongPress`) and `useLongPress` in
    `src/ui/message-actions.tsx`, then every picture. Text people need to copy,
    like notes and a card's answer, stays selectable.
-3. **A Windows app: a real `.exe` installer**, made with Tauri (NSIS). Build it
-   on a GitHub Actions Windows runner, which is free because the repo is
-   public; cloud sessions are Linux. He accepted the "unknown publisher"
-   warning that only a paid certificate removes. The Microsoft Store is free
-   for individuals if he wants it later. He tries the `.exe` on his PC.
-   **Next, as of 2026-10-04.** Known about his PC: Node 22, Visual Studio Build
-   Tools 2022 (C++), WebView2 154; **no Rust**, and no `gh`. Recommended: the
-   window loads the live site (`https://learning-app-6kk.pages.dev`) rather
-   than a bundled copy, so every deploy updates the app and no installer is
-   needed per change; the screens kept on the device (§71) work the same in
-   WebView2. Build on `windows-latest`, which has Rust and MSVC, and publish
-   the `.exe` as a GitHub Release. A workflow file may need pushing from his PC.
-   The app icon's source is `design-reference/nomi-app-icon.png`.
-4. **A better PC version.** Ideas he has seen: keyboard shortcuts (Space flips a
-   card, Enter sends), the app's own right-click menus, the chat list beside
-   the open chat, a window that remembers its size. Ask him which come first.
+3. **A Windows app: a real `.exe` installer**, made with Tauri (NSIS).
+   **Built on 2026-10-04 on branch `step-3-windows-app`, and tried on his PC
+   on 2026-10-05: it installs and he signed in (NOTES §73.6). Not merged
+   yet.** `src-tauri/` is a
+   window on the live site. `.github/workflows/windows-app.yml` builds it on
+   GitHub's free Windows machine (his PC has no Rust and no `gh`), keeps the
+   `.exe` with the run, and on `main` publishes it at
+   `https://github.com/paulmandap/learning-app/releases/latest/download/Nomi-Windows-Setup.exe`.
+   Links to other sites open in his browser. Settings says reminders go to the
+   phone, because WebView2 has no push. **What is left, in order:**
+   - **The first build.** The first push (`a71509c`) never built: the
+     workflow file did not parse (§73.5). Fixed, and CI passed on it. Nothing
+     here could compile the Rust. Read the run
+     without signing in: `https://api.github.com/repos/paulmandap/learning-app/actions/runs?branch=step-3-windows-app`
+     for its result, then the failed job's check-run annotations, where the
+     workflow writes the error lines.
+   - **Commit `src-tauri/Cargo.lock`** from the next build's artifacts (step 4
+     builds again). Until then each build takes the newest matching crates.
+   - **He merges**, which publishes the release, **and deploys the site**,
+     which brings the reminders line to the window. He kept its wording.
+   He accepted the "unknown publisher" warning that only a paid certificate
+   removes. The Microsoft Store is free for individuals if he wants it later.
+4. **A better PC version.** **He chose all four on 2026-10-05:** keyboard
+   shortcuts (Space flips a card, Enter sends), the app's own right-click
+   menus, the chat list beside the open chat, and a window that remembers its
+   size. The first three are website changes, so they arrive with a deploy and
+   no new installer. The window size is in `src-tauri/`, so it needs a new
+   installer and a raised version (NOTES §73.2). **Also measure first:**
+   whether minimizing the window hides the page (NOTES §73.7). If not, a
+   minimized Nomi keeps animating and polling the database.
 5. **An Android APK**, the same way (Tauri 2 or Capacitor), installed from a
    file. From 2027 Android needs Google's free "limited distribution" developer
-   account, up to 20 devices; he accepted that.
+   account, up to 20 devices; he accepted that. **Publish its releases with
+   `gh release create --latest=false`**, or the Windows app's permanent link
+   (`releases/latest/download/Nomi-Windows-Setup.exe`) breaks (NOTES §73.7).
 
 **Reading for this plan:** NOTES §42, §43.3 and §45.2, then search NOTES for
 whatever else you touch.
@@ -647,6 +662,14 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
 57. **Icons are plain `<svg>`, not Views** (NOTES §66, the owner's decision,
     reversing §56.2's "draw boxes"). Web-only on purpose — the app is a PWA —
     and no icon package: the shapes stay in `src/core/icon-shapes.ts`.
+58. **The Windows app is a window on the live site, and the site is given
+    nothing of the computer** (NOTES §73, the plan he agreed). No copy of the
+    app is bundled, so a deploy reaches it with no new installer. There are no
+    capabilities, so the page can call no Tauri command; it only learns it is
+    in the window, from `window.nomiApp`. Granting the page anything is a
+    decision of its own. `tests/windows-app.test.ts` holds both, and keeps
+    the identifier the phone apps', because it names where the window keeps
+    everyone's sign-in.
 
 ## Hard-won gotchas — do not rediscover these
 
@@ -742,6 +765,11 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   PowerShell 5.1's `Get-Content -Raw` reads BOM-less UTF-8 as ANSI and
   `Set-Content -Encoding utf8` writes a BOM: every "§" became "Â§" in four files
   (NOTES §56.3). Use the editor; a large `git diff --stat` is the tell.
+- **A workflow file that does not parse fails before anything runs**, with one
+  line on the run's page. A plain YAML value cannot hold a colon followed by a
+  space (`run: echo "a: b"`); use `run: |`. Check every workflow with
+  actionlint (a free download from github.com/rhysd/actionlint) before it is
+  pushed (NOTES §73.5).
 - **Git Bash rewrites a lone `/` argument into a Windows path.** Run
   `scripts/screenshot.ts /` from PowerShell, or set `MSYS_NO_PATHCONV=1`.
 - **`npx` on Windows runs through a `.cmd` shim, and cmd.exe eats `>`.** Any
