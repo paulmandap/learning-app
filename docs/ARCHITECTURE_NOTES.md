@@ -9725,6 +9725,122 @@ the parsed YAML, passes `bash -n`. Run with a stand-in `gh`, it creates
 and replaces the file with `--clobber` when it exists. The notes come out
 unindented, so the heredoc closes.
 
+### 73.8 Live (2026-10-06)
+
+The owner merged PR #1 (`a2261ae`) and deployed it. The release workflow ran on
+main and published `windows-v0.1.0` with `Nomi-Windows-Setup.exe` (1,963,441
+bytes). The permanent link answers 302 to that file. `deploy-status.ts`:
+production is exactly HEAD, the live bundle the local build's.
+
+## 74. Step 4: Nomi on a PC (2026-10-06)
+
+The owner chose all four on 2026-10-05: keyboard shortcuts, right-click
+menus, chats side by side, and a window that remembers its size. Built inline,
+with no workflow (his choice after §73.7).
+
+### 74.1 Found first
+
+- **Two of the shortcuts already existed.** Flashcards have had Space, left
+  and right (`app/set/[id]/flashcards.tsx`), and every chat box sends on Enter,
+  with Shift+Enter for a new line (`Composer` in `src/ui/nomi.tsx`). The gaps:
+  the quiz had no keys at all, the blanks needed the mouse after checking, and
+  nothing on screen said which keys work.
+- **react-native-web's TextInput stops a key at the field.** Measured in the
+  built app before changing anything: "x y" typed into a flashcard's Edit form
+  arrived whole, and the card did not turn over, though flashcards listen for
+  Space on `window`. So a key listener on the page never sees keys typed into
+  the app's fields. The note editor (Tiptap, `contenteditable`) is the
+  exception, and it is on no study screen.
+- Long-press menus existed for chat messages only. Posts and comments have a
+  ⋯, and a set has its menu on its own page.
+- **WebView2 does not hide a page when its window is minimized.** Microsoft's
+  `IsVisible` docs (2026-08-24): *"WebView2 as a child window does not get
+  window messages when the top window is minimized or restored. For performance
+  reasons, developers should set the IsVisible property of the WebView to FALSE
+  when the app window is minimized."* wry 0.57 does not (§73.7). TanStack
+  pauses interval polling only for a hidden page: an open chat polls three
+  queries every 4 s (`CHAT_POLL_MS`), every tab the unread badge every 20 s
+  (`INBOX_POLL_MS`).
+
+### 74.2 What changed
+
+- **Right-click** (`rightClick` in `src/ui/app-feel.ts`, decided by
+  `rightClickOpensMenu` in `src/core/app-feel.ts`). A message opens the menu its
+  long-press does, reactions included. A post or a comment opens its ⋯ menu,
+  a post on its own page too. A set on Home opens a short new menu
+  (`setShortcuts`, `src/core/set-menu.ts`): Open set, then Flashcards, Quiz and
+  Fill in the blanks once it has cards. Renaming, sharing and deleting stay on
+  the set's page, behind their confirm steps. Not for a finger, since an
+  Android hold arrives as `contextmenu` too and the long-press opens the menu
+  already. Not over words selected in the item, where the browser's menu has
+  Copy. A set inside an open folder too: its menu opens over the folder's
+  sheet, and choosing from it closes both. **Not yet:** notes.
+- **Keys** (`useStudyKeys` in `src/ui/study-keys.tsx`, decided in
+  `src/core/study-keys.ts`). Quiz: 1 to 4 choose, Enter checks, then Enter goes
+  on. A written answer's field checks on Enter and then goes on. Blanks: after
+  checking, Enter goes on, and "Did you have it?" takes the right arrow for yes
+  and the left for no, as a flashcard is graded. On a PC the answer field is
+  ready to type into (`autoFocus` on `Field`, only with a mouse). Keys are left
+  alone with Ctrl, Alt or the Windows key held, on a repeat, while a sheet is
+  open (`aria-modal`), and on a focused button or link, which presses itself.
+  One quiet line says which keys work, only on a device with a mouse
+  (`KeyHint`), and the first flashcard's hint names the arrows there.
+- **Chats side by side** (`ChatSplit` in `src/ui/inbox.tsx`, decided by
+  `showChatList` in `src/core/chat-split.ts`). At 900 px and wider, the chat
+  list (340 wide) stays on the left of an open chat, the open one filled in.
+  Choosing another replaces it, so Back still goes to where the chats were
+  opened from. The list moved out of the Community tab into `src/ui/inbox.tsx`
+  as `InboxList`. 900 is the list beside a chat at `CONTENT_MAX_WIDTH` (560),
+  and a test holds the sum.
+- **The Windows app 0.2.0** (`src-tauri/`). The window opens at the size and
+  place it was left: `tauri-plugin-window-state` 2.5.0, read in its source. It
+  restores a window when it is ready, saves on closing, and shows a hidden
+  window even with nothing saved, so the window is built hidden and does not
+  jump. Minimized, the page is hidden (`Webview::hide`), and shown and focused
+  again on restore, as Microsoft asks. The plugin's commands answer nothing,
+  because there are no capabilities.
+
+### 74.3 Verified (2026-10-06)
+
+- typecheck clean. `expo export`. **1731 tests**, 2 skipped, the boot check
+  against the fresh build. `tests/pc-version.test.ts` (14) and
+  `tests/windows-app.test.ts` (14 now). `tests/messages.test.ts`'s inbox test
+  reads `src/ui/inbox.tsx` now, and still holds the Everyone room before the
+  conversations.
+- In the built app, in Chrome, as test account A, at 1100 × 680 in dark, with
+  real right-clicks and key presses through the DevTools protocol:
+  - a set's right-click opened its menu, and its Quiz opened the quiz;
+  - the quiz said "Press 1 to 4 to choose, and Enter to check.", and 1 chose
+    the first answer (photographed);
+  - a message's right-click opened its menu: reactions, Reply, Copy, Unsend,
+    Report, Block;
+  - the Everyone room had the chat list beside it, Everyone filled in
+    (photographed). At 430 wide it was the chat alone.
+  Nothing was checked or chosen, so no attempt was written.
+- A set inside an open folder (added the same day): typechecked and held by
+  a test, but not seen in the app, because test account A has no folder and
+  making one would write to the database.
+- **Not verified here:** the Windows app 0.2.0, its window size and its
+  minimize. That is its build and the owner's PC.
+- **Noticed, not changed:** beside the list, the header's back arrow still
+  lines up with the content column of the whole window, not the chat's.
+
+### 74.4 Tried on the owner's PC (2026-10-06)
+
+- He pushed `b962731`. CI and the Windows build passed (run 37407465160).
+  He deployed the branch preview, which served the local build's bundle, and
+  then pushed `7b8e27e` (a set inside a folder).
+- He installed 0.2.0 over 0.1.0 (`nomi.exe`, 8,862,720 bytes) and reported
+  "done". He did not report each item one by one, such as the folder's
+  right-click or the CPU while minimized. On disk afterwards, the window-state
+  plugin had written `%APPDATA%\com.paulmandap.studyapp\.window-state.json`
+  on closing: 1100 × 680 at (402, 164), not maximized.
+- **`src-tauri/Cargo.lock` is committed**, from that run's artifact: lock
+  version 4, with `nomi` 0.2.0, `tauri` 2.12.1, `tauri-build` 2.7.1,
+  `tauri-plugin-opener` 2.7.0, `tauri-plugin-window-state` 2.5.0 and `wry`
+  0.57.0. From now on a build takes exactly these. The workflow's comment says
+  when a new one is due: after a change to `Cargo.toml` moves the versions.
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)
@@ -9750,3 +9866,5 @@ unindented, so the heredoc closes.
 - [Tauri 2.12.1 WebviewWindowBuilder](https://docs.rs/tauri/2.12.1/tauri/webview/struct.WebviewWindowBuilder.html)
 - [tauri-plugin-opener 2.7.0](https://docs.rs/tauri-plugin-opener/2.7.0/tauri_plugin_opener/)
 - [actions/upload-artifact (archive: false)](https://github.com/actions/upload-artifact)
+- [WebView2 ICoreWebView2Controller, IsVisible (hide when minimized)](https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/win32/icorewebview2controller)
+- [tauri-plugin-window-state 2.5.0](https://docs.rs/tauri-plugin-window-state/2.5.0/tauri_plugin_window_state/)

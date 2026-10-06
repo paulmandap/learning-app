@@ -29,6 +29,8 @@ import { addQuizChoices } from '../../../src/data/quiz-options';
 import { deal, startingLevel } from '../../../src/core/deck';
 import { choicesFor, isWritten, needsChoices, type Option } from '../../../src/core/quiz';
 import { crossedClue, crossOut, pointsClue } from '../../../src/core/hints';
+import { quizKey } from '../../../src/core/study-keys';
+import { KeyHint, useHasKeyboard, useStudyKeys } from '../../../src/ui/study-keys';
 import { GeminiBrowserProvider } from '../../../src/ai/gemini';
 import { reasonToMessage } from '../../../src/core/ai-errors';
 import { GeminiCallError } from '../../../src/ai/gemini';
@@ -337,6 +339,23 @@ export default function Quiz() {
     setIndex((i) => i + 1);
   }
 
+  // On a PC: 1 to 4 choose, Enter checks and then goes on (NOTES §74). A
+  // written answer's own field checks on Enter; its keys never reach here.
+  useStudyKeys((key) => {
+    if (isLoading || choices !== 'ready' || !item) return false;
+    const action = quizKey(key, { answered: current !== null, choices: isWritten(item) ? 0 : options.length });
+    if (!action) return false;
+    if (action.kind === 'choose') {
+      if (!crossed.has(action.index)) setChosen(action.index);
+    } else if (action.kind === 'check') {
+      void submit();
+    } else {
+      next();
+    }
+    return true;
+  });
+  const hasKeyboard = useHasKeyboard();
+
   if (isLoading || choices === 'checking') {
     return (
       <Screen>
@@ -566,6 +585,9 @@ export default function Quiz() {
                 onChangeText={setTyped}
                 placeholder="Answer in a sentence or two…"
                 autoCapitalize="sentences"
+                // Enter checks, and once it is marked, goes on (NOTES §74).
+                onSubmitEditing={() => (current ? next() : void submit())}
+                autoFocus={hasKeyboard}
               />
             )}
           </Card>
@@ -602,6 +624,14 @@ export default function Quiz() {
           )}
 
           {error ? <Notice tone="error">{error}</Notice> : null}
+
+          <KeyHint>
+            {current
+              ? `Press Enter for ${index + 1 >= items.length ? 'your results' : 'the next question'}.`
+              : isWritten(item)
+                ? 'Press Enter to check your answer.'
+                : `Press 1 to ${options.length} to choose, and Enter to check.`}
+          </KeyHint>
         </>
       ) : null}
     </Screen>

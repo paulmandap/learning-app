@@ -6,14 +6,17 @@
 //! a browser would keep it.
 //!
 //! The site is given nothing of the computer. There are no capabilities, so no
-//! Tauri command answers it. All it learns is that it is in this window, from
-//! `MARK`. tests/windows-app.test.ts holds both.
+//! Tauri command answers it, the window-state plugin's included. All it learns
+//! is that it is in this window, from `MARK`. tests/windows-app.test.ts holds
+//! both.
 
 // No console window behind the app, except in a debug build.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::webview::NewWindowResponse;
-use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Url, Webview, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 /// The live site, the same address scripts/deploy-status.ts reads.
 const SITE: &str = "https://learning-app-6kk.pages.dev/";
@@ -27,14 +30,21 @@ const MARK: &str = "if (window.location.origin === 'https://learning-app-6kk.pag
 
 fn main() {
     tauri::Builder::default()
+        // The window opens at the size and place it was left (NOTES §74). Saved
+        // in the app's own folder when it closes.
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
             let site = Url::parse(SITE)?;
             let home = site.origin();
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(site))
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(site))
                 .title("Nomi")
                 .inner_size(1100.0, 680.0)
                 .min_inner_size(360.0, 560.0)
                 .center()
+                // Shown by the window-state plugin once it has put the window
+                // back, so it does not open in the middle and then jump. With
+                // nothing saved yet, the plugin shows it where it is.
+                .visible(false)
                 .initialization_script(MARK)
                 // Tauri's own drag and drop replaces WebView2's on Windows, and
                 // the page's stops working. The page's is the one Nomi uses.
@@ -55,6 +65,26 @@ fn main() {
                     NewWindowResponse::Deny
                 })
                 .build()?;
+
+            // Minimized, the page is hidden, as a browser hides a tab it is not
+            // showing. WebView2 does not notice a minimized window on its own,
+            // and Microsoft asks the app to do this (NOTES §74). Without it Nomi
+            // went on animating and asking the database for news.
+            let hidden = AtomicBool::new(false);
+            let page = window.clone();
+            window.on_window_event(move |event| {
+                if let WindowEvent::Resized(_) = event {
+                    let minimized = page.is_minimized().unwrap_or(false);
+                    if minimized != hidden.swap(minimized, Ordering::Relaxed) {
+                        let webview: &Webview<_> = page.as_ref();
+                        let _ = if minimized {
+                            webview.hide()
+                        } else {
+                            webview.show().and_then(|()| webview.set_focus())
+                        };
+                    }
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

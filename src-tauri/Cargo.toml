@@ -1,6 +1,6 @@
 [package]
 name = "nomi"
-version = "0.1.0"
+version = "0.2.0"
 description = "Nomi for Windows: a window that shows the live site"
 authors = ["Paul Christian Mandap"]
 edition = "2021"
@@ -18,3 +18,6 @@ tauri = { version = "2.12.1", features = [] }
 # Only its open_url, to hand a link to the person's own browser. The plugin is
 # never registered, so the site cannot call it.
 tauri-plugin-opener = "2.7.0"
+# Saves the window's size and place on closing and puts them back on opening
+# (NOTES §74). Its commands answer nothing: there are no capabilities.
+tauri-plugin-window-state = "2.5.0"

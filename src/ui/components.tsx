@@ -557,6 +557,7 @@ export function Field({
   autoCapitalize = 'none',
   maxLength,
   onSubmitEditing,
+  autoFocus,
 }: {
   label: string;
   value: string;
@@ -566,6 +567,8 @@ export function Field({
   keyboardType?: 'default' | 'email-address' | 'number-pad';
   autoCapitalize?: 'none' | 'sentences';
   maxLength?: number;
+  /** Ready to type into as it appears: a drill on a PC goes on without the mouse (NOTES §74). */
+  autoFocus?: boolean;
   /**
    * Enter submits. Typing an answer and pressing return is the whole
    * interaction on a desktop keyboard; reaching for the mouse to confirm a
@@ -588,6 +591,7 @@ export function Field({
         maxLength={maxLength}
         onSubmitEditing={onSubmitEditing}
         returnKeyType={onSubmitEditing ? 'done' : undefined}
+        autoFocus={autoFocus}
         style={[styles.input, { color: t.text, borderColor: t.border, backgroundColor: t.bg }]}
       />
     </View>

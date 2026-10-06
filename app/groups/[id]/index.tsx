@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LoadingState, Screen } from '../../../src/ui/components';
 import { StatePanel } from '../../../src/ui/states';
 import { ChatRoom, type RoomMessage } from '../../../src/ui/chat-room';
+import { ChatSplit } from '../../../src/ui/inbox';
 import { OverflowMenu } from '../../../src/ui/menu';
 import { LeaveSheet } from '../../../src/ui/group-sheets';
 import { Icon } from '../../../src/ui/glyphs';
@@ -176,28 +177,31 @@ export default function GroupRoom() {
           ),
         }}
       />
-      <ChatRoom
-        messages={roomMessages}
-        loading={messages.isLoading}
-        myId={myId}
-        reactions={reactions.data ?? []}
-        empty={{ title: 'Say hello to the group', detail: 'Only the people in this group can see it.' }}
-        // Not the group's name: a name can run to sixty characters, and in
-        // the box it wrapped half out of sight (photographed, NOTES §58.5).
-        placeholder="Message the group"
-        reportKind="group_message"
-        showNames
-        hideDetail="It stays for everyone else in the group — only the person who sent it can take it back."
-        editNote="Everyone in the group will see it marked as edited."
-        actions={{
-          send: (text, replyTo) => sendGroupMessage(groupId, text, replyTo),
-          edit: editGroupMessage,
-          unsendEveryone: unsendGroupMessage,
-          hideForMe: hideGroupMessage,
-          react: reactToGroupMessage,
-        }}
-        onChanged={refresh}
-      />
+      {/* The chat list beside it, on a wide window (NOTES §74). */}
+      <ChatSplit current={groupId}>
+        <ChatRoom
+          messages={roomMessages}
+          loading={messages.isLoading}
+          myId={myId}
+          reactions={reactions.data ?? []}
+          empty={{ title: 'Say hello to the group', detail: 'Only the people in this group can see it.' }}
+          // Not the group's name: a name can run to sixty characters, and in
+          // the box it wrapped half out of sight (photographed, NOTES §58.5).
+          placeholder="Message the group"
+          reportKind="group_message"
+          showNames
+          hideDetail="It stays for everyone else in the group — only the person who sent it can take it back."
+          editNote="Everyone in the group will see it marked as edited."
+          actions={{
+            send: (text, replyTo) => sendGroupMessage(groupId, text, replyTo),
+            edit: editGroupMessage,
+            unsendEveryone: unsendGroupMessage,
+            hideForMe: hideGroupMessage,
+            react: reactToGroupMessage,
+          }}
+          onChanged={refresh}
+        />
+      </ChatSplit>
 
       {leaving ? (
         <LeaveSheet

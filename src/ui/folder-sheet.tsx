@@ -17,6 +17,7 @@ import {
 import { createFolder, deleteFolder, renameFolder } from '../data/folders';
 import { formatSetTitle } from '../core/title';
 import type { StudySet } from '../data/sets';
+import { rightClick } from './app-feel';
 
 /**
  * One folder, on its own, with everything else out of the way (NOTES §48).
@@ -51,6 +52,7 @@ export function FolderSheet({
   onClose,
   onOpenSet,
   onOpenFolder,
+  onSetMenu,
 }: {
   folder: Folder;
   /** Every folder, so this one can find its children. */
@@ -62,6 +64,8 @@ export function FolderSheet({
   onOpenSet: (id: string) => void;
   /** Open a subfolder in its own sheet — one level, so it never nests further. */
   onOpenFolder: (folder: Folder) => void;
+  /** A set right-clicked on a PC: Home opens its menu over this sheet (NOTES §74). */
+  onSetMenu?: (set: StudySet) => void;
 }) {
   const t = useTheme();
   const queryClient = useQueryClient();
@@ -158,13 +162,15 @@ export function FolderSheet({
         const stats = statsBySet.get(set.id);
         const cards = set.cardCount ?? 0;
         return (
-          <ListRow
-            key={set.id}
-            title={formatSetTitle(set.title)}
-            meta={`${cards} card${cards === 1 ? '' : 's'}${stats?.due ? ` · ${stats.due} due today` : ''}`}
-            progress={cards > 0 && stats ? stats.known / cards : undefined}
-            onPress={() => onOpenSet(set.id)}
-          />
+          // A right click on a PC: the set's menu, as on Home (NOTES §74).
+          <View key={set.id} {...(onSetMenu ? rightClick(() => onSetMenu(set)) : {})}>
+            <ListRow
+              title={formatSetTitle(set.title)}
+              meta={`${cards} card${cards === 1 ? '' : 's'}${stats?.due ? ` · ${stats.due} due today` : ''}`}
+              progress={cards > 0 && stats ? stats.known / cards : undefined}
+              onPress={() => onOpenSet(set.id)}
+            />
+          </View>
         );
       })}
 

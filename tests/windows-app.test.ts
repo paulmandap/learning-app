@@ -82,6 +82,24 @@ describe('what the site is given', () => {
   });
 });
 
+describe('the window on a PC (NOTES §74)', () => {
+  it('opens at the size and place it was left, without a jump', () => {
+    // Built hidden, and shown by the plugin once it has moved the window back
+    // (or at once, with nothing saved). Without the plugin it would never show.
+    expect(main).toContain('.visible(false)');
+    expect(main).toContain('.plugin(tauri_plugin_window_state::Builder::new().build())');
+    expect(cargo).toMatch(/^tauri-plugin-window-state = "/m);
+  });
+
+  it('hides the page while minimized, as a browser hides a tab', () => {
+    // WebView2 does not notice a minimized window on its own (Microsoft's
+    // IsVisible docs). Visible, a minimized Nomi kept animating and polling.
+    expect(main).toMatch(/if let WindowEvent::Resized\(_\) = event/);
+    expect(main).toContain('webview.hide()');
+    expect(main).toContain('webview.show()');
+  });
+});
+
 describe('the installer', () => {
   it('names the same app as the phone apps', () => {
     // The identifier also names the folder the window keeps its storage in.

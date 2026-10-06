@@ -12,6 +12,7 @@ import { PostList } from '../../src/ui/post';
 import { Composer } from '../../src/ui/nomi';
 import { Icon } from '../../src/ui/glyphs';
 import { CONTENT_MAX_WIDTH, space, TOUCH_TARGET, type, useTheme } from '../../src/ui/theme';
+import { rightClick } from '../../src/ui/app-feel';
 import { addComment, addReply, deleteComment, getPost, likeComment, listComments } from '../../src/data/posts';
 import { agoShort, COMMENT_MAX_LENGTH, replyingTo, threadComments, type PostComment } from '../../src/core/posts';
 import { personName } from '../../src/core/social';
@@ -305,7 +306,11 @@ function CommentRow({
   const t = useTheme();
   const name = nameOf(comment);
   return (
-    <View style={{ flexDirection: 'row', gap: space.md, alignItems: 'flex-start', marginLeft: reply ? 48 : 0 }}>
+    <View
+      // A right click on a PC opens the comment's menu, as its ⋯ does (NOTES §74).
+      {...rightClick(onMore)}
+      style={{ flexDirection: 'row', gap: space.md, alignItems: 'flex-start', marginLeft: reply ? 48 : 0 }}
+    >
       <Pressable accessibilityRole="button" accessibilityLabel={`${name}'s profile`} onPress={onOpenPerson}>
         <PersonAvatar avatar={comment.author_avatar} userId={comment.author_id} name={name} size={reply ? 28 : 36} />
       </Pressable>

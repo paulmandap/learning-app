@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { LoadingState, Screen } from '../../src/ui/components';
 import { StatePanel } from '../../src/ui/states';
 import { ChatRoom, type RoomMessage } from '../../src/ui/chat-room';
+import { ChatSplit } from '../../src/ui/inbox';
 import { OverflowMenu } from '../../src/ui/menu';
 import { BlockSheet, ReportSheet } from '../../src/ui/people';
 import { PersonAvatar } from '../../src/ui/avatar';
@@ -164,28 +165,31 @@ export default function Conversation() {
           ),
         }}
       />
-      <ChatRoom
-        messages={roomMessages}
-        loading={messages.isLoading}
-        myId={myId}
-        reactions={named}
-        empty={{ title: `Say hello to ${name}`, detail: 'Only the two of you can see this conversation.' }}
-        placeholder={`Message ${name}`}
-        reportKind="direct_message"
-        showNames={false}
-        seenId={seenMessageId(messages.data ?? [], myId, who.their_read_at)}
-        closed={who.can_send ? null : CLOSED_CONVERSATION}
-        hideDetail={`It stays for ${name} — only the person who sent it can take it back.`}
-        editNote={`${name} will see it marked as edited.`}
-        actions={{
-          send: (text, replyTo) => sendDirectMessage(conversationId, text, replyTo),
-          edit: editDirectMessage,
-          unsendEveryone: unsendDirectMessage,
-          hideForMe: hideDirectMessage,
-          react: reactToDirectMessage,
-        }}
-        onChanged={refresh}
-      />
+      {/* The chat list beside it, on a wide window (NOTES §74). */}
+      <ChatSplit current={conversationId}>
+        <ChatRoom
+          messages={roomMessages}
+          loading={messages.isLoading}
+          myId={myId}
+          reactions={named}
+          empty={{ title: `Say hello to ${name}`, detail: 'Only the two of you can see this conversation.' }}
+          placeholder={`Message ${name}`}
+          reportKind="direct_message"
+          showNames={false}
+          seenId={seenMessageId(messages.data ?? [], myId, who.their_read_at)}
+          closed={who.can_send ? null : CLOSED_CONVERSATION}
+          hideDetail={`It stays for ${name} — only the person who sent it can take it back.`}
+          editNote={`${name} will see it marked as edited.`}
+          actions={{
+            send: (text, replyTo) => sendDirectMessage(conversationId, text, replyTo),
+            edit: editDirectMessage,
+            unsendEveryone: unsendDirectMessage,
+            hideForMe: hideDirectMessage,
+            react: reactToDirectMessage,
+          }}
+          onChanged={refresh}
+        />
+      </ChatSplit>
 
       {reporting ? (
         <ReportSheet

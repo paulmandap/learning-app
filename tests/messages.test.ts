@@ -227,10 +227,15 @@ describe('what the Privacy Policy says about messages is what the app does', () 
 describe('on screen', () => {
   it('Chat is an inbox: the Everyone room first, then conversations', () => {
     const community = readFileSync('app/(tabs)/community.tsx', 'utf8');
-    expect(community).toMatch(/pane === 'chat' \? \(\s*<InboxPane /);
-    expect(community).toContain("router.push('/messages/everyone')");
+    // The list is in src/ui/inbox.tsx since NOTES §74, because a wide window
+    // draws it beside an open chat as well as in the Community tab.
+    expect(community).toMatch(/pane === 'chat' \? \([\s\S]{0,200}?<InboxList /);
+    const inbox = readFileSync('src/ui/inbox.tsx', 'utf8');
+    expect(inbox).toContain("go('/messages/everyone')");
+    // The Everyone room is drawn before the conversations.
+    expect(inbox.indexOf("go('/messages/everyone')")).toBeLessThan(inbox.indexOf('shown.map('));
     // Conversations and groups together since NOTES §58, most recent first.
-    expect(community).toContain('mergeInbox(inbox.data ?? [], groups.data ?? [])');
+    expect(inbox).toContain('mergeInbox(inbox.data ?? [], groups.data ?? [])');
   });
 
   it('both rooms are the one ChatRoom, registered with a back control, with the ✦ kept off their Send', () => {

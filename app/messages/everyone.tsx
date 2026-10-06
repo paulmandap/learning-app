@@ -4,6 +4,7 @@ import { Stack } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Body, Card, Screen } from '../../src/ui/components';
 import { ChatRoom } from '../../src/ui/chat-room';
+import { ChatSplit } from '../../src/ui/inbox';
 import { useTheme } from '../../src/ui/theme';
 import {
   CommunityUnavailableError,
@@ -76,29 +77,32 @@ export default function EveryoneRoom() {
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ title: 'Everyone' }} />
-      <ChatRoom
-        messages={roomMessages}
-        loading={isLoading}
-        myId={myId}
-        reactions={reactions}
-        empty={{
-          title: 'Nobody has said anything yet',
-          detail: 'This is one room, and everyone signed in to Nomi is in it.',
-        }}
-        placeholder="Say something"
-        reportKind="message"
-        showNames
-        hideDetail="It stays in the room for everyone else — only the person who sent it can take it back."
-        editNote="Everyone will see it marked as edited."
-        actions={{
-          send: (text, replyTo) => sendMessage(text, replyTo),
-          edit: editMessage,
-          unsendEveryone: deleteMessageForEveryone,
-          hideForMe: hideMessage,
-          react,
-        }}
-        onChanged={refresh}
-      />
+      {/* The chat list beside it, on a wide window (NOTES §74). */}
+      <ChatSplit current="everyone">
+        <ChatRoom
+          messages={roomMessages}
+          loading={isLoading}
+          myId={myId}
+          reactions={reactions}
+          empty={{
+            title: 'Nobody has said anything yet',
+            detail: 'This is one room, and everyone signed in to Nomi is in it.',
+          }}
+          placeholder="Say something"
+          reportKind="message"
+          showNames
+          hideDetail="It stays in the room for everyone else — only the person who sent it can take it back."
+          editNote="Everyone will see it marked as edited."
+          actions={{
+            send: (text, replyTo) => sendMessage(text, replyTo),
+            edit: editMessage,
+            unsendEveryone: deleteMessageForEveryone,
+            hideForMe: hideMessage,
+            react,
+          }}
+          onChanged={refresh}
+        />
+      </ChatSplit>
     </View>
   );
 }

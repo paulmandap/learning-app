@@ -27,6 +27,8 @@ import { reviewStatesForSet } from '../../../src/data/review';
 import { studyOrder } from '../../../src/core/schedule';
 import { gradeTypedAnswer, makeCloze, type Cloze } from '../../../src/core/cloze';
 import { quickClue } from '../../../src/core/hints';
+import { blanksKey } from '../../../src/core/study-keys';
+import { KeyHint, useHasKeyboard, useStudyKeys } from '../../../src/ui/study-keys';
 import type { Level } from '../../../src/core/planner';
 
 /**
@@ -272,6 +274,18 @@ export default function Blanks() {
     setIndex((i) => i + 1);
   }
 
+  // On a PC (NOTES §74): the field's Enter checks; then Enter goes on, and the
+  // arrows answer "did you have it?" as they do on a flashcard.
+  useStudyKeys((key) => {
+    if (!current) return false;
+    const action = blanksKey(key, phase.state);
+    if (action === 'had-it') resolveNear(true);
+    else if (action === 'missed-it') resolveNear(false);
+    else if (action === 'next') next();
+    return action !== null;
+  });
+  const hasKeyboard = useHasKeyboard();
+
   if (isLoading) {
     return (
       <Screen>
@@ -368,6 +382,7 @@ export default function Blanks() {
                 placeholder="Type what goes in the gap…"
                 autoCapitalize="none"
                 onSubmitEditing={check}
+                autoFocus={hasKeyboard}
               />
             ) : null}
 
@@ -413,6 +428,14 @@ export default function Blanks() {
               />
             </Card>
           )}
+
+          <KeyHint>
+            {phase.state === 'asking'
+              ? 'Press Enter to check.'
+              : phase.state === 'near'
+                ? 'Right arrow if you had it, left arrow if you missed it.'
+                : `Press Enter for ${index + 1 >= queue.length ? 'how you did' : 'the next one'}.`}
+          </KeyHint>
         </>
       ) : null}
     </Screen>

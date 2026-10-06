@@ -39,7 +39,7 @@ Working app, deployed, in daily use.
 
 - **Live:** https://learning-app-6kk.pages.dev
 - **Deploy:** `npx wrangler pages deploy dist --project-name=learning-app --branch=main`
-- **1715 tests pass** on 2026-10-04, 2 skipped (live Gemini behind
+- **1731 tests pass** on 2026-10-06, 2 skipped (live Gemini behind
   `LIVE_GEMINI=1`; the build check also skips unless `REQUIRE_BUILD=1` and a
   built `dist/`). Typecheck clean. (447 when this was written on 2026-09-06.)
 - Stack: Expo SDK 57 + Expo Router, TypeScript strict, Supabase, TanStack Query,
@@ -122,35 +122,31 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
    `src/ui/message-actions.tsx`, then every picture. Text people need to copy,
    like notes and a card's answer, stays selectable.
 3. **A Windows app: a real `.exe` installer**, made with Tauri (NSIS).
-   **Built on 2026-10-04 on branch `step-3-windows-app`, and tried on his PC
-   on 2026-10-05: it installs and he signed in (NOTES §73.6). Not merged
-   yet.** `src-tauri/` is a
-   window on the live site. `.github/workflows/windows-app.yml` builds it on
-   GitHub's free Windows machine (his PC has no Rust and no `gh`), keeps the
-   `.exe` with the run, and on `main` publishes it at
+   **Live since 2026-10-06 (NOTES §73.8):** merged as `a2261ae`, released as
+   `windows-v0.1.0`, and the site deployed. `src-tauri/` is a window on the
+   live site. `.github/workflows/windows-app.yml` builds it on GitHub's free
+   Windows machine (his PC has no Rust and no `gh`), keeps the `.exe` with the
+   run, and on `main` publishes it at
    `https://github.com/paulmandap/learning-app/releases/latest/download/Nomi-Windows-Setup.exe`.
    Links to other sites open in his browser. Settings says reminders go to the
-   phone, because WebView2 has no push. **What is left, in order:**
-   - **The first build.** The first push (`a71509c`) never built: the
-     workflow file did not parse (§73.5). Fixed, and CI passed on it. Nothing
-     here could compile the Rust. Read the run
-     without signing in: `https://api.github.com/repos/paulmandap/learning-app/actions/runs?branch=step-3-windows-app`
-     for its result, then the failed job's check-run annotations, where the
-     workflow writes the error lines.
-   - **Commit `src-tauri/Cargo.lock`** from the next build's artifacts (step 4
-     builds again). Until then each build takes the newest matching crates.
-   - **He merges**, which publishes the release, **and deploys the site**,
-     which brings the reminders line to the window. He kept its wording.
+   phone, because WebView2 has no push. A failed build writes its error lines
+   to the run's annotations, readable without signing in through
+   `https://api.github.com/repos/paulmandap/learning-app/actions/runs?branch=<branch>`.
    He accepted the "unknown publisher" warning that only a paid certificate
    removes. The Microsoft Store is free for individuals if he wants it later.
-4. **A better PC version.** **He chose all four on 2026-10-05:** keyboard
-   shortcuts (Space flips a card, Enter sends), the app's own right-click
-   menus, the chat list beside the open chat, and a window that remembers its
-   size. The first three are website changes, so they arrive with a deploy and
-   no new installer. The window size is in `src-tauri/`, so it needs a new
-   installer and a raised version (NOTES §73.2). **Also measure first:**
-   whether minimizing the window hides the page (NOTES §73.7). If not, a
-   minimized Nomi keeps animating and polling the database.
+4. **A better PC version.** **Built on 2026-10-06 (NOTES §74) on branch
+   `step-4-pc-version`, and tried on his PC the same day: 0.2.0 installed, and
+   its saved window place was on disk (NOTES §74.4). `src-tauri/Cargo.lock` is
+   committed.** All four of his choices: right-click menus (messages, posts,
+   comments, and a short menu for a set on Home or in a folder), keys (the quiz
+   and the blanks; flashcards and chat boxes had theirs already), chats side by
+   side from 900 px, and the Windows app 0.2.0, which reopens where it was left
+   and hides the page while minimized. **What is left:** he merges, which
+   publishes `windows-v0.2.0`, and deploys the site, which brings the three
+   website parts to the window.
+   - Not done, and worth knowing if asked: right-click on notes; beside the
+     chat list, the header's back arrow still lines up with the whole window's
+     column (NOTES §74.3).
 5. **An Android APK**, the same way (Tauri 2 or Capacitor), installed from a
    file. From 2027 Android needs Google's free "limited distribution" developer
    account, up to 20 devices; he accepted that. **Publish its releases with
@@ -770,6 +766,10 @@ Each was decided with evidence. Reversing one silently would undo a measurement.
   space (`run: echo "a: b"`); use `run: |`. Check every workflow with
   actionlint (a free download from github.com/rhysd/actionlint) before it is
   pushed (NOTES §73.5).
+- **A key typed into one of the app's fields never reaches a listener on
+  `window`**: react-native-web's TextInput stops it at the field. So a study
+  screen's keys cannot fire while someone types in a field on it (measured,
+  NOTES §74.1). The note editor is not a TextInput and does not do this.
 - **Git Bash rewrites a lone `/` argument into a Windows path.** Run
   `scripts/screenshot.ts /` from PowerShell, or set `MSYS_NO_PATHCONV=1`.
 - **`npx` on Windows runs through a `.cmd` shim, and cmd.exe eats `>`.** Any
