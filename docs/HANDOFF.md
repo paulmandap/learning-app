@@ -134,23 +134,19 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
    `https://api.github.com/repos/paulmandap/learning-app/actions/runs?branch=<branch>`.
    He accepted the "unknown publisher" warning that only a paid certificate
    removes. The Microsoft Store is free for individuals if he wants it later.
-4. **A better PC version.** **Built on 2026-10-06 (NOTES §74), on branch
-   `step-4-pc-version` if the owner ran the commands; not tried yet.** All four
-   of his choices: right-click menus (messages, posts, comments, and a short
-   menu for a set on Home), keys (the quiz and the blanks; flashcards and chat
-   boxes had theirs already), chats side by side from 900 px, and the Windows
-   app 0.2.0, which reopens where it was left and hides the page while
-   minimized. **What is left, in order:**
-   - **The Windows build of 0.2.0**, the first with the window-state plugin.
-   - **He tries it** on his PC: the window comes back the same after closing;
-     minimized, Task Manager shows Nomi at almost no CPU; and the three
-     website parts in a browser (they reach the window only once deployed).
-   - **Commit `src-tauri/Cargo.lock`** from that build's artifacts. Until then
-     each build takes the newest matching crates.
-   - **He merges**, which publishes `windows-v0.2.0`, **and deploys the site**.
+4. **A better PC version.** **Built on 2026-10-06 (NOTES §74) on branch
+   `step-4-pc-version`, and tried on his PC the same day: 0.2.0 installed, and
+   its saved window place was on disk (NOTES §74.4). `src-tauri/Cargo.lock` is
+   committed.** All four of his choices: right-click menus (messages, posts,
+   comments, and a short menu for a set on Home or in a folder), keys (the quiz
+   and the blanks; flashcards and chat boxes had theirs already), chats side by
+   side from 900 px, and the Windows app 0.2.0, which reopens where it was left
+   and hides the page while minimized. **What is left:** he merges, which
+   publishes `windows-v0.2.0`, and deploys the site, which brings the three
+   website parts to the window.
    - Not done, and worth knowing if asked: right-click on notes; beside the
-     chat list, the header's back arrow still
-     lines up with the whole window's column (NOTES §74.3).
+     chat list, the header's back arrow still lines up with the whole window's
+     column (NOTES §74.3).
 5. **An Android APK**, the same way (Tauri 2 or Capacitor), installed from a
    file. From 2027 Android needs Google's free "limited distribution" developer
    account, up to 20 devices; he accepted that. **Publish its releases with

@@ -9825,6 +9825,22 @@ with no workflow (his choice after §73.7).
 - **Noticed, not changed:** beside the list, the header's back arrow still
   lines up with the content column of the whole window, not the chat's.
 
+### 74.4 Tried on the owner's PC (2026-10-06)
+
+- He pushed `b962731`. CI and the Windows build passed (run 37407465160).
+  He deployed the branch preview, which served the local build's bundle, and
+  then pushed `7b8e27e` (a set inside a folder).
+- He installed 0.2.0 over 0.1.0 (`nomi.exe`, 8,862,720 bytes) and reported
+  "done". He did not report each item one by one, such as the folder's
+  right-click or the CPU while minimized. On disk afterwards, the window-state
+  plugin had written `%APPDATA%\com.paulmandap.studyapp\.window-state.json`
+  on closing: 1100 × 680 at (402, 164), not maximized.
+- **`src-tauri/Cargo.lock` is committed**, from that run's artifact: lock
+  version 4, with `nomi` 0.2.0, `tauri` 2.12.1, `tauri-build` 2.7.1,
+  `tauri-plugin-opener` 2.7.0, `tauri-plugin-window-state` 2.5.0 and `wry`
+  0.57.0. From now on a build takes exactly these. The workflow's comment says
+  when a new one is due: after a change to `Cargo.toml` moves the versions.
+
 ## Sources
 
 - [RFC 8291 — Message Encryption for Web Push](https://www.rfc-editor.org/rfc/rfc8291)
