@@ -37,6 +37,9 @@ describe('a right click', () => {
     expect(read('src', 'ui', 'post.tsx')).toContain('{...rightClick(onMenu)}');
     expect(read('app', 'post', '[id].tsx')).toContain('{...rightClick(onMore)}');
     expect(read('app', '(tabs)', 'index.tsx')).toContain('{...rightClick(() => setMenuFor(set))}');
+    // A set inside an open folder too, its menu drawn over the folder's sheet.
+    expect(read('src', 'ui', 'folder-sheet.tsx')).toContain('rightClick(() => onSetMenu(set))');
+    expect(read('app', '(tabs)', 'index.tsx')).toContain('onSetMenu={setMenuFor}');
   });
 });
 

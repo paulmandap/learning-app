@@ -148,8 +148,8 @@ or for the students. NOTES §65–§70 were written as "not yet deployed"; run
    - **Commit `src-tauri/Cargo.lock`** from that build's artifacts. Until then
      each build takes the newest matching crates.
    - **He merges**, which publishes `windows-v0.2.0`, **and deploys the site**.
-   - Not done, and worth knowing if asked: right-click on a set inside an open
-     folder and on notes; beside the chat list, the header's back arrow still
+   - Not done, and worth knowing if asked: right-click on notes; beside the
+     chat list, the header's back arrow still
      lines up with the whole window's column (NOTES §74.3).
 5. **An Android APK**, the same way (Tauri 2 or Capacitor), installed from a
    file. From 2027 Android needs Google's free "limited distribution" developer

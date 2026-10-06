@@ -303,9 +303,12 @@ export default function Home() {
             router.push(`/set/${id}`);
           }}
           onOpenFolder={setOpenFolder}
+          onSetMenu={setMenuFor}
         />
       ) : null}
 
+      {/* After the folder's sheet, so it opens over it when a set in a folder
+          is right-clicked. */}
       {menuFor ? (
         <Sheet onClose={() => setMenuFor(null)}>
           <SheetTitle>{formatSetTitle(menuFor.title)}</SheetTitle>
@@ -314,8 +317,10 @@ export default function Home() {
               icon: shortcut.icon,
               label: shortcut.label,
               onPress: () => {
-                // Close first, as OverflowMenu does, so nothing is left behind.
+                // Close first, as OverflowMenu does, so nothing is left behind:
+                // the folder too, when the set was in one.
                 setMenuFor(null);
+                setOpenFolder(null);
                 const id = menuFor.id;
                 if (shortcut.mode === 'flashcards') router.push(`/set/${id}/flashcards`);
                 else if (shortcut.mode === 'quiz') router.push(`/set/${id}/quiz`);

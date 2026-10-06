@@ -9773,7 +9773,8 @@ with no workflow (his choice after §73.7).
   the set's page, behind their confirm steps. Not for a finger, since an
   Android hold arrives as `contextmenu` too and the long-press opens the menu
   already. Not over words selected in the item, where the browser's menu has
-  Copy. **Not yet:** a set inside an open folder, and notes.
+  Copy. A set inside an open folder too: its menu opens over the folder's
+  sheet, and choosing from it closes both. **Not yet:** notes.
 - **Keys** (`useStudyKeys` in `src/ui/study-keys.tsx`, decided in
   `src/core/study-keys.ts`). Quiz: 1 to 4 choose, Enter checks, then Enter goes
   on. A written answer's field checks on Enter and then goes on. Blanks: after
@@ -9816,6 +9817,9 @@ with no workflow (his choice after §73.7).
   - the Everyone room had the chat list beside it, Everyone filled in
     (photographed). At 430 wide it was the chat alone.
   Nothing was checked or chosen, so no attempt was written.
+- A set inside an open folder (added the same day): typechecked and held by
+  a test, but not seen in the app, because test account A has no folder and
+  making one would write to the database.
 - **Not verified here:** the Windows app 0.2.0, its window size and its
   minimize. That is its build and the owner's PC.
 - **Noticed, not changed:** beside the list, the header's back arrow still
